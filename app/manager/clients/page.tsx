@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { ClientOnboardingModal } from "@/components/manager/ClientOnboardingModal";
+import { ClientDrawer } from "@/components/drawers";
 
 // ============================================
 // TYPES
@@ -47,6 +48,10 @@ export default function ClientsPage() {
 
     // Onboarding modal
     const [showOnboardingModal, setShowOnboardingModal] = useState(false);
+
+    // Drawer state
+    const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+    const [showDrawer, setShowDrawer] = useState(false);
 
     // ============================================
     // FETCH CLIENTS
@@ -98,6 +103,16 @@ export default function ClientsPage() {
 
     const handleOnboardingSuccess = (clientId: string) => {
         fetchClients();
+    };
+
+    const handleClientClick = (client: Client) => {
+        setSelectedClient(client);
+        setShowDrawer(true);
+    };
+
+    const handleClientUpdate = (updatedClient: Client) => {
+        setClients(prev => prev.map(c => c.id === updatedClient.id ? { ...c, ...updatedClient } : c));
+        setSelectedClient(prev => prev ? { ...prev, ...updatedClient } : null);
     };
 
     if (isLoading && clients.length === 0) {
@@ -222,10 +237,10 @@ export default function ClientsPage() {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                     {filteredClients.map((client, index) => (
-                        <Link
+                        <div
                             key={client.id}
-                            href={`/manager/clients/${client.id}`}
-                            className="mgr-client-card group block"
+                            onClick={() => handleClientClick(client)}
+                            className="mgr-client-card group block cursor-pointer"
                             style={{ animationDelay: `${index * 50}ms` }}
                         >
                             <div className="p-6">
@@ -276,10 +291,18 @@ export default function ClientsPage() {
                                     <p className="text-lg font-bold text-slate-900">{client._count.users}</p>
                                 </div>
                             </div>
-                        </Link>
+                        </div>
                     ))}
                 </div>
             )}
+
+            {/* Client Drawer */}
+            <ClientDrawer
+                isOpen={showDrawer}
+                onClose={() => setShowDrawer(false)}
+                client={selectedClient}
+                onUpdate={handleClientUpdate}
+            />
 
             {/* Client Onboarding Modal */}
             <ClientOnboardingModal

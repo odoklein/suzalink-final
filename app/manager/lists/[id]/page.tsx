@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Card, Badge, Button, DataTable, ConfirmModal, useToast } from "@/components/ui";
 import type { Column } from "@/components/ui/DataTable";
+import { CompanyDrawer, ContactDrawer } from "@/components/drawers";
 import {
     ArrowLeft,
     List,
@@ -100,6 +101,12 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [view, setView] = useState<"companies" | "contacts">("companies");
 
+    // Drawer states
+    const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+    const [selectedContact, setSelectedContact] = useState<(Contact & { companyName: string }) | null>(null);
+    const [showCompanyDrawer, setShowCompanyDrawer] = useState(false);
+    const [showContactDrawer, setShowContactDrawer] = useState(false);
+
     // Resolve params
     useEffect(() => {
         params.then((p) => setListId(p.id));
@@ -147,6 +154,84 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     }, [listId]);
 
     // ============================================
+    // DRAWER HANDLERS
+    // ============================================
+
+    const handleCompanyClick = (company: Company) => {
+        setSelectedCompany(company);
+        setShowCompanyDrawer(true);
+    };
+
+    const handleContactClick = (contact: Contact & { companyName: string }) => {
+        setSelectedContact(contact);
+        setShowContactDrawer(true);
+    };
+
+    const handleCompanyUpdate = (updatedCompany: Company) => {
+        setCompanies((prev) =>
+            prev.map((c) => (c.id === updatedCompany.id ? { ...c, ...updatedCompany } : c))
+        );
+        setSelectedCompany((prev) => (prev?.id === updatedCompany.id ? { ...prev, ...updatedCompany } : prev));
+        // Refresh list to update counts if needed
+        if (updatedCompany._count.contacts !== selectedCompany?._count.contacts) {
+            fetchList();
+        }
+    };
+
+    const handleContactUpdate = (updatedContact: Contact) => {
+        // Update in companies list (nested)
+        setCompanies((prev) =>
+            prev.map((company) => {
+                if (company.id === updatedContact.companyId) {
+                    return {
+                        ...company,
+                        contacts: company.contacts.map((c) =>
+                            c.id === updatedContact.id ? { ...c, ...updatedContact } : c
+                        ),
+                    };
+                }
+                return company;
+            })
+        );
+
+        // Update selected contact if open
+        if (selectedContact?.id === updatedContact.id) {
+            setSelectedContact({
+                ...updatedContact,
+                companyName: selectedContact.companyName,
+            });
+        }
+
+        // Update selected company's contacts if open
+        if (selectedCompany && selectedCompany.id === updatedContact.companyId) {
+            setSelectedCompany(prev => {
+                if (!prev) return null;
+                return {
+                    ...prev,
+                    contacts: prev.contacts.map(c => c.id === updatedContact.id ? updatedContact : c)
+                }
+            })
+        }
+    };
+
+    // Handle contact click from inside CompanyDrawer
+    const handleCompanyContactClick = (contact: Contact) => {
+        if (!selectedCompany) return;
+
+        setSelectedContact({
+            ...contact,
+            companyName: selectedCompany.name,
+            companyId: selectedCompany.id
+        });
+        // We keep company drawer open but maybe overlay or switch? 
+        // For better UX, let's close company and open contact, or just stack them.
+        // Stacking might be complex with current implementation (one z-index).
+        // Let's close company drawer and open contact drawer for now.
+        setShowCompanyDrawer(false);
+        setTimeout(() => setShowContactDrawer(true), 100);
+    };
+
+    // ============================================
     // DELETE LIST
     // ============================================
 
@@ -179,58 +264,9 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     // EXPORT CSV
     // ============================================
 
-    const handleExport = async () => {
+    const handleExport = () => {
         if (!list) return;
-
-        try {
-            const headers = ["Company", "Industry", "Country", "Website", "Contact Name", "Email", "Phone", "Title", "Status"];
-            const rows: string[][] = [];
-
-            companies.forEach((company) => {
-                if (company.contacts.length === 0) {
-                    rows.push([
-                        company.name,
-                        company.industry || "",
-                        company.country || "",
-                        company.website || "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        company.status,
-                    ]);
-                } else {
-                    company.contacts.forEach((contact) => {
-                        rows.push([
-                            company.name,
-                            company.industry || "",
-                            company.country || "",
-                            company.website || "",
-                            `${contact.firstName || ""} ${contact.lastName || ""}`.trim(),
-                            contact.email || "",
-                            contact.phone || "",
-                            contact.title || "",
-                            contact.status,
-                        ]);
-                    });
-                }
-            });
-
-            const csvContent = [
-                headers.join(","),
-                ...rows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
-            ].join("\n");
-
-            const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = `${list.name.replace(/\s+/g, "_")}_export.csv`;
-            link.click();
-
-            success("Export réussi", "Le fichier CSV a été téléchargé");
-        } catch (err) {
-            showError("Erreur", "Impossible d'exporter la liste");
-        }
+        window.location.href = `/api/lists/${list.id}/export`;
     };
 
     // ============================================
@@ -587,6 +623,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                             searchFields={["name", "industry", "country"]}
                             pagination
                             pageSize={15}
+                            onRowClick={handleCompanyClick}
                         />
                     )
                 ) : (
@@ -608,10 +645,31 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                             searchFields={["firstName", "lastName", "email", "companyName"]}
                             pagination
                             pageSize={15}
+                            onRowClick={handleContactClick}
                         />
                     )
                 )}
             </Card>
+
+            {/* Company Drawer */}
+            <CompanyDrawer
+                isOpen={showCompanyDrawer}
+                onClose={() => setShowCompanyDrawer(false)}
+                company={selectedCompany}
+                onUpdate={handleCompanyUpdate}
+                onContactClick={handleCompanyContactClick}
+                isManager={isManager}
+                listId={listId}
+            />
+
+            {/* Contact Drawer */}
+            <ContactDrawer
+                isOpen={showContactDrawer}
+                onClose={() => setShowContactDrawer(false)}
+                contact={selectedContact}
+                onUpdate={handleContactUpdate}
+                isManager={isManager}
+            />
 
             {/* Delete Confirmation */}
             <ConfirmModal

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useToast } from "@/components/ui";
 import {
     Building2,
@@ -15,6 +15,14 @@ import {
     Loader2,
     Plus,
     X,
+    Wand2,
+    Brain,
+    Lightbulb,
+    ArrowRight,
+    Zap,
+    TrendingUp,
+    AlertTriangle,
+    RefreshCw,
 } from "lucide-react";
 import { Button, Badge, Modal } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -25,6 +33,7 @@ import { cn } from "@/lib/utils";
 
 const STEPS = [
     { id: "client", label: "Fiche Client", icon: Building2, description: "Informations de base" },
+    { id: "ai", label: "Analyse IA", icon: Brain, description: "Suggestions intelligentes" },
     { id: "targets", label: "Cibles & ICP", icon: Target, description: "Profil client idéal" },
     { id: "listing", label: "Base de données", icon: Users, description: "Critères de listing" },
     { id: "scripts", label: "Scripts", icon: FileText, description: "Scripts d'appel" },
@@ -61,6 +70,43 @@ interface FormData {
     missionName: string;
     missionObjective: string;
     missionChannel: "CALL" | "EMAIL" | "LINKEDIN";
+}
+
+interface AIAnalysis {
+    summary: string;
+    confidence: number;
+    recommendations: {
+        icp: {
+            description: string;
+            industries: string[];
+            companySize: string;
+            jobTitles: string[];
+            geographies: string[];
+            reasoning: string;
+        };
+        listing: {
+            sources: string[];
+            estimatedContacts: string;
+            criteria: string;
+            signals: string[];
+        };
+        strategy: {
+            primaryChannel: "CALL" | "EMAIL" | "LINKEDIN";
+            channelReasoning: string;
+            sequence: string[];
+            cadence: string;
+            expectedConversion: string;
+        };
+        quickWins: string[];
+        risks: string[];
+    };
+    nextSteps: Array<{
+        order: number;
+        action: string;
+        details: string;
+        priority: "high" | "medium" | "low";
+        estimatedTime: string;
+    }>;
 }
 
 const INITIAL_FORM_DATA: FormData = {
@@ -133,6 +179,20 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [newTag, setNewTag] = useState("");
 
+    // AI Analysis state
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
+    const [aiError, setAiError] = useState<string | null>(null);
+
+    // AI Script generation state
+    const [isGeneratingScripts, setIsGeneratingScripts] = useState(false);
+    const [scriptSuggestions, setScriptSuggestions] = useState<{
+        intro: string[];
+        discovery: string[];
+        objection: string[];
+        closing: string[];
+    } | null>(null);
+
     // ============================================
     // FORM HANDLERS
     // ============================================
@@ -152,6 +212,177 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
     };
 
     // ============================================
+    // AI ANALYSIS
+    // ============================================
+
+    const runAIAnalysis = async () => {
+        if (!formData.name.trim()) {
+            showError("Erreur", "Le nom du client est requis pour l'analyse");
+            return;
+        }
+
+        setIsAnalyzing(true);
+        setAiError(null);
+
+        try {
+            const res = await fetch("/api/ai/mistral/onboarding", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    name: formData.name,
+                    industry: formData.industry,
+                    website: formData.website,
+                    email: formData.email,
+                    icp: formData.icp,
+                    targetIndustries: formData.targetIndustries,
+                    targetCompanySize: formData.targetCompanySize,
+                    targetJobTitles: formData.targetJobTitles,
+                    targetGeographies: formData.targetGeographies,
+                    analysisType: "full",
+                }),
+            });
+
+            const data = await res.json();
+
+            if (data.success && data.data?.analysis) {
+                setAiAnalysis(data.data.analysis);
+            } else {
+                setAiError(data.error || "Erreur lors de l'analyse");
+            }
+        } catch (err) {
+            console.error("AI analysis error:", err);
+            setAiError("Erreur de connexion à l'IA");
+        } finally {
+            setIsAnalyzing(false);
+        }
+    };
+
+    const applyAISuggestions = () => {
+        if (!aiAnalysis?.recommendations) return;
+
+        const { icp, listing, strategy } = aiAnalysis.recommendations;
+
+        // Apply ICP suggestions
+        if (icp) {
+            if (icp.description && !formData.icp) {
+                updateField("icp", icp.description);
+            }
+            if (icp.industries?.length && !formData.targetIndustries.length) {
+                updateField("targetIndustries", icp.industries);
+            }
+            if (icp.companySize && !formData.targetCompanySize) {
+                updateField("targetCompanySize", icp.companySize);
+            }
+            if (icp.jobTitles?.length && !formData.targetJobTitles.length) {
+                updateField("targetJobTitles", icp.jobTitles);
+            }
+            if (icp.geographies?.length && !formData.targetGeographies.length) {
+                updateField("targetGeographies", icp.geographies);
+            }
+        }
+
+        // Apply listing suggestions
+        if (listing) {
+            if (listing.sources?.length && !formData.listingSources.length) {
+                updateField("listingSources", listing.sources);
+            }
+            if (listing.estimatedContacts && !formData.estimatedContacts) {
+                updateField("estimatedContacts", listing.estimatedContacts);
+            }
+            if (listing.criteria && !formData.listingCriteria) {
+                updateField("listingCriteria", listing.criteria);
+            }
+        }
+
+        // Apply channel suggestion
+        if (strategy?.primaryChannel && !formData.createMission) {
+            updateField("missionChannel", strategy.primaryChannel);
+        }
+
+        success("Suggestions appliquées", "Les recommandations ont été ajoutées aux champs vides");
+    };
+
+    // ============================================
+    // AI SCRIPT GENERATION
+    // ============================================
+
+    const generateScripts = async () => {
+        // Need at least client name and some ICP info
+        if (!formData.name.trim()) {
+            showError("Erreur", "Le nom du client est requis");
+            return;
+        }
+
+        // Build ICP from collected data
+        const icpText = formData.icp ||
+            `Cibles: ${formData.targetJobTitles.join(", ") || "Décideurs"}. ` +
+            `Industries: ${formData.targetIndustries.join(", ") || formData.industry || "B2B"}. ` +
+            `Taille: ${formData.targetCompanySize || "PME/ETI"}.`;
+
+        // Build pitch from AI analysis or default
+        const pitchText = aiAnalysis?.recommendations?.strategy?.channelReasoning ||
+            `${formData.name} propose des solutions pour les entreprises du secteur ${formData.industry || "B2B"}.`;
+
+        setIsGeneratingScripts(true);
+
+        try {
+            const res = await fetch("/api/ai/mistral/script", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    channel: formData.missionChannel || "CALL",
+                    clientName: formData.name,
+                    icp: icpText,
+                    pitch: pitchText,
+                    section: "all",
+                    suggestionsCount: 2,
+                }),
+            });
+
+            const data = await res.json();
+
+            if (data.success && data.data?.suggestions) {
+                setScriptSuggestions(data.data.suggestions);
+
+                // Auto-apply first suggestion to empty fields
+                const { suggestions } = data.data;
+                if (suggestions.intro?.[0] && !formData.introScript) {
+                    updateField("introScript", suggestions.intro[0]);
+                }
+                if (suggestions.discovery?.[0] && !formData.discoveryScript) {
+                    updateField("discoveryScript", suggestions.discovery[0]);
+                }
+                if (suggestions.objection?.[0] && !formData.objectionScript) {
+                    updateField("objectionScript", suggestions.objection[0]);
+                }
+                if (suggestions.closing?.[0] && !formData.closingScript) {
+                    updateField("closingScript", suggestions.closing[0]);
+                }
+
+                success("Scripts générés", "Les scripts ont été pré-remplis par l'IA");
+            } else {
+                showError("Erreur", data.error || "Impossible de générer les scripts");
+            }
+        } catch (err) {
+            console.error("Script generation error:", err);
+            showError("Erreur", "Erreur de connexion à l'IA");
+        } finally {
+            setIsGeneratingScripts(false);
+        }
+    };
+
+    const applyScriptSuggestion = (field: "introScript" | "discoveryScript" | "objectionScript" | "closingScript", suggestion: string) => {
+        updateField(field, suggestion);
+    };
+
+    // Auto-run analysis when moving to AI step
+    useEffect(() => {
+        if (currentStep === 1 && !aiAnalysis && !isAnalyzing && formData.name.trim()) {
+            runAIAnalysis();
+        }
+    }, [currentStep]);
+
+    // ============================================
     // NAVIGATION
     // ============================================
 
@@ -159,13 +390,15 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
         switch (currentStep) {
             case 0: // Client info
                 return formData.name.trim().length > 0;
-            case 1: // Targets
-                return true; // Optional for manager
-            case 2: // Listing
+            case 1: // AI Analysis
+                return true; // Can skip AI step
+            case 2: // Targets
                 return true;
-            case 3: // Scripts
+            case 3: // Listing
                 return true;
-            case 4: // Planning
+            case 4: // Scripts
+                return true;
+            case 5: // Planning
                 return true;
             default:
                 return true;
@@ -187,6 +420,8 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
     const handleClose = () => {
         setCurrentStep(0);
         setFormData(INITIAL_FORM_DATA);
+        setAiAnalysis(null);
+        setAiError(null);
         onClose();
     };
 
@@ -211,6 +446,13 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
                 listingSources: formData.listingSources,
                 listingCriteria: formData.listingCriteria,
                 estimatedContacts: formData.estimatedContacts,
+                // Store AI analysis for reference
+                aiAnalysis: aiAnalysis ? {
+                    summary: aiAnalysis.summary,
+                    confidence: aiAnalysis.confidence,
+                    quickWins: aiAnalysis.recommendations?.quickWins,
+                    risks: aiAnalysis.recommendations?.risks,
+                } : null,
             };
 
             const scripts = {
@@ -220,7 +462,6 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
                 closing: formData.closingScript,
             };
 
-            // Create client with onboarding
             const clientRes = await fetch("/api/clients", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -229,12 +470,10 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
                     email: formData.email || null,
                     phone: formData.phone || null,
                     industry: formData.industry || null,
-                    // Onboarding data
                     onboardingData,
                     targetLaunchDate: formData.targetLaunchDate || null,
                     scripts,
                     notes: formData.notes || null,
-                    // Mission creation
                     createMission: formData.createMission,
                     missionName: formData.missionName || null,
                     missionObjective: formData.missionObjective || null,
@@ -259,6 +498,187 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
         } finally {
             setIsSubmitting(false);
         }
+    };
+
+    // ============================================
+    // RENDER AI STEP
+    // ============================================
+
+    const renderAIStep = () => {
+        if (isAnalyzing) {
+            return (
+                <div className="flex flex-col items-center justify-center py-12">
+                    <div className="w-16 h-16 bg-indigo-100 rounded-2xl flex items-center justify-center mb-4">
+                        <Brain className="w-8 h-8 text-indigo-600 animate-pulse" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-slate-900 mb-2">Analyse en cours...</h3>
+                    <p className="text-sm text-slate-500 text-center max-w-md">
+                        L'IA analyse les informations de {formData.name} pour générer des recommandations personnalisées.
+                    </p>
+                    <Loader2 className="w-6 h-6 text-indigo-600 animate-spin mt-6" />
+                </div>
+            );
+        }
+
+        if (aiError) {
+            return (
+                <div className="space-y-4">
+                    <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
+                        <div className="flex items-center gap-3">
+                            <AlertTriangle className="w-5 h-5 text-red-600" />
+                            <div>
+                                <h4 className="font-medium text-red-900">Erreur d'analyse</h4>
+                                <p className="text-sm text-red-700">{aiError}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <Button variant="secondary" onClick={runAIAnalysis} className="gap-2">
+                        <RefreshCw className="w-4 h-4" />
+                        Réessayer l'analyse
+                    </Button>
+                    <p className="text-sm text-slate-500">
+                        Vous pouvez continuer sans l'analyse IA en cliquant sur "Suivant".
+                    </p>
+                </div>
+            );
+        }
+
+        if (!aiAnalysis) {
+            return (
+                <div className="flex flex-col items-center justify-center py-12">
+                    <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mb-4">
+                        <Wand2 className="w-8 h-8 text-slate-400" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-slate-900 mb-2">Analyse IA</h3>
+                    <p className="text-sm text-slate-500 text-center max-w-md mb-6">
+                        Obtenez des recommandations personnalisées basées sur les informations du client.
+                    </p>
+                    <Button variant="primary" onClick={runAIAnalysis} className="gap-2">
+                        <Sparkles className="w-4 h-4" />
+                        Lancer l'analyse
+                    </Button>
+                </div>
+            );
+        }
+
+        // Show AI results
+        const { recommendations, nextSteps, summary, confidence } = aiAnalysis;
+
+        return (
+            <div className="space-y-5">
+                {/* Summary */}
+                <div className="p-4 bg-gradient-to-r from-indigo-50 to-violet-50 border border-indigo-200 rounded-xl">
+                    <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                            <Brain className="w-5 h-5 text-indigo-600" />
+                        </div>
+                        <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                                <h4 className="font-semibold text-indigo-900">Analyse IA</h4>
+                                <span className="text-xs font-medium px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full">
+                                    {confidence || 85}% confiance
+                                </span>
+                            </div>
+                            <p className="text-sm text-indigo-800">{summary}</p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Apply button */}
+                <Button variant="primary" onClick={applyAISuggestions} className="w-full gap-2">
+                    <Zap className="w-4 h-4" />
+                    Appliquer toutes les suggestions
+                </Button>
+
+                {/* Recommendations */}
+                <div className="grid grid-cols-2 gap-4">
+                    {/* ICP */}
+                    <div className="p-4 bg-white border border-slate-200 rounded-xl">
+                        <div className="flex items-center gap-2 mb-3">
+                            <Target className="w-4 h-4 text-violet-600" />
+                            <h5 className="font-semibold text-slate-900 text-sm">ICP Suggéré</h5>
+                        </div>
+                        <p className="text-xs text-slate-600 mb-2">{recommendations.icp?.description}</p>
+                        <div className="flex flex-wrap gap-1">
+                            {recommendations.icp?.jobTitles?.slice(0, 3).map((title, i) => (
+                                <span key={i} className="text-[10px] px-2 py-0.5 bg-violet-50 text-violet-700 rounded">
+                                    {title}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Strategy */}
+                    <div className="p-4 bg-white border border-slate-200 rounded-xl">
+                        <div className="flex items-center gap-2 mb-3">
+                            <TrendingUp className="w-4 h-4 text-emerald-600" />
+                            <h5 className="font-semibold text-slate-900 text-sm">Canal Recommandé</h5>
+                        </div>
+                        <div className="flex items-center gap-2 mb-2">
+                            <span className="text-sm font-semibold text-emerald-700">
+                                {recommendations.strategy?.primaryChannel === "CALL" ? "📞 Appel" :
+                                    recommendations.strategy?.primaryChannel === "EMAIL" ? "✉️ Email" : "💼 LinkedIn"}
+                            </span>
+                        </div>
+                        <p className="text-xs text-slate-500">{recommendations.strategy?.channelReasoning}</p>
+                    </div>
+                </div>
+
+                {/* Quick Wins */}
+                {recommendations.quickWins?.length > 0 && (
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                        <div className="flex items-center gap-2 mb-3">
+                            <Lightbulb className="w-4 h-4 text-amber-600" />
+                            <h5 className="font-semibold text-amber-900 text-sm">Quick Wins</h5>
+                        </div>
+                        <ul className="space-y-1">
+                            {recommendations.quickWins.map((win, i) => (
+                                <li key={i} className="flex items-start gap-2 text-xs text-amber-800">
+                                    <ArrowRight className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                                    {win}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+
+                {/* Next Steps */}
+                {nextSteps?.length > 0 && (
+                    <div>
+                        <h5 className="font-semibold text-slate-900 text-sm mb-3">Prochaines étapes suggérées</h5>
+                        <div className="space-y-2">
+                            {nextSteps.slice(0, 4).map((step, i) => (
+                                <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg">
+                                    <div className={cn(
+                                        "w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0",
+                                        step.priority === "high" ? "bg-red-500" :
+                                            step.priority === "medium" ? "bg-amber-500" : "bg-slate-400"
+                                    )}>
+                                        {step.order}
+                                    </div>
+                                    <div className="flex-1">
+                                        <p className="text-sm font-medium text-slate-900">{step.action}</p>
+                                        <p className="text-xs text-slate-500">{step.details}</p>
+                                        <span className="text-[10px] text-slate-400 mt-1 block">
+                                            ⏱ {step.estimatedTime}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Refresh */}
+                <button
+                    onClick={runAIAnalysis}
+                    className="w-full text-sm text-slate-500 hover:text-indigo-600 transition-colors flex items-center justify-center gap-2"
+                >
+                    <RefreshCw className="w-4 h-4" />
+                    Relancer l'analyse
+                </button>
+            </div>
+        );
     };
 
     // ============================================
@@ -336,10 +756,23 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
                                 />
                             </div>
                         </div>
+
+                        {/* AI Preview hint */}
+                        <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                            <div className="flex items-center gap-2">
+                                <Sparkles className="w-4 h-4 text-indigo-600" />
+                                <span className="text-sm text-indigo-700">
+                                    <strong>Étape suivante :</strong> L'IA analysera ces informations pour vous suggérer l'ICP, les sources de données et la stratégie optimale.
+                                </span>
+                            </div>
+                        </div>
                     </div>
                 );
 
-            case 1: // Targets/ICP
+            case 1: // AI Analysis
+                return renderAIStep();
+
+            case 2: // Targets/ICP
                 return (
                     <div className="space-y-4">
                         <div>
@@ -446,7 +879,7 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
                     </div>
                 );
 
-            case 2: // Listing
+            case 3: // Listing
                 return (
                     <div className="space-y-4">
                         <div>
@@ -507,20 +940,68 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
                     </div>
                 );
 
-            case 3: // Scripts
+            case 4: // Scripts
                 return (
                     <div className="space-y-4">
-                        <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
-                            <p className="text-xs text-indigo-700">
-                                <Sparkles className="w-3.5 h-3.5 inline mr-1" />
-                                Les scripts seront utilisés par les SDRs lors des appels.
-                            </p>
+                        {/* AI Generation Button */}
+                        <div className="p-4 bg-gradient-to-r from-violet-50 to-indigo-50 border border-indigo-200 rounded-xl">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center">
+                                        <Wand2 className="w-5 h-5 text-indigo-600" />
+                                    </div>
+                                    <div>
+                                        <h4 className="font-semibold text-indigo-900 text-sm">Génération IA</h4>
+                                        <p className="text-xs text-indigo-600">
+                                            Créez des scripts personnalisés basés sur l'ICP et le client
+                                        </p>
+                                    </div>
+                                </div>
+                                <Button
+                                    variant="primary"
+                                    size="sm"
+                                    onClick={generateScripts}
+                                    disabled={isGeneratingScripts}
+                                    isLoading={isGeneratingScripts}
+                                    className="gap-2"
+                                >
+                                    {isGeneratingScripts ? (
+                                        "Génération..."
+                                    ) : (
+                                        <>
+                                            <Sparkles className="w-4 h-4" />
+                                            Générer les scripts
+                                        </>
+                                    )}
+                                </Button>
+                            </div>
                         </div>
 
+                        {/* Intro Script */}
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                                Script d'introduction
-                            </label>
+                            <div className="flex items-center justify-between mb-1.5">
+                                <label className="block text-sm font-medium text-slate-700">
+                                    Script d'introduction
+                                </label>
+                                {scriptSuggestions?.intro && scriptSuggestions.intro.length > 1 && (
+                                    <div className="flex gap-1">
+                                        {scriptSuggestions.intro.map((_, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => applyScriptSuggestion("introScript", scriptSuggestions.intro[i])}
+                                                className={cn(
+                                                    "text-[10px] px-2 py-0.5 rounded-full transition-colors",
+                                                    formData.introScript === scriptSuggestions.intro[i]
+                                                        ? "bg-indigo-500 text-white"
+                                                        : "bg-slate-100 text-slate-600 hover:bg-indigo-100"
+                                                )}
+                                            >
+                                                Option {i + 1}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                             <textarea
                                 value={formData.introScript}
                                 onChange={(e) => updateField("introScript", e.target.value)}
@@ -530,10 +1011,31 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
                             />
                         </div>
 
+                        {/* Discovery Script */}
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                                Questions de découverte
-                            </label>
+                            <div className="flex items-center justify-between mb-1.5">
+                                <label className="block text-sm font-medium text-slate-700">
+                                    Questions de découverte
+                                </label>
+                                {scriptSuggestions?.discovery && scriptSuggestions.discovery.length > 1 && (
+                                    <div className="flex gap-1">
+                                        {scriptSuggestions.discovery.map((_, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => applyScriptSuggestion("discoveryScript", scriptSuggestions.discovery[i])}
+                                                className={cn(
+                                                    "text-[10px] px-2 py-0.5 rounded-full transition-colors",
+                                                    formData.discoveryScript === scriptSuggestions.discovery[i]
+                                                        ? "bg-indigo-500 text-white"
+                                                        : "bg-slate-100 text-slate-600 hover:bg-indigo-100"
+                                                )}
+                                            >
+                                                Option {i + 1}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                             <textarea
                                 value={formData.discoveryScript}
                                 onChange={(e) => updateField("discoveryScript", e.target.value)}
@@ -543,10 +1045,31 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
                             />
                         </div>
 
+                        {/* Objection Script */}
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                                Réponses aux objections
-                            </label>
+                            <div className="flex items-center justify-between mb-1.5">
+                                <label className="block text-sm font-medium text-slate-700">
+                                    Réponses aux objections
+                                </label>
+                                {scriptSuggestions?.objection && scriptSuggestions.objection.length > 1 && (
+                                    <div className="flex gap-1">
+                                        {scriptSuggestions.objection.map((_, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => applyScriptSuggestion("objectionScript", scriptSuggestions.objection[i])}
+                                                className={cn(
+                                                    "text-[10px] px-2 py-0.5 rounded-full transition-colors",
+                                                    formData.objectionScript === scriptSuggestions.objection[i]
+                                                        ? "bg-indigo-500 text-white"
+                                                        : "bg-slate-100 text-slate-600 hover:bg-indigo-100"
+                                                )}
+                                            >
+                                                Option {i + 1}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                             <textarea
                                 value={formData.objectionScript}
                                 onChange={(e) => updateField("objectionScript", e.target.value)}
@@ -556,10 +1079,31 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
                             />
                         </div>
 
+                        {/* Closing Script */}
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                                Script de closing
-                            </label>
+                            <div className="flex items-center justify-between mb-1.5">
+                                <label className="block text-sm font-medium text-slate-700">
+                                    Script de closing
+                                </label>
+                                {scriptSuggestions?.closing && scriptSuggestions.closing.length > 1 && (
+                                    <div className="flex gap-1">
+                                        {scriptSuggestions.closing.map((_, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => applyScriptSuggestion("closingScript", scriptSuggestions.closing[i])}
+                                                className={cn(
+                                                    "text-[10px] px-2 py-0.5 rounded-full transition-colors",
+                                                    formData.closingScript === scriptSuggestions.closing[i]
+                                                        ? "bg-indigo-500 text-white"
+                                                        : "bg-slate-100 text-slate-600 hover:bg-indigo-100"
+                                                )}
+                                            >
+                                                Option {i + 1}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                             <textarea
                                 value={formData.closingScript}
                                 onChange={(e) => updateField("closingScript", e.target.value)}
@@ -568,10 +1112,17 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
                                 className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none text-sm"
                             />
                         </div>
+
+                        {/* Regenerate hint */}
+                        {scriptSuggestions && (
+                            <p className="text-xs text-slate-500 text-center">
+                                💡 Cliquez sur "Option 1" ou "Option 2" pour alterner entre les suggestions
+                            </p>
+                        )}
                     </div>
                 );
 
-            case 4: // Planning
+            case 5: // Planning
                 return (
                     <div className="space-y-4">
                         <div>
@@ -679,12 +1230,12 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
                     </div>
                     <div>
                         <h2 className="text-lg font-semibold text-slate-900">Onboarding Client</h2>
-                        <p className="text-sm text-slate-500">Créez un nouveau client avec toutes les informations</p>
+                        <p className="text-sm text-slate-500">Créez un nouveau client avec assistance IA</p>
                     </div>
                 </div>
 
                 {/* Progress Steps */}
-                <div className="flex items-center justify-between mb-6 px-2">
+                <div className="flex items-center justify-between mb-6 px-2 overflow-x-auto">
                     {STEPS.map((step, index) => (
                         <div
                             key={step.id}
@@ -696,21 +1247,21 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
                             <button
                                 onClick={() => setCurrentStep(index)}
                                 className={cn(
-                                    "flex items-center gap-2 px-2 py-1 rounded-lg transition-colors",
+                                    "flex items-center gap-1.5 px-2 py-1 rounded-lg transition-colors",
                                     index === currentStep && "bg-indigo-50",
                                     index < currentStep && "text-indigo-600"
                                 )}
                             >
                                 <div className={cn(
-                                    "w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold",
+                                    "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold",
                                     index === currentStep && "bg-indigo-500 text-white",
                                     index < currentStep && "bg-indigo-500 text-white",
                                     index > currentStep && "bg-slate-200 text-slate-500"
                                 )}>
-                                    {index < currentStep ? <Check className="w-3.5 h-3.5" /> : index + 1}
+                                    {index < currentStep ? <Check className="w-3 h-3" /> : index + 1}
                                 </div>
                                 <span className={cn(
-                                    "text-xs font-medium hidden md:block",
+                                    "text-[11px] font-medium hidden lg:block",
                                     index === currentStep ? "text-indigo-600" : "text-slate-500"
                                 )}>
                                     {step.label}
@@ -718,7 +1269,7 @@ export function ClientOnboardingModal({ isOpen, onClose, onSuccess }: ClientOnbo
                             </button>
                             {index < STEPS.length - 1 && (
                                 <div className={cn(
-                                    "flex-1 h-0.5 mx-2",
+                                    "flex-1 h-0.5 mx-1",
                                     index < currentStep ? "bg-indigo-500" : "bg-slate-200"
                                 )} />
                             )}

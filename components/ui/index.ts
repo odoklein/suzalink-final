@@ -6,6 +6,7 @@ export { default as Badge } from "./Badge";
 
 // New Components
 export { Modal, ModalFooter, ConfirmModal } from "./Modal";
+export { Drawer, DrawerSection, DrawerField } from "./Drawer";
 export { Select, MultiSelect } from "./Select";
 export type { SelectOption } from "./Select";
 export { ToastProvider, useToast } from "./Toast";

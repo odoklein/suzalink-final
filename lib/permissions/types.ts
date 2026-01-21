@@ -86,7 +86,13 @@ export type PermissionCode =
     | "features.comms_create_broadcast"
     | "features.comms_resolve_thread"
     | "features.comms_delete_message"
-    | "features.comms_manage_groups";
+    | "features.comms_manage_groups"
+    // Billing Module
+    | "pages.billing"
+    | "features.create_invoice"
+    | "features.validate_invoice"
+    | "features.sync_payments"
+    | "features.confirm_payment";
 
 // Permission object from API
 export interface Permission {

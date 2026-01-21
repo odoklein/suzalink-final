@@ -88,6 +88,18 @@ enum EmailProvider {
   CUSTOM
 }
 
+enum InvoiceStatus {
+  DRAFT
+  VALIDATED
+  SENT
+  PAID
+}
+
+enum PaymentMatchStatus {
+  MATCHED
+  CONFIRMED
+}
+
 // ============================================
 // EMAIL HUB ENUMS
 // ============================================
@@ -222,6 +234,10 @@ model User {
   commsMessages           CommsMessage[]          @relation("CommsMessageAuthor")
   commsMentions           CommsMention[]          @relation("CommsMentionedUser")
   commsBroadcastReceipts  CommsBroadcastReceipt[] @relation("CommsBroadcastReader")
+  
+  // Billing Module
+  createdInvoices         Invoice[]               @relation("InvoiceCreator")
+  confirmedPayments       InvoicePayment[]        @relation("PaymentConfirmer")
   
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -1543,4 +1559,134 @@ model CommsBroadcastReceipt {
   @@unique([threadId, userId])
   @@index([threadId])
   @@index([userId])
+}
+
+// ============================================
+// BILLING MODULE
+// ============================================
+
+model CompanyIssuer {
+  id            String    @id @default(cuid())
+  legalName     String
+  address       String
+  city          String
+  postalCode    String
+  country       String    @default("France")
+  siret         String    @unique
+  vatNumber     String?
+  email         String?
+  phone         String?
+  logo          String?
+  
+  invoices      Invoice[]
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model BillingClient {
+  id            String    @id @default(cuid())
+  legalName     String
+  address       String
+  city          String
+  postalCode    String
+  country       String    @default("France")
+  siret         String?
+  vatNumber     String?
+  email         String?
+  phone         String?
+  
+  invoices      Invoice[]
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@index([siret])
+  @@index([vatNumber])
+}
+
+model Invoice {
+  id              String          @id @default(cuid())
+  invoiceNumber   String?         @unique
+  status          InvoiceStatus   @default(DRAFT)
+  
+  billingClientId String
+  billingClient   BillingClient   @relation(fields: [billingClientId], references: [id], onDelete: Restrict)
+  
+  companyIssuerId String
+  companyIssuer   CompanyIssuer   @relation(fields: [companyIssuerId], references: [id], onDelete: Restrict)
+  
+  issueDate       DateTime
+  dueDate         DateTime
+  
+  totalHt         Decimal         @default(0) @db.Decimal(10, 2)
+  totalVat        Decimal         @default(0) @db.Decimal(10, 2)
+  totalTtc        Decimal         @default(0) @db.Decimal(10, 2)
+  
+  facturxPdfUrl   String?
+  
+  createdById     String
+  createdBy       User            @relation("InvoiceCreator", fields: [createdById], references: [id])
+  
+  validatedAt     DateTime?
+  sentAt          DateTime?
+  paidAt          DateTime?
+  
+  items           InvoiceItem[]
+  payments        InvoicePayment[]
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  @@index([invoiceNumber])
+  @@index([status])
+  @@index([billingClientId])
+  @@index([companyIssuerId])
+  @@index([createdById])
+}
+
+model InvoiceItem {
+  id            String    @id @default(cuid())
+  invoiceId     String
+  invoice       Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  
+  description   String
+  quantity      Decimal   @db.Decimal(10, 2)
+  unitPriceHt   Decimal   @db.Decimal(10, 2)
+  vatRate       Decimal   @db.Decimal(5, 2)  // e.g., 20.00 for 20%
+  
+  totalHt       Decimal   @db.Decimal(10, 2)
+  totalVat      Decimal   @db.Decimal(10, 2)
+  totalTtc      Decimal   @db.Decimal(10, 2)
+  
+  order         Int       @default(0)
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@index([invoiceId])
+}
+
+model InvoicePayment {
+  id                  String              @id @default(cuid())
+  invoiceId           String
+  invoice             Invoice             @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  
+  qontoTransactionId  String              @unique
+  amount              Decimal             @db.Decimal(10, 2)
+  paymentDate         DateTime
+  
+  status              PaymentMatchStatus  @default(MATCHED)
+  
+  matchedAt           DateTime            @default(now())
+  confirmedAt         DateTime?
+  confirmedById       String?
+  confirmedBy         User?               @relation("PaymentConfirmer", fields: [confirmedById], references: [id])
+  
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  
+  @@index([invoiceId])
+  @@index([qontoTransactionId])
+  @@index([status])
 }

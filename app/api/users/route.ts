@@ -27,7 +27,11 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     const statusFilter = searchParams.get('status'); // 'active', 'inactive', 'all'
 
     if (roleFilter) {
-        where.role = roleFilter;
+        if (roleFilter.includes(',')) {
+            where.role = { in: roleFilter.split(',') };
+        } else {
+            where.role = roleFilter;
+        }
     }
 
     if (statusFilter === 'active') {

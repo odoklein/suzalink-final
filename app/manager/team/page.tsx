@@ -772,6 +772,7 @@ export default function TeamDashboardPage() {
     const { success, error: showError } = useToast();
     const [members, setMembers] = useState<TeamMember[]>([]);
     const [blocks, setBlocks] = useState<ScheduleBlock[]>([]);
+    const [recentActivities, setRecentActivities] = useState<{ id: string; user: string; action: string; time: string; type: "call" | "meeting" | "schedule" }[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
     const [roleFilter, setRoleFilter] = useState<string>("all");
@@ -787,15 +788,17 @@ export default function TeamDashboardPage() {
         setIsLoading(true);
         try {
             // Fetch team members (SDRs and BDs)
-            const [usersRes, blocksRes, actionsRes] = await Promise.all([
+            const [usersRes, blocksRes, actionsRes, activitiesRes] = await Promise.all([
                 fetch("/api/users?role=SDR,BUSINESS_DEVELOPER"),
                 fetch(`/api/planning?startDate=${formatDate(weekDates[0])}&endDate=${formatDate(weekDates[4])}`),
                 fetch("/api/actions/stats"),
+                fetch("/api/actions/recent?limit=8"),
             ]);
 
             const usersJson = await usersRes.json();
             const blocksJson = await blocksRes.json();
             const actionsJson = await actionsRes.json();
+            const activitiesJson = await activitiesRes.json();
 
             let teamMembers: TeamMember[] = [];
             let scheduleBlocks: ScheduleBlock[] = [];
@@ -811,6 +814,10 @@ export default function TeamDashboardPage() {
 
             if (actionsJson.success) {
                 actionStats = actionsJson.data || {};
+            }
+
+            if (activitiesJson.success) {
+                setRecentActivities(activitiesJson.data || []);
             }
 
             // Compute metrics for each member
@@ -854,13 +861,17 @@ export default function TeamDashboardPage() {
                 if (activeBlock) {
                     status = activeBlock.status === "IN_PROGRESS" ? "busy" : "online";
                 } else if (member.isActive) {
-                    // Simulate some activity
-                    status = Math.random() > 0.6 ? "online" : "away";
+                    // Check if they have any scheduled block today
+                    const hasBlockToday = memberBlocks.some(b => b.date.split("T")[0] === currentDateStr);
+                    status = hasBlockToday ? "away" : "offline";
                 }
 
-                // Simulate some metrics (in real app, these would come from API)
-                const callsThisWeek = memberStats.callsThisWeek || Math.floor(Math.random() * 80) + 20;
-                const meetingsBookedThisWeek = memberStats.meetingsThisWeek || Math.floor(Math.random() * 8);
+                // Use REAL data from the API - fallback to member._count if no stats
+                const callsThisWeek = memberStats.callsThisWeek || member._count?.actions || 0;
+                const meetingsBookedThisWeek = memberStats.meetingsThisWeek || 0;
+                const callsToday = memberStats.callsToday || 0;
+                const conversionRate = memberStats.conversionRate ||
+                    (callsThisWeek > 0 ? Number(((meetingsBookedThisWeek / callsThisWeek) * 100).toFixed(1)) : 0);
 
                 return {
                     ...member,
@@ -869,25 +880,23 @@ export default function TeamDashboardPage() {
                         scheduledHoursThisMonth: scheduledHoursThisWeek * 4,
                         completedHoursThisWeek,
                         completedHoursThisMonth: completedHoursThisWeek * 4,
-                        callsToday: Math.floor(callsThisWeek / 5),
+                        callsToday,
                         callsThisWeek,
-                        callsThisMonth: callsThisWeek * 4,
+                        callsThisMonth: memberStats.callsThisMonth || callsThisWeek * 4,
                         avgCallsPerHour: completedHoursThisWeek > 0
                             ? Number((callsThisWeek / completedHoursThisWeek).toFixed(1))
                             : 0,
-                        meetingsBooked: meetingsBookedThisWeek * 4,
+                        meetingsBooked: memberStats.meetingsBooked || meetingsBookedThisWeek,
                         meetingsBookedThisWeek,
-                        conversionRate: callsThisWeek > 0
-                            ? Number(((meetingsBookedThisWeek / callsThisWeek) * 100).toFixed(1))
-                            : 0,
+                        conversionRate,
                         lastActiveAt: null,
                         currentMission: activeBlock?.mission?.name || null,
                         activeBlockId: activeBlock?.id || null,
                         status,
                         dailyHours,
-                        currentStreak: Math.floor(Math.random() * 10),
+                        currentStreak: 0, // Would need streak tracking in DB
                         weeklyRank: index + 1,
-                        monthlyScore: Math.floor(Math.random() * 1000),
+                        monthlyScore: memberStats.monthlyScore || (callsThisWeek + meetingsBookedThisWeek * 10),
                     },
                 };
             });
@@ -954,15 +963,6 @@ export default function TeamDashboardPage() {
 
         return stats;
     }, [members]);
-
-    // Mock activity feed
-    const recentActivities = [
-        { id: "1", user: "Marie L.", action: "a terminé 15 appels", time: "Il y a 5 min", type: "call" as const },
-        { id: "2", user: "Thomas D.", action: "a booké un RDV avec Acme Corp", time: "Il y a 12 min", type: "meeting" as const },
-        { id: "3", user: "Sophie M.", action: "a démarré sa session", time: "Il y a 25 min", type: "schedule" as const },
-        { id: "4", user: "Lucas R.", action: "a complété 8 appels", time: "Il y a 35 min", type: "call" as const },
-        { id: "5", user: "Emma B.", action: "a booké un RDV avec Tech Inc", time: "Il y a 1h", type: "meeting" as const },
-    ];
 
     // ============================================
     // RENDER

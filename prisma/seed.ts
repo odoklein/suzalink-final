@@ -80,6 +80,13 @@ const PERMISSIONS: PermissionDef[] = [
     { code: "actions.book_meetings", name: "Réserver RDV", description: "Peut réserver des rendez-vous", category: "actions" },
     { code: "actions.create_opportunity", name: "Créer opportunité", description: "Peut créer des opportunités", category: "actions" },
     { code: "actions.edit_contacts", name: "Modifier contacts", description: "Peut modifier les informations de contact", category: "actions" },
+    
+    // Billing Module
+    { code: "pages.billing", name: "Facturation", description: "Accès à la gestion de la facturation", category: "pages" },
+    { code: "features.create_invoice", name: "Créer facture", description: "Peut créer de nouvelles factures", category: "features" },
+    { code: "features.validate_invoice", name: "Valider facture", description: "Peut valider et générer des factures", category: "features" },
+    { code: "features.sync_payments", name: "Synchroniser paiements", description: "Peut synchroniser les paiements Qonto", category: "features" },
+    { code: "features.confirm_payment", name: "Confirmer paiement", description: "Peut confirmer les paiements détectés", category: "features" },
 ];
 
 // Role-based default permissions
@@ -96,6 +103,8 @@ const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
         "features.create_client", "features.edit_client", "features.delete_client",
         "features.create_user", "features.edit_user", "features.delete_user", "features.manage_permissions", "features.ban_user",
         "features.upload_files", "features.delete_files", "features.manage_folders",
+        // Billing features
+        "pages.billing", "features.create_invoice", "features.validate_invoice", "features.sync_payments", "features.confirm_payment",
         // All actions
         "actions.make_calls", "actions.send_emails", "actions.send_linkedin", 
         "actions.book_meetings", "actions.create_opportunity", "actions.edit_contacts",
@@ -337,6 +346,24 @@ async function main() {
 
     // Seed permissions
     await seedPermissions();
+
+    // Seed CompanyIssuer (Suzali Conseil)
+    const companyIssuer = await prisma.companyIssuer.upsert({
+        where: { siret: "12345678901234" }, // Replace with actual SIRET
+        update: {},
+        create: {
+            legalName: "Suzali Conseil",
+            address: "123 Rue de la République",
+            city: "Paris",
+            postalCode: "75001",
+            country: "France",
+            siret: "12345678901234", // Replace with actual SIRET
+            vatNumber: "FR12345678901", // Replace with actual VAT number
+            email: "contact@suzali.fr",
+            phone: "+33 1 23 45 67 89",
+        },
+    });
+    console.log("✅ Created CompanyIssuer:", companyIssuer.legalName);
 
     console.log("\n🎉 Seeding complete!\n");
     console.log("📋 Test Credentials:");

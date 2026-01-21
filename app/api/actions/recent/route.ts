@@ -1,0 +1,191 @@
+import { NextRequest, NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+
+// ============================================
+// GET /api/actions/recent
+// Returns recent team activity for the activity feed
+// ============================================
+
+export async function GET(request: NextRequest) {
+    try {
+        const session = await getServerSession(authOptions);
+        if (!session?.user) {
+            return NextResponse.json(
+                { success: false, error: "Non autorisé" },
+                { status: 401 }
+            );
+        }
+
+        const { searchParams } = new URL(request.url);
+        const limit = parseInt(searchParams.get("limit") || "10");
+
+        // Fetch recent actions with user and campaign info
+        const recentActions = await prisma.action.findMany({
+            take: limit,
+            orderBy: { createdAt: "desc" },
+            include: {
+                sdr: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+                contact: {
+                    select: {
+                        firstName: true,
+                        lastName: true,
+                        company: {
+                            select: {
+                                name: true,
+                            },
+                        },
+                    },
+                },
+                campaign: {
+                    select: {
+                        name: true,
+                    },
+                },
+            },
+        });
+
+        // Fetch recent schedule block status changes
+        const recentBlocks = await prisma.scheduleBlock.findMany({
+            take: limit,
+            orderBy: { updatedAt: "desc" },
+            where: {
+                status: { in: ["IN_PROGRESS", "COMPLETED"] },
+            },
+            include: {
+                sdr: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+                mission: {
+                    select: {
+                        name: true,
+                    },
+                },
+            },
+        });
+
+        // Format activities
+        const activities: {
+            id: string;
+            user: string;
+            userId: string;
+            action: string;
+            time: string;
+            type: "call" | "meeting" | "schedule";
+            createdAt: Date;
+        }[] = [];
+
+        // Add action activities
+        for (const action of recentActions) {
+            const userName = action.sdr.name.split(" ").map((n, i) =>
+                i === 0 ? n : n[0] + "."
+            ).join(" ");
+
+            let actionText = "";
+            let type: "call" | "meeting" = "call";
+
+            switch (action.result) {
+                case "MEETING_BOOKED":
+                    const companyName = action.contact?.company?.name || "un prospect";
+                    actionText = `a booké un RDV avec ${companyName}`;
+                    type = "meeting";
+                    break;
+                case "INTERESTED":
+                    actionText = "a qualifié un prospect intéressé";
+                    type = "call";
+                    break;
+                case "CALLBACK_REQUESTED":
+                    actionText = "a noté un rappel à faire";
+                    type = "call";
+                    break;
+                case "NO_RESPONSE":
+                    actionText = "a tenté un contact (pas de réponse)";
+                    type = "call";
+                    break;
+                case "BAD_CONTACT":
+                    actionText = "a signalé un mauvais contact";
+                    type = "call";
+                    break;
+                case "DISQUALIFIED":
+                    actionText = "a disqualifié un prospect";
+                    type = "call";
+                    break;
+                default:
+                    actionText = "a effectué une action";
+                    type = "call";
+            }
+
+            activities.push({
+                id: action.id,
+                user: userName,
+                userId: action.sdrId,
+                action: actionText,
+                time: formatRelativeTime(action.createdAt),
+                type,
+                createdAt: action.createdAt,
+            });
+        }
+
+        // Add schedule activities
+        for (const block of recentBlocks) {
+            const userName = block.sdr.name.split(" ").map((n, i) =>
+                i === 0 ? n : n[0] + "."
+            ).join(" ");
+
+            const actionText = block.status === "IN_PROGRESS"
+                ? `a démarré sa session sur ${block.mission.name}`
+                : `a terminé sa session sur ${block.mission.name}`;
+
+            activities.push({
+                id: block.id,
+                user: userName,
+                userId: block.sdrId,
+                action: actionText,
+                time: formatRelativeTime(block.updatedAt),
+                type: "schedule",
+                createdAt: block.updatedAt,
+            });
+        }
+
+        // Sort by time and take the most recent
+        activities.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        const sortedActivities = activities.slice(0, limit);
+
+        return NextResponse.json({
+            success: true,
+            data: sortedActivities,
+        });
+
+    } catch (error) {
+        console.error("[GET /api/actions/recent] Error:", error);
+        return NextResponse.json(
+            { success: false, error: "Erreur serveur" },
+            { status: 500 }
+        );
+    }
+}
+
+// Format relative time
+function formatRelativeTime(date: Date): string {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffMins < 1) return "À l'instant";
+    if (diffMins < 60) return `Il y a ${diffMins} min`;
+    if (diffHours < 24) return `Il y a ${diffHours}h`;
+    if (diffDays === 1) return "Hier";
+    if (diffDays < 7) return `Il y a ${diffDays} jours`;
+    return date.toLocaleDateString("fr-FR");
+}

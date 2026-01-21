@@ -30,6 +30,7 @@ const createClientSchema = z.object({
         listingSources: z.array(z.string()).optional(),
         listingCriteria: z.string().optional(),
         estimatedContacts: z.string().optional(),
+        aiAnalysis: z.any().optional(),
     }).optional(),
     targetLaunchDate: z.string().optional().nullable(),
     scripts: z.object({
@@ -131,7 +132,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
 
     // Create onboarding record if onboarding data is provided
     const hasOnboardingData = onboardingData || scripts || notes || targetLaunchDate;
-    
+
     if (hasOnboardingData) {
         await prisma.clientOnboarding.create({
             data: {

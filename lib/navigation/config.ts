@@ -17,6 +17,7 @@ import {
     Send,
     Zap,
     MessageSquare,
+    Receipt,
     LucideIcon,
 } from "lucide-react";
 import { UserRole } from "@prisma/client";
@@ -94,6 +95,12 @@ export const MANAGER_NAV: NavSection[] = [
                 icon: FileText,
                 label: "Fichiers",
                 permission: "pages.files"
+            },
+            {
+                href: "/manager/billing/invoices",
+                icon: Receipt,
+                label: "Facturation",
+                permission: "pages.billing"
             },
             {
                 href: "/manager/analytics",
