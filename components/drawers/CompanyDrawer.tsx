@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Drawer, DrawerSection, DrawerField, Button, Input, Badge, useToast } from "@/components/ui";
 import {
     Building2,
@@ -59,9 +59,11 @@ interface CompanyDrawerProps {
     onClose: () => void;
     company: Company | null;
     onUpdate?: (company: Company) => void;
+    onCreate?: (company: Company) => void;
     onContactClick?: (contact: Contact) => void;
     isManager?: boolean;
     listId?: string;
+    isCreating?: boolean;
 }
 
 // ============================================
@@ -83,9 +85,11 @@ export function CompanyDrawer({
     onClose,
     company,
     onUpdate,
+    onCreate,
     onContactClick,
     isManager = false,
     listId,
+    isCreating = false,
 }: CompanyDrawerProps) {
     const { success, error: showError } = useToast();
     const [isEditing, setIsEditing] = useState(false);
@@ -98,9 +102,18 @@ export function CompanyDrawer({
         size: "",
     });
 
-    // Reset form when company changes
-    const handleOpen = () => {
-        if (company) {
+    // Reset form when company changes or when creating
+    useEffect(() => {
+        if (isCreating) {
+            setFormData({
+                name: "",
+                industry: "",
+                country: "",
+                website: "",
+                size: "",
+            });
+            setIsEditing(true);
+        } else if (company) {
             setFormData({
                 name: company.name || "",
                 industry: company.industry || "",
@@ -110,43 +123,78 @@ export function CompanyDrawer({
             });
             setIsEditing(false);
         }
-    };
-
-    // Call handleOpen when company changes
-    if (company && formData.name !== company.name && !isEditing) {
-        handleOpen();
-    }
+    }, [company, isCreating]);
 
     // ============================================
     // SAVE HANDLER
     // ============================================
 
     const handleSave = async () => {
-        if (!company || !listId) return;
-
-        setIsSaving(true);
-        try {
-            const res = await fetch(`/api/companies/${company.id}`, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(formData),
-            });
-
-            const json = await res.json();
-
-            if (json.success) {
-                success("Société mise à jour", `${formData.name} a été mis à jour`);
-                setIsEditing(false);
-                if (onUpdate) {
-                    onUpdate({ ...company, ...formData });
-                }
-            } else {
-                showError("Erreur", json.error || "Impossible de mettre à jour");
+        if (isCreating) {
+            // Create new company
+            if (!listId || !formData.name.trim()) {
+                showError("Erreur", "Le nom de la société est requis");
+                return;
             }
-        } catch (err) {
-            showError("Erreur", "Impossible de mettre à jour la société");
-        } finally {
-            setIsSaving(false);
+
+            setIsSaving(true);
+            try {
+                const res = await fetch(`/api/lists/${listId}/companies`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        name: formData.name,
+                        industry: formData.industry || undefined,
+                        country: formData.country || undefined,
+                        website: formData.website || undefined,
+                        size: formData.size || undefined,
+                    }),
+                });
+
+                const json = await res.json();
+
+                if (json.success) {
+                    success("Société créée", `${formData.name} a été créée`);
+                    if (onCreate) {
+                        onCreate(json.data);
+                    }
+                    onClose();
+                } else {
+                    showError("Erreur", json.error || "Impossible de créer la société");
+                }
+            } catch (err) {
+                showError("Erreur", "Impossible de créer la société");
+            } finally {
+                setIsSaving(false);
+            }
+        } else {
+            // Update existing company
+            if (!company || !listId) return;
+
+            setIsSaving(true);
+            try {
+                const res = await fetch(`/api/companies/${company.id}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(formData),
+                });
+
+                const json = await res.json();
+
+                if (json.success) {
+                    success("Société mise à jour", `${formData.name} a été mis à jour`);
+                    setIsEditing(false);
+                    if (onUpdate) {
+                        onUpdate({ ...company, ...formData });
+                    }
+                } else {
+                    showError("Erreur", json.error || "Impossible de mettre à jour");
+                }
+            } catch (err) {
+                showError("Erreur", "Impossible de mettre à jour la société");
+            } finally {
+                setIsSaving(false);
+            }
         }
     };
 
@@ -159,28 +207,28 @@ export function CompanyDrawer({
         success("Copié", `${label} copié dans le presse-papier`);
     };
 
-    if (!company) return null;
+    if (!isCreating && !company) return null;
 
-    const statusConfig = STATUS_CONFIG[company.status];
-    const StatusIcon = statusConfig.icon;
+    const statusConfig = isCreating ? null : STATUS_CONFIG[company!.status];
+    const StatusIcon = statusConfig?.icon;
 
     return (
         <Drawer
             isOpen={isOpen}
             onClose={onClose}
-            title={isEditing ? "Modifier la société" : company.name}
-            description={isEditing ? "Modifiez les informations de la société" : undefined}
+            title={isCreating ? "Nouvelle société" : (isEditing ? "Modifier la société" : company!.name)}
+            description={isCreating ? "Ajoutez une nouvelle société à la liste" : (isEditing ? "Modifiez les informations de la société" : undefined)}
             size="lg"
             footer={
                 isManager && (
                     <div className="flex items-center justify-end gap-3">
-                        {isEditing ? (
+                        {isEditing || isCreating ? (
                             <>
                                 <Button
                                     variant="ghost"
                                     onClick={() => {
                                         setIsEditing(false);
-                                        handleOpen();
+                                        onClose();
                                     }}
                                     disabled={isSaving}
                                 >
@@ -190,10 +238,10 @@ export function CompanyDrawer({
                                 <Button
                                     variant="primary"
                                     onClick={handleSave}
-                                    disabled={isSaving}
+                                    disabled={isSaving || !formData.name.trim()}
                                 >
                                     <Save className="w-4 h-4 mr-2" />
-                                    {isSaving ? "Enregistrement..." : "Enregistrer"}
+                                    {isSaving ? (isCreating ? "Création..." : "Enregistrement...") : (isCreating ? "Créer" : "Enregistrer")}
                                 </Button>
                             </>
                         ) : (
@@ -211,7 +259,7 @@ export function CompanyDrawer({
         >
             <div className="space-y-6">
                 {/* Status Badge */}
-                {!isEditing && (
+                {!isEditing && !isCreating && statusConfig && (
                     <div className={cn(
                         "inline-flex items-center gap-2 px-3 py-1.5 rounded-full",
                         statusConfig.bg,
@@ -227,7 +275,7 @@ export function CompanyDrawer({
 
                 {/* Company Info */}
                 <DrawerSection title="Informations">
-                    {isEditing ? (
+                    {(isEditing || isCreating) ? (
                         <div className="space-y-4">
                             <Input
                                 label="Nom de la société *"
@@ -261,39 +309,39 @@ export function CompanyDrawer({
                                 icon={<Users className="w-4 h-4 text-slate-400" />}
                             />
                         </div>
-                    ) : (
+                    ) : company ? (
                         <div className="space-y-4">
                             <DrawerField
                                 label="Industrie"
-                                value={company.industry}
+                                value={company!.industry}
                                 icon={<Briefcase className="w-5 h-5 text-indigo-500" />}
                             />
                             <DrawerField
                                 label="Pays"
-                                value={company.country}
+                                value={company!.country}
                                 icon={<MapPin className="w-5 h-5 text-indigo-500" />}
                             />
                             <DrawerField
                                 label="Site web"
                                 value={
-                                    company.website && (
+                                    company!.website && (
                                         <div className="flex items-center gap-2">
                                             <a
-                                                href={company.website.startsWith("http") ? company.website : `https://${company.website}`}
+                                                href={company!.website.startsWith("http") ? company!.website : `https://${company!.website}`}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
                                                 className="text-indigo-600 hover:underline truncate max-w-[200px]"
                                             >
-                                                {company.website}
+                                                {company!.website}
                                             </a>
                                             <button
-                                                onClick={() => copyToClipboard(company.website!, "Site web")}
+                                                onClick={() => copyToClipboard(company!.website!, "Site web")}
                                                 className="text-slate-400 hover:text-slate-600"
                                             >
                                                 <Copy className="w-3.5 h-3.5" />
                                             </button>
                                             <a
-                                                href={company.website.startsWith("http") ? company.website : `https://${company.website}`}
+                                                href={company!.website.startsWith("http") ? company!.website : `https://${company!.website}`}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
                                                 className="text-slate-400 hover:text-slate-600"
@@ -307,15 +355,15 @@ export function CompanyDrawer({
                             />
                             <DrawerField
                                 label="Taille"
-                                value={company.size}
+                                value={company!.size}
                                 icon={<Users className="w-5 h-5 text-indigo-500" />}
                             />
                         </div>
-                    )}
+                    ) : null}
                 </DrawerSection>
 
                 {/* Contacts List */}
-                {!isEditing && (
+                {!isEditing && !isCreating && company && (
                     <DrawerSection title={`Contacts (${company.contacts.length})`}>
                         {company.contacts.length === 0 ? (
                             <div className="text-center py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
@@ -324,7 +372,7 @@ export function CompanyDrawer({
                             </div>
                         ) : (
                             <div className="space-y-2">
-                                {company.contacts.map((contact) => {
+                                {company!.contacts.map((contact) => {
                                     const contactStatus = STATUS_CONFIG[contact.status];
                                     const ContactStatusIcon = contactStatus.icon;
 

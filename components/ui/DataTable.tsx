@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 
 export interface Column<T> {
     key: string;
-    header: string;
+    header: string | React.ReactNode;
     sortable?: boolean;
     width?: string;
     render?: (value: any, row: T) => React.ReactNode;
@@ -161,8 +161,12 @@ export function DataTable<T extends Record<string, any>>({
                                     onClick={() => column.sortable && handleSort(column.key)}
                                 >
                                     <div className="flex items-center gap-1">
-                                        <span>{column.header}</span>
-                                        {column.sortable && (
+                                        {typeof column.header === "string" ? (
+                                            <span>{column.header}</span>
+                                        ) : (
+                                            column.header
+                                        )}
+                                        {column.sortable && typeof column.header === "string" && (
                                             <span className="flex flex-col">
                                                 <ChevronUp
                                                     className={cn(

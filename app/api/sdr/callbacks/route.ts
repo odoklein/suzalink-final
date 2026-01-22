@@ -46,13 +46,18 @@ export async function GET() {
                         }
                     }
                 },
-                mission: {
+                campaign: {
                     select: {
                         id: true,
                         name: true,
-                        client: {
+                        mission: {
                             select: {
-                                name: true
+                                name: true,
+                                client: {
+                                    select: {
+                                        name: true
+                                    }
+                                }
                             }
                         }
                     }

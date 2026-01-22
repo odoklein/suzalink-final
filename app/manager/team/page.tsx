@@ -308,7 +308,7 @@ function DailyHoursChart({
     return (
         <div className="flex items-end justify-between gap-1 h-16">
             {data.map((d, i) => (
-                <div key={d.day} className="flex-1 flex flex-col items-center gap-1">
+                <div key={`${d.day}-${i}`} className="flex-1 flex flex-col items-center gap-1">
                     <div className="w-full flex items-end justify-center gap-0.5 h-12">
                         {/* Scheduled bar */}
                         <div

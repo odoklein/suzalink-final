@@ -30,3 +30,7 @@ export { EmptyState } from "./EmptyState";
 export { LoadingState } from "./LoadingState";
 export { StatCard } from "./StatCard";
 export { Tabs } from "./Tabs";
+export { Tooltip, TooltipTrigger } from "./Tooltip";
+export { HelpPanel, HelpPanelTrigger } from "./HelpPanel";
+export { Tour, TourProvider, useTour } from "./Tour";
+export type { TourStep } from "./Tour";

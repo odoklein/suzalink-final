@@ -87,6 +87,13 @@ const PERMISSIONS: PermissionDef[] = [
     { code: "features.validate_invoice", name: "Valider facture", description: "Peut valider et générer des factures", category: "features" },
     { code: "features.sync_payments", name: "Synchroniser paiements", description: "Peut synchroniser les paiements Qonto", category: "features" },
     { code: "features.confirm_payment", name: "Confirmer paiement", description: "Peut confirmer les paiements détectés", category: "features" },
+    
+    // Prospect Orchestration Engine
+    { code: "pages.prospects", name: "Prospects", description: "Accès à la gestion des prospects", category: "pages" },
+    { code: "features.manage_prospect_rules", name: "Gérer règles prospects", description: "Peut créer et modifier les règles de prospects", category: "features" },
+    { code: "features.review_prospects", name: "Réviser prospects", description: "Peut approuver ou rejeter les prospects", category: "features" },
+    { code: "features.configure_prospect_sources", name: "Configurer sources prospects", description: "Peut configurer les sources de prospects", category: "features" },
+    { code: "features.activate_prospects", name: "Activer prospects", description: "Peut activer manuellement les prospects", category: "features" },
 ];
 
 // Role-based default permissions
@@ -105,6 +112,9 @@ const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
         "features.upload_files", "features.delete_files", "features.manage_folders",
         // Billing features
         "pages.billing", "features.create_invoice", "features.validate_invoice", "features.sync_payments", "features.confirm_payment",
+        // Prospect Orchestration Engine
+        "pages.prospects", "features.manage_prospect_rules", "features.review_prospects", 
+        "features.configure_prospect_sources", "features.activate_prospects",
         // All actions
         "actions.make_calls", "actions.send_emails", "actions.send_linkedin", 
         "actions.book_meetings", "actions.create_opportunity", "actions.edit_contacts",

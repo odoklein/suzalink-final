@@ -19,6 +19,7 @@ import {
     AlertCircle,
     Clock,
     RefreshCw,
+    Plus,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -106,6 +107,8 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     const [selectedContact, setSelectedContact] = useState<(Contact & { companyName: string }) | null>(null);
     const [showCompanyDrawer, setShowCompanyDrawer] = useState(false);
     const [showContactDrawer, setShowContactDrawer] = useState(false);
+    const [isCreatingCompany, setIsCreatingCompany] = useState(false);
+    const [isCreatingContact, setIsCreatingContact] = useState(false);
 
     // Resolve params
     useEffect(() => {
@@ -176,6 +179,30 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
         if (updatedCompany._count.contacts !== selectedCompany?._count.contacts) {
             fetchList();
         }
+    };
+
+    const handleCompanyCreate = (newCompany: Company) => {
+        setCompanies((prev) => [newCompany, ...prev]);
+        fetchList(); // Refresh to update counts
+    };
+
+    const handleContactCreate = (newContact: Contact & { companyName: string }) => {
+        // Find company and add contact
+        setCompanies((prev) =>
+            prev.map((company) => {
+                if (company.id === newContact.companyId) {
+                    return {
+                        ...company,
+                        contacts: [...company.contacts, newContact],
+                        _count: {
+                            contacts: company._count.contacts + 1,
+                        },
+                    };
+                }
+                return company;
+            })
+        );
+        fetchList(); // Refresh to update counts
     };
 
     const handleContactUpdate = (updatedContact: Contact) => {
@@ -580,7 +607,42 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                     <h2 className="text-xl font-bold text-slate-900">
                         {view === "companies" ? "Sociétés" : "Contacts"}
                     </h2>
-                    <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+                    <div className="flex items-center gap-2">
+                        {isManager && (
+                            <>
+                                {view === "companies" ? (
+                                    <Button
+                                        variant="primary"
+                                        size="sm"
+                                        onClick={() => {
+                                            setIsCreatingCompany(true);
+                                            setSelectedCompany(null);
+                                            setShowCompanyDrawer(true);
+                                        }}
+                                        className="gap-2"
+                                    >
+                                        <Plus className="w-4 h-4" />
+                                        Ajouter une société
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        variant="primary"
+                                        size="sm"
+                                        onClick={() => {
+                                            setIsCreatingContact(true);
+                                            setSelectedContact(null);
+                                            setShowContactDrawer(true);
+                                        }}
+                                        className="gap-2"
+                                        disabled={companies.length === 0}
+                                    >
+                                        <Plus className="w-4 h-4" />
+                                        Ajouter un contact
+                                    </Button>
+                                )}
+                            </>
+                        )}
+                        <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
                         <button
                             onClick={() => setView("companies")}
                             className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${view === "companies"
@@ -601,6 +663,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                             <Users className="w-4 h-4" />
                             Contacts ({totalContacts})
                         </button>
+                        </div>
                     </div>
                 </div>
 
@@ -654,21 +717,35 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
             {/* Company Drawer */}
             <CompanyDrawer
                 isOpen={showCompanyDrawer}
-                onClose={() => setShowCompanyDrawer(false)}
+                onClose={() => {
+                    setShowCompanyDrawer(false);
+                    setIsCreatingCompany(false);
+                    setSelectedCompany(null);
+                }}
                 company={selectedCompany}
                 onUpdate={handleCompanyUpdate}
+                onCreate={isCreatingCompany ? handleCompanyCreate : undefined}
                 onContactClick={handleCompanyContactClick}
                 isManager={isManager}
                 listId={listId}
+                isCreating={isCreatingCompany}
             />
 
             {/* Contact Drawer */}
             <ContactDrawer
                 isOpen={showContactDrawer}
-                onClose={() => setShowContactDrawer(false)}
+                onClose={() => {
+                    setShowContactDrawer(false);
+                    setIsCreatingContact(false);
+                    setSelectedContact(null);
+                }}
                 contact={selectedContact}
                 onUpdate={handleContactUpdate}
+                onCreate={isCreatingContact ? handleContactCreate : undefined}
                 isManager={isManager}
+                listId={listId}
+                companies={companies}
+                isCreating={isCreatingContact}
             />
 
             {/* Delete Confirmation */}

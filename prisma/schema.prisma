@@ -101,6 +101,47 @@ enum PaymentMatchStatus {
 }
 
 // ============================================
+// PROSPECT ORCHESTRATION ENGINE ENUMS
+// ============================================
+
+enum ProspectSourceType {
+  WEB_FORM
+  CSV_IMPORT
+  API
+  PARTNER_FEED
+  MANUAL_ENTRY
+}
+
+enum ProspectPipelineStep {
+  INTAKE
+  NORMALIZE
+  VALIDATE
+  ENRICH
+  DEDUPLICATE
+  SCORE
+  ROUTE
+  ACTIVATE
+  HOLD
+  REJECT
+}
+
+enum ProspectStatus {
+  PENDING
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  ACTIVATED
+  DUPLICATE
+}
+
+enum DecisionOutcome {
+  PASS
+  FAIL
+  REVIEW_REQUIRED
+  SKIP
+}
+
+// ============================================
 // EMAIL HUB ENUMS
 // ============================================
 
@@ -239,6 +280,12 @@ model User {
   createdInvoices         Invoice[]               @relation("InvoiceCreator")
   confirmedPayments       InvoicePayment[]        @relation("PaymentConfirmer")
   
+  // Prospect Orchestration Engine
+  reviewedProspects   ProspectProfile[] @relation("ProspectReviewer")
+  assignedProspects   ProspectProfile[]
+  createdProspectRules ProspectRule[] @relation("ProspectRuleCreator")
+  updatedProspectRules ProspectRule[] @relation("ProspectRuleUpdater")
+  
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   
@@ -325,6 +372,11 @@ model Client {
   // Internal Communication Module
   commsChannel  CommsChannel?
   
+  // Prospect Orchestration Engine
+  prospectSources     ProspectSource[]
+  prospectRules       ProspectRule[]
+  prospectPipelineConfig ProspectPipelineConfig?
+  
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -351,6 +403,10 @@ model Mission {
   
   // Internal Communication Module
   commsChannel  CommsChannel?
+  
+  // Prospect Orchestration Engine
+  prospectProfiles    ProspectProfile[]
+  prospectSources     ProspectSource[]
   
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -1689,4 +1745,242 @@ model InvoicePayment {
   @@index([invoiceId])
   @@index([qontoTransactionId])
   @@index([status])
+}
+
+// ============================================
+// PROSPECT ORCHESTRATION ENGINE MODELS
+// ============================================
+
+// Source configuration
+model ProspectSource {
+  id            String              @id @default(cuid())
+  name          String              // "Website Form", "Partner API", etc.
+  type          ProspectSourceType
+  clientId      String?             // Optional: client-specific source
+  client        Client?             @relation(fields: [clientId], references: [id])
+  
+  // Configuration
+  isActive      Boolean             @default(true)
+  autoActivate  Boolean             @default(false) // Skip review for high-confidence
+  defaultMissionId String?          // Default mission for routing
+  defaultMission Mission?           @relation(fields: [defaultMissionId], references: [id])
+  
+  // Metadata
+  metadata      Json?               // Source-specific config (API keys, webhook URLs, etc.)
+  
+  events        ProspectEvent[]
+  rules         ProspectRule[]
+  
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  
+  @@index([clientId])
+  @@index([type])
+  @@index([isActive])
+}
+
+// Immutable event log (append-only)
+model ProspectEvent {
+  id            String              @id @default(cuid())
+  sourceId      String
+  source        ProspectSource      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  profileId     String?             // Links to ProspectProfile (null until profile created)
+  profile       ProspectProfile?    @relation(fields: [profileId], references: [id])
+  
+  // Raw payload (immutable)
+  rawPayload    Json                // Original data as received
+  
+  // Event metadata
+  eventType     String              // "intake", "update", "enrichment", "decision"
+  step          ProspectPipelineStep
+  outcome       DecisionOutcome?
+  
+  // Processing context
+  processedAt   DateTime            @default(now())
+  processedBy   String?             // System or userId for manual events
+  errorMessage  String?             // If processing failed
+  
+  // Decision log reference
+  decisionLogId String?
+  decisionLog   ProspectDecisionLog? @relation(fields: [decisionLogId], references: [id])
+  
+  createdAt     DateTime            @default(now())
+  
+  @@index([sourceId])
+  @@index([profileId])
+  @@index([step])
+  @@index([createdAt])
+  @@index([eventType])
+}
+
+// Evolving prospect profile (derived from events)
+model ProspectProfile {
+  id            String              @id @default(cuid())
+  
+  // Normalized data (evolves as events are processed)
+  firstName     String?
+  lastName      String?
+  email         String?
+  phone         String?
+  linkedin      String?
+  title         String?
+  companyName   String?
+  companyWebsite String?
+  companyIndustry String?
+  companyCountry String?
+  companySize   String?
+  
+  // Additional fields (flexible JSON)
+  customFields  Json?               // Source-specific or enrichment data
+  
+  // Pipeline state
+  currentStep   ProspectPipelineStep @default(INTAKE)
+  status        ProspectStatus       @default(PENDING)
+  
+  // Scoring
+  qualityScore  Int                 @default(0) // 0-100
+  confidenceScore Int               @default(0) // 0-100 (data completeness)
+  
+  // Routing
+  assignedMissionId String?
+  assignedMission   Mission?        @relation(fields: [assignedMissionId], references: [id])
+  assignedSdrId     String?
+  assignedSdr       User?           @relation(fields: [assignedSdrId], references: [id])
+  
+  // Deduplication
+  duplicateOfId     String?         // If merged with another profile
+  duplicateOf       ProspectProfile? @relation("ProspectDuplicates", fields: [duplicateOfId], references: [id])
+  duplicates        ProspectProfile[] @relation("ProspectDuplicates")
+  
+  // Review
+  reviewRequired    Boolean         @default(false)
+  reviewReason      String?         // Why review is needed
+  reviewedById      String?
+  reviewedBy        User?           @relation("ProspectReviewer", fields: [reviewedById], references: [id])
+  reviewedAt        DateTime?
+  reviewNotes       String?         @db.Text
+  
+  // Activation
+  activatedAt       DateTime?
+  activatedContactId String?       // Link to created Contact (read-only after activation)
+  activatedCompanyId String?        // Link to created Company
+  
+  // Relations
+  events            ProspectEvent[]
+  decisionLogs     ProspectDecisionLog[]
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  @@index([status])
+  @@index([currentStep])
+  @@index([qualityScore])
+  @@index([reviewRequired])
+  @@index([assignedMissionId])
+  @@index([assignedSdrId])
+  @@index([email]) // For deduplication
+  @@index([phone]) // For deduplication
+  @@unique([email]) // Prevent duplicate emails
+}
+
+// Decision log (explainability)
+model ProspectDecisionLog {
+  id            String              @id @default(cuid())
+  profileId     String
+  profile       ProspectProfile      @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  
+  step          ProspectPipelineStep
+  outcome       DecisionOutcome
+  
+  // Rule execution
+  ruleId        String?
+  rule          ProspectRule?       @relation(fields: [ruleId], references: [id])
+  ruleResult   Json?               // Rule evaluation details
+  
+  // Decision context
+  inputData     Json                // Profile state at decision time
+  outputData    Json?               // Changes made
+  reason        String               @db.Text // Human-readable explanation
+  
+  // Metadata
+  executedAt    DateTime            @default(now())
+  executedBy    String?             // System or userId
+  
+  events        ProspectEvent[]
+  
+  @@index([profileId])
+  @@index([step])
+  @@index([outcome])
+  @@index([executedAt])
+}
+
+// Rule definitions (manager-configurable)
+model ProspectRule {
+  id            String              @id @default(cuid())
+  name          String
+  description   String?             @db.Text
+  
+  // Rule scope
+  clientId      String?             // Client-specific rule
+  client        Client?             @relation(fields: [clientId], references: [id])
+  sourceId      String?             // Source-specific rule
+  source        ProspectSource?      @relation(fields: [sourceId], references: [id])
+  
+  // Rule application
+  step          ProspectPipelineStep // Which step this rule applies to
+  priority      Int                 @default(0) // Higher = evaluated first
+  
+  // Rule definition (declarative JSON)
+  condition     Json                // { field: "email", operator: "endsWith", value: "@gmail.com" }
+  action        Json                // { type: "adjustScore", value: -30 } or { type: "requireReview", reason: "Free email" }
+  
+  // Versioning
+  version       Int                 @default(1)
+  isActive      Boolean             @default(true)
+  
+  // Audit
+  createdById   String
+  createdBy     User                @relation("ProspectRuleCreator", fields: [createdById], references: [id])
+  updatedById   String?
+  updatedBy     User?               @relation("ProspectRuleUpdater", fields: [updatedById], references: [id])
+  
+  decisionLogs  ProspectDecisionLog[]
+  
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  
+  @@index([clientId])
+  @@index([sourceId])
+  @@index([step])
+  @@index([isActive])
+  @@index([priority])
+}
+
+// Pipeline step configuration
+model ProspectPipelineConfig {
+  id            String              @id @default(cuid())
+  clientId      String?
+  client        Client?             @relation(fields: [clientId], references: [id])
+  
+  // Step settings
+  enableEnrichment Boolean          @default(false)
+  enrichmentProvider String?        // "clearbit", "apollo", "custom"
+  enrichmentApiKey  String?         // Encrypted
+  
+  // Thresholds
+  minQualityScore    Int             @default(50) // Minimum score for auto-approval
+  minConfidenceScore Int             @default(70) // Minimum confidence for auto-approval
+  reviewThreshold    Int             @default(40) // Score below which review required
+  
+  // Deduplication
+  enableDeduplication Boolean        @default(true)
+  dedupeFields        String[]       @default(["email", "phone"]) // Fields to match on
+  
+  // Routing
+  defaultRoutingStrategy String      @default("round_robin") // "round_robin", "load_balance", "manual"
+  
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  
+  @@unique([clientId])
 }

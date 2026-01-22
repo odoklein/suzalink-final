@@ -104,9 +104,9 @@ const updateClientSchema = z.object({
     industry: z.string().optional().nullable(),
     // Onboarding fields
     onboardingStatus: z.enum(['DRAFT', 'IN_PROGRESS', 'READY_FOR_REVIEW', 'APPROVED', 'ACTIVE']).optional(),
-    onboardingData: z.record(z.unknown()).optional(),
+    onboardingData: z.record(z.string(), z.unknown()).optional(),
     targetLaunchDate: z.string().optional().nullable(),
-    scripts: z.record(z.unknown()).optional(),
+    scripts: z.record(z.string(), z.unknown()).optional(),
     notes: z.string().optional().nullable(),
 });
 
@@ -141,9 +141,9 @@ export const PUT = withErrorHandler(async (request: NextRequest, { params }: Rou
                 create: {
                     clientId: id,
                     status: data.onboardingStatus || 'DRAFT',
-                    onboardingData: data.onboardingData || {},
+                    onboardingData: (data.onboardingData || {}) as any,
                     targetLaunchDate: data.targetLaunchDate ? new Date(data.targetLaunchDate) : undefined,
-                    scripts: data.scripts || {},
+                    scripts: (data.scripts || {}) as any,
                     notes: data.notes || undefined,
                     createdById: session.user.id,
                     completedAt: data.onboardingStatus === 'ACTIVE' ? new Date() : undefined,
