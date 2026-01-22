@@ -32,8 +32,8 @@ export const GET = withErrorHandler(async (
         // Download file from storage
         const buffer = await storageService.download(file.path);
 
-        // Return file with appropriate headers
-        return new NextResponse(buffer, {
+        // Return file with appropriate headers (Uint8Array is valid BodyInit; Buffer is not in DOM types)
+        return new NextResponse(new Uint8Array(buffer), {
             headers: {
                 'Content-Type': file.mimeType,
                 'Content-Disposition': `attachment; filename="${encodeURIComponent(file.originalName)}"`,

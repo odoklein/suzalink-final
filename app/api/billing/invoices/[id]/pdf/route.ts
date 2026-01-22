@@ -37,8 +37,8 @@ export const GET = withErrorHandler(async (
         // Download PDF from storage
         const pdfBuffer = await storageService.download(key);
 
-        // Return PDF as response
-        return new NextResponse(pdfBuffer, {
+        // Return PDF as response (Uint8Array is valid BodyInit; Buffer is not in DOM types)
+        return new NextResponse(new Uint8Array(pdfBuffer), {
             headers: {
                 "Content-Type": "application/pdf",
                 "Content-Disposition": `attachment; filename="facture-${invoice.invoiceNumber || id}.pdf"`,
