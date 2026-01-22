@@ -72,8 +72,8 @@ export const GET = withErrorHandler(async (
         totalActions: actions.length,
         meetings: actions.filter(a => a.result === 'MEETING_BOOKED').length,
         interested: actions.filter(a => a.result === 'INTERESTED').length,
-        notInterested: actions.filter(a => a.result === 'NOT_INTERESTED').length,
-        noAnswer: actions.filter(a => a.result === 'NO_ANSWER').length,
+        notInterested: actions.filter(a => a.result === 'DISQUALIFIED').length,
+        noAnswer: actions.filter(a => a.result === 'NO_RESPONSE').length,
         conversionRate: actions.length > 0
             ? (actions.filter(a => a.result === 'MEETING_BOOKED').length / actions.length) * 100
             : 0,
