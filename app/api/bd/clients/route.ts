@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import {
     successResponse,
@@ -95,9 +96,9 @@ const createClientSchema = z.object({
     email: z.string().email().optional().nullable(),
     phone: z.string().optional().nullable(),
     industry: z.string().optional().nullable(),
-    onboardingData: z.record(z.unknown()).optional(),
+    onboardingData: z.record(z.string(), z.unknown()).optional(),
     targetLaunchDate: z.string().optional().nullable(),
-    scripts: z.record(z.unknown()).optional(),
+    scripts: z.record(z.string(), z.unknown()).optional(),
     notes: z.string().optional().nullable(),
 });
 
@@ -122,9 +123,9 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
             data: {
                 clientId: client.id,
                 status: 'DRAFT',
-                onboardingData: data.onboardingData || {},
+                onboardingData: (data.onboardingData || {}) as Prisma.InputJsonValue,
                 targetLaunchDate: data.targetLaunchDate ? new Date(data.targetLaunchDate) : undefined,
-                scripts: data.scripts || {},
+                scripts: (data.scripts || {}) as Prisma.InputJsonValue,
                 notes: data.notes || undefined,
                 createdById: session.user.id,
             },

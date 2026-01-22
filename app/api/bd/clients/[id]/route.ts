@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import {
     successResponse,
@@ -141,18 +142,18 @@ export const PUT = withErrorHandler(async (request: NextRequest, { params }: Rou
                 create: {
                     clientId: id,
                     status: data.onboardingStatus || 'DRAFT',
-                    onboardingData: (data.onboardingData || {}) as any,
+                    onboardingData: (data.onboardingData || {}) as Prisma.InputJsonValue,
                     targetLaunchDate: data.targetLaunchDate ? new Date(data.targetLaunchDate) : undefined,
-                    scripts: (data.scripts || {}) as any,
+                    scripts: (data.scripts || {}) as Prisma.InputJsonValue,
                     notes: data.notes || undefined,
                     createdById: session.user.id,
                     completedAt: data.onboardingStatus === 'ACTIVE' ? new Date() : undefined,
                 },
                 update: {
                     status: data.onboardingStatus,
-                    onboardingData: data.onboardingData,
+                    onboardingData: data.onboardingData as Prisma.InputJsonValue | undefined,
                     targetLaunchDate: data.targetLaunchDate ? new Date(data.targetLaunchDate) : undefined,
-                    scripts: data.scripts,
+                    scripts: data.scripts as Prisma.InputJsonValue | undefined,
                     notes: data.notes,
                     completedAt: data.onboardingStatus === 'ACTIVE' ? new Date() : undefined,
                 },

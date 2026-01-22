@@ -27,29 +27,25 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         const clients = results.map((company) => PappersService.toBillingClient(company));
 
         return successResponse(clients);
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Pappers search error:", error);
-        
-        if (error instanceof Error) {
+        const e = error as Error & { isQuotaError?: boolean; statusCode?: number };
+        if (e instanceof Error) {
             // Check for API key configuration error
-            if (error.message.includes("PAPPERS_API_KEY")) {
+            if (e.message.includes("PAPPERS_API_KEY")) {
                 return errorResponse("Service Pappers non configuré", 503);
             }
-            
             // Check for quota/credit errors (401)
-            if (error.isQuotaError || error.statusCode === 401) {
+            if (e.isQuotaError || e.statusCode === 401) {
                 return errorResponse(
                     "Quota Pappers épuisé. Veuillez recharger vos crédits ou utiliser la saisie manuelle.",
                     402
                 );
             }
-            
-            // Return the error message if available
-            if (error.message) {
-                return errorResponse(error.message, error.statusCode || 500);
+            if (e.message) {
+                return errorResponse(e.message, e.statusCode ?? 500);
             }
         }
-        
         return errorResponse("Erreur lors de la recherche", 500);
     }
 });
