@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getThread, updateThreadStatus } from "@/lib/comms/service";
+import { publishThreadStatusUpdated } from "@/lib/comms/realtime";
 import type { CommsThreadStatus } from "@/lib/comms/types";
 
 interface RouteParams {
@@ -62,6 +63,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
             }
 
             await updateThreadStatus(id, body.status, session.user.id);
+            await publishThreadStatusUpdated(id, body.status);
         }
 
         return NextResponse.json({ success: true });

@@ -52,8 +52,8 @@ export async function GET(req: NextRequest) {
             data: {
                 userId: 'system',
                 action: 'link_clicked',
-                entityType: 'Email',
-                entityId: emailId,
+                resourceType: 'Email',
+                resourceId: emailId,
                 metadata: metadata as any,
             },
         }).catch(console.error);

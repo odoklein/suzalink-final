@@ -40,7 +40,7 @@ interface Callback {
         client: {
             name: string;
         };
-    };
+    } | null;
 }
 
 // ============================================
@@ -81,98 +81,117 @@ export default function SDRCallbacksPage() {
     }
 
     return (
-        <div className="space-y-6 animate-fade-in">
+        <div className="space-y-8 animate-fade-in p-2">
             {/* Header */}
-            <div>
-                <h1 className="text-xl font-bold text-slate-900">Rappels en attente</h1>
-                <p className="text-sm text-slate-500 mt-1">
-                    Contacts intéressés à rappeler
-                </p>
+            <div className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-indigo-900">
+                        Rappels en attente
+                    </h1>
+                    <p className="text-slate-500 mt-2 font-medium">
+                        Gérez vos demandes de rappel et optimisez vos conversions
+                    </p>
+                </div>
+                <div className="hidden md:flex bg-amber-50 text-amber-700 px-4 py-2 rounded-full text-sm font-semibold border border-amber-100 shadow-sm">
+                    {callbacks.length} {callbacks.length > 1 ? "rappels" : "rappel"} à traiter
+                </div>
             </div>
 
             {/* List */}
             {callbacks.length === 0 ? (
-                <Card className="text-center py-12">
-                    <Clock className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-slate-700">Aucun rappel en attente</h3>
-                    <p className="text-slate-500 mt-1">
-                        C'est calme pour le moment. Continuez vos sessions d'appels !
+                <Card className="text-center py-16 border-dashed border-2 bg-slate-50/50">
+                    <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] ring-1 ring-slate-100">
+                        <CheckCircle2 className="w-10 h-10 text-emerald-500" />
+                    </div>
+                    <h3 className="text-xl font-bold text-slate-900">Tout est à jour !</h3>
+                    <p className="text-slate-500 mt-2 max-w-sm mx-auto">
+                        Aucun rappel en attente. C'est le moment idéal pour lancer une nouvelle session de prospection.
                     </p>
-                    <Link href="/sdr/action" className="inline-block mt-4">
-                        <Button variant="primary">
+                    <Link href="/sdr/action" className="inline-block mt-8">
+                        <Button className="bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-700 hover:to-indigo-600 text-white shadow-lg shadow-indigo-200 transaction-all hover:-translate-y-0.5">
                             Démarrer une session
                         </Button>
                     </Link>
                 </Card>
             ) : (
-                <div className="space-y-3">
+                <div className="grid grid-cols-1 gap-4">
                     {callbacks.map((callback) => (
-                        <Card key={callback.id} className="!p-4 hover:border-indigo-300 transition-all">
-                            <div className="flex items-start justify-between gap-4">
-                                <div className="flex items-start gap-3">
-                                    <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center flex-shrink-0">
-                                        <Clock className="w-5 h-5 text-amber-600" />
+                        <div
+                            key={callback.id}
+                            className="group relative bg-white rounded-2xl p-5 border border-slate-200/60 shadow-[0_2px_8px_rgb(0,0,0,0.04)] hover:shadow-[0_12px_24px_rgb(0,0,0,0.08)] hover:border-indigo-200/60 transition-all duration-300 hover:-translate-y-0.5"
+                        >
+                            <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-amber-400 to-orange-400 rounded-l-2xl group-hover:w-2 transition-all duration-300" />
+
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pl-4">
+                                <div className="flex items-start gap-5">
+                                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 flex items-center justify-center flex-shrink-0 border border-amber-100 shadow-inner group-hover:scale-110 transition-transform duration-300">
+                                        <Clock className="w-7 h-7 text-amber-600" />
                                     </div>
-                                    <div>
-                                        <h3 className="font-semibold text-slate-900">
-                                            {callback.contact.firstName} {callback.contact.lastName}
-                                        </h3>
-                                        <div className="flex items-center gap-2 text-sm text-slate-500 mt-0.5">
-                                            <Building2 className="w-3 h-3" />
-                                            <span>{callback.contact.company.name}</span>
+
+                                    <div className="space-y-1">
+                                        <div className="flex items-center gap-3">
+                                            <h3 className="text-lg font-bold text-slate-900 group-hover:text-indigo-900 transition-colors">
+                                                {callback.contact.firstName} {callback.contact.lastName}
+                                            </h3>
+                                            <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
+                                                {new Date(callback.createdAt).toLocaleDateString()}
+                                            </span>
+                                        </div>
+
+                                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
+                                            <div className="flex items-center gap-1.5 font-medium">
+                                                <Building2 className="w-4 h-4 text-slate-400" />
+                                                {callback.contact.company.name}
+                                            </div>
                                             {callback.contact.title && (
-                                                <>
-                                                    <span className="text-slate-300">•</span>
-                                                    <span>{callback.contact.title}</span>
-                                                </>
+                                                <div className="flex items-center gap-1.5 text-slate-500">
+                                                    <span className="w-1 h-1 rounded-full bg-slate-300" />
+                                                    {callback.contact.title}
+                                                </div>
                                             )}
                                         </div>
 
-                                        {/* Context Bubble */}
-                                        <div className="mt-3 p-3 bg-amber-50/50 rounded-lg border border-amber-100/50">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <Badge variant="outline" className="bg-white/50 text-amber-700 text-[10px] h-5 border-amber-200">
-                                                    {callback.mission.client.name}
-                                                </Badge>
-                                                <span className="text-xs text-slate-400">
-                                                    Demandé le {new Date(callback.createdAt).toLocaleDateString()}
-                                                </span>
+                                        {/* Context Badge */}
+                                        {(callback.mission || callback.note) && (
+                                            <div className="flex flex-wrap items-center gap-3 mt-3">
+                                                {callback.mission?.client && (
+                                                    <Badge variant="outline" className="bg-indigo-50/50 text-indigo-700 border-indigo-100 hover:bg-indigo-100 transition-colors">
+                                                        Client: {callback.mission.client.name}
+                                                    </Badge>
+                                                )}
+                                                {callback.note && (
+                                                    <p className="text-sm text-slate-500 italic truncate max-w-md border-l-2 border-slate-200 pl-2">
+                                                        "{callback.note}"
+                                                    </p>
+                                                )}
                                             </div>
-                                            {callback.note && (
-                                                <p className="text-sm text-slate-700 italic">
-                                                    "{callback.note}"
-                                                </p>
-                                            )}
-                                        </div>
+                                        )}
                                     </div>
                                 </div>
 
-                                <div className="flex flex-col gap-2">
-                                    <Link href="/sdr/action">
+                                <div className="flex items-center gap-3 pl-4 md:pl-0 border-t md:border-t-0 border-slate-50 pt-4 md:pt-0">
+                                    {callback.contact.phone && (
+                                        <div className="hidden lg:block text-right mr-2">
+                                            <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">Contact</p>
+                                            <p className="font-mono text-sm text-slate-700">{callback.contact.phone}</p>
+                                        </div>
+                                    )}
+
+                                    <Link href="/sdr/action" className="w-full md:w-auto">
                                         <Button
-                                            size="sm"
-                                            variant="primary"
-                                            className="w-full gap-2"
-                                            // In a real app, we would pass the contact ID to the action page to prioritize it
                                             onClick={() => {
-                                                // We could set a session storage or URL param here if the action page supports it
-                                                // For now just taking them to action page is good
+                                                // Ideally pass context
                                             }}
+                                            className="w-full md:w-auto bg-slate-900 hover:bg-indigo-600 text-white shadow-md hover:shadow-indigo-200 transition-all duration-300 gap-2"
                                         >
                                             <Phone className="w-4 h-4" />
-                                            Rappeler
+                                            <span>Rappeler</span>
+                                            <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 -ml-2 group-hover:ml-0 transition-all" />
                                         </Button>
                                     </Link>
-                                    {callback.contact.phone && (
-                                        <a href={`tel:${callback.contact.phone}`} className="w-full">
-                                            <Button size="sm" variant="ghost" className="w-full text-slate-600">
-                                                {callback.contact.phone}
-                                            </Button>
-                                        </a>
-                                    )}
                                 </div>
                             </div>
-                        </Card>
+                        </div>
                     ))}
                 </div>
             )}

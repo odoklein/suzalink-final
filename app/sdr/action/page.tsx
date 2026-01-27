@@ -22,6 +22,7 @@ import {
     AlertCircle,
 } from "lucide-react";
 import { Card, Badge, Button, LoadingState, EmptyState, Tabs } from "@/components/ui";
+import { BookingModal } from "@/components/sdr/BookingModal";
 import type { ActionResult, Channel } from "@/lib/types";
 import { ACTION_RESULT_LABELS } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -55,6 +56,7 @@ interface NextActionData {
     campaignId?: string;
     channel?: Channel;
     script?: string;
+    clientBookingUrl?: string;
     lastAction?: {
         result: string;
         note?: string;
@@ -117,6 +119,7 @@ export default function SDRActionPage() {
     const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
     const [selectedListId, setSelectedListId] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<string>("intro");
+    const [showBookingModal, setShowBookingModal] = useState(false);
 
     // Load filters
     useEffect(() => {
@@ -467,6 +470,16 @@ export default function SDRActionPage() {
                                     LinkedIn
                                 </a>
                             )}
+                            {currentAction.clientBookingUrl && (
+                                <Button
+                                    variant="primary"
+                                    onClick={() => setShowBookingModal(true)}
+                                    className="w-full gap-2"
+                                >
+                                    <Calendar className="w-4 h-4" />
+                                    Planifier un RDV
+                                </Button>
+                            )}
                         </div>
 
                         {/* Previous Note */}
@@ -584,6 +597,21 @@ export default function SDRActionPage() {
                     <ChevronRight className="w-4 h-4" />
                 </Button>
             </div>
+
+            {/* Booking Modal */}
+            {currentAction?.clientBookingUrl && currentAction.contact && (
+                <BookingModal
+                    isOpen={showBookingModal}
+                    onClose={() => setShowBookingModal(false)}
+                    bookingUrl={currentAction.clientBookingUrl}
+                    contactId={currentAction.contact.id}
+                    contactName={`${currentAction.contact.firstName || ""} ${currentAction.contact.lastName || ""}`.trim() || "Contact"}
+                    onBookingSuccess={() => {
+                        // Reload next action after booking success
+                        loadNextAction();
+                    }}
+                />
+            )}
         </div>
     );
 }

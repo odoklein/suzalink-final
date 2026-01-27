@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { cn } from "@/lib/utils";
+import { useCommsRealtime } from "@/hooks/useCommsRealtime";
+import type { CommsRealtimePayload } from "@/lib/comms/events";
 import {
     MessageSquare,
     Plus,
@@ -21,6 +23,7 @@ import { Button, Input, EmptyState } from "@/components/ui";
 import { ThreadList } from "./ThreadList";
 import { ThreadView } from "./ThreadView";
 import { NewThreadModal } from "./NewThreadModal";
+import { SearchPanel } from "./SearchPanel";
 import type {
     CommsThreadListItem,
     CommsThreadView,
@@ -61,10 +64,19 @@ export function CommsInbox({ className }: CommsInboxProps) {
     const [isSyncing, setIsSyncing] = useState(false);
     const [showNewThreadModal, setShowNewThreadModal] = useState(false);
     const [showFilters, setShowFilters] = useState(false);
+    const [showSearchPanel, setShowSearchPanel] = useState(false);
 
     // Filters
     const [filters, setFilters] = useState<CommsInboxFilters>({});
     const [searchQuery, setSearchQuery] = useState("");
+    const selectedThreadIdRef = useRef<string | null>(null);
+    selectedThreadIdRef.current = selectedThread?.id ?? null;
+
+    // Typing indicators per thread
+    const [typingByThread, setTypingByThread] = useState<Record<string, string>>({});
+    const typingTimeoutRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+
 
     // Fetch threads
     const fetchThreads = useCallback(async (refresh = false) => {
@@ -117,6 +129,56 @@ export function CommsInbox({ className }: CommsInboxProps) {
         }
     }, []);
 
+    // Real-time: refetch on message/thread events; track typing
+    const handleRealtimeEvent = useCallback(
+        (payload: CommsRealtimePayload) => {
+            const tid = payload.threadId;
+            if (payload.type === "typing_start" && tid && payload.userName) {
+                if (typingTimeoutRef.current[tid]) {
+                    clearTimeout(typingTimeoutRef.current[tid]);
+                }
+                setTypingByThread((prev) => ({ ...prev, [tid]: payload.userName! }));
+                typingTimeoutRef.current[tid] = setTimeout(() => {
+                    setTypingByThread((prev) => {
+                        const next = { ...prev };
+                        delete next[tid];
+                        return next;
+                    });
+                    delete typingTimeoutRef.current[tid];
+                }, 5000);
+            } else if (payload.type === "typing_stop" && tid) {
+                setTypingByThread((prev) => {
+                    const next = { ...prev };
+                    delete next[tid];
+                    return next;
+                });
+                if (typingTimeoutRef.current[tid]) {
+                    clearTimeout(typingTimeoutRef.current[tid]);
+                    delete typingTimeoutRef.current[tid];
+                }
+            }
+            if (!tid) return;
+            if (
+                payload.type === "message_created" ||
+                payload.type === "message_updated" ||
+                payload.type === "message_deleted" ||
+                payload.type === "thread_status_updated"
+            ) {
+                fetchThreads(true);
+                fetchStats();
+                if (selectedThreadIdRef.current === tid) {
+                    fetchThreadDetails(tid);
+                }
+            }
+        },
+        [fetchThreads, fetchStats, fetchThreadDetails]
+    );
+
+    useCommsRealtime({
+        enabled: !!session?.user?.id,
+        onEvent: handleRealtimeEvent,
+    });
+
     // Initial load
     useEffect(() => {
         fetchThreads();
@@ -152,14 +214,36 @@ export function CommsInbox({ className }: CommsInboxProps) {
     };
 
     // Handle send message
-    const handleSendMessage = async (content: string) => {
+    const handleSendMessage = async (
+        content: string,
+        opts?: { mentionIds?: string[]; files?: File[] }
+    ) => {
         if (!selectedThread) return;
 
-        await fetch(`/api/comms/threads/${selectedThread.id}/messages`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content }),
-        });
+        const hasFiles = !!opts?.files?.length;
+        if (hasFiles) {
+            const form = new FormData();
+            form.set("content", content);
+            if (opts.mentionIds?.length) {
+                form.set("mentionIds", JSON.stringify(opts.mentionIds));
+            }
+            for (const f of opts.files!) {
+                form.append("files", f);
+            }
+            await fetch(`/api/comms/threads/${selectedThread.id}/messages`, {
+                method: "POST",
+                body: form,
+            });
+        } else {
+            await fetch(`/api/comms/threads/${selectedThread.id}/messages`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    content,
+                    mentionIds: opts?.mentionIds ?? [],
+                }),
+            });
+        }
 
         fetchThreadDetails(selectedThread.id);
         fetchStats();
@@ -232,6 +316,13 @@ export function CommsInbox({ className }: CommsInboxProps) {
                                 title="Synchroniser les emails"
                             >
                                 <RefreshCw className="w-4 h-4" />
+                            </button>
+                            <button
+                                onClick={() => setShowSearchPanel(true)}
+                                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                                title="Recherche avancée"
+                            >
+                                <Search className="w-4 h-4" />
                             </button>
                             <Button
                                 size="sm"
@@ -315,7 +406,9 @@ export function CommsInbox({ className }: CommsInboxProps) {
                         onClose={handleCloseThread}
                         onStatusChange={handleStatusChange}
                         onSendMessage={handleSendMessage}
+                        onReactionToggle={() => selectedThread && fetchThreadDetails(selectedThread.id)}
                         currentUserId={session?.user?.id || ""}
+                        typingUserName={typingByThread[selectedThread.id]}
                     />
                 ) : (
                     <div className="flex-1 flex items-center justify-center">
@@ -340,6 +433,16 @@ export function CommsInbox({ className }: CommsInboxProps) {
                 onClose={() => setShowNewThreadModal(false)}
                 onSubmit={handleCreateThread}
                 userRole={session?.user?.role || ""}
+            />
+
+            {/* Search panel */}
+            <SearchPanel
+                isOpen={showSearchPanel}
+                onClose={() => setShowSearchPanel(false)}
+                onResultClick={(threadId, messageId) => {
+                    fetchThreadDetails(threadId);
+                    setShowSearchPanel(false);
+                }}
             />
         </div >
     );

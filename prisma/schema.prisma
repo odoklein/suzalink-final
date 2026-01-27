@@ -275,6 +275,9 @@ model User {
   commsMessages           CommsMessage[]          @relation("CommsMessageAuthor")
   commsMentions           CommsMention[]          @relation("CommsMentionedUser")
   commsBroadcastReceipts  CommsBroadcastReceipt[] @relation("CommsBroadcastReader")
+  commsMessageReadReceipts CommsMessageReadReceipt[] @relation("CommsMessageReader")
+  commsMessageReactions   CommsMessageReaction[]    @relation("CommsMessageReactor")
+  commsSavedSearches      CommsSavedSearch[]
   
   // Billing Module
   createdInvoices         Invoice[]               @relation("InvoiceCreator")
@@ -356,6 +359,7 @@ model Client {
   phone         String?
   industry      String?
   logo          String?
+  bookingUrl    String?   // URL for booking tools (Calendly, etc.)
   users         User[]
   missions      Mission[]
   folders       Folder[]
@@ -1546,12 +1550,18 @@ model CommsMessage {
   authorId        String
   author          User              @relation("CommsMessageAuthor", fields: [authorId], references: [id])
   
+  parentMessageId String?
+  parentMessage   CommsMessage?     @relation("MessageReplies", fields: [parentMessageId], references: [id], onDelete: SetNull)
+  replies         CommsMessage[]    @relation("MessageReplies")
+  
   type            CommsMessageType  @default(TEXT)
   content         String            @db.Text
   
   // Rich content
   attachments     CommsAttachment[]
   mentions        CommsMention[]
+  readReceipts    CommsMessageReadReceipt[]
+  reactions       CommsMessageReaction[]
   
   // Edit tracking
   isEdited        Boolean           @default(false)
@@ -1565,6 +1575,7 @@ model CommsMessage {
   
   @@index([threadId])
   @@index([authorId])
+  @@index([parentMessageId])
   @@index([createdAt])
   @@index([isDeleted])
 }
@@ -1603,6 +1614,32 @@ model CommsAttachment {
   @@index([messageId])
 }
 
+model CommsMessageReadReceipt {
+  id          String      @id @default(cuid())
+  messageId   String
+  message     CommsMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User        @relation("CommsMessageReader", fields: [userId], references: [id], onDelete: Cascade)
+  readAt      DateTime    @default(now())
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
+}
+
+model CommsMessageReaction {
+  id        String        @id @default(cuid())
+  messageId String
+  message   CommsMessage  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User          @relation("CommsMessageReactor", fields: [userId], references: [id], onDelete: Cascade)
+  emoji     String
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+  @@index([userId])
+}
+
 model CommsBroadcastReceipt {
   id              String      @id @default(cuid())
   threadId        String
@@ -1615,6 +1652,37 @@ model CommsBroadcastReceipt {
   @@unique([threadId, userId])
   @@index([threadId])
   @@index([userId])
+}
+
+model CommsSavedSearch {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  query     String
+  filters   Json?    // { channelType?, authorId?, fromDate?, toDate?, status? }
+  
+  createdAt DateTime @default(now())
+  
+  @@index([userId])
+}
+
+model CommsMessageTemplate {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  category    String?  // "greeting", "follow_up", "closing", "custom"
+  content     String   @db.Text
+  variables   String[] @default([]) // ["{{client_name}}", "{{mission_name}}"]
+  isShared    Boolean  @default(false) // If true, visible to all users
+  usageCount  Int      @default(0)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId])
+  @@index([isShared])
+  @@index([category])
 }
 
 // ============================================

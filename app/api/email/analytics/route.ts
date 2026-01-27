@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
+import { Prisma } from '@prisma/client';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 
@@ -42,7 +43,7 @@ export async function GET(req: NextRequest) {
             mailboxIds = [mailboxId];
         } else {
             // Get accessible mailboxes
-            const whereClause: Parameters<typeof prisma.mailbox.findMany>[0]['where'] = {
+            const whereClause: Prisma.MailboxWhereInput = {
                 isActive: true,
             };
 

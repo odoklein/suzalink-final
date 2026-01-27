@@ -53,6 +53,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         campaign_script: string | null;
         mission_name: string;
         mission_channel: string;
+        client_id: string;
         last_action_result: string | null;
         last_action_note: string | null;
         last_action_created: Date | null;
@@ -78,11 +79,13 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                 camp.id as campaign_id,
                 camp.script as campaign_script,
                 m.name as mission_name,
-                m.channel as mission_channel
+                m.channel as mission_channel,
+                cl.id as client_id
             FROM "Contact" c
             INNER JOIN "Company" co ON c."companyId" = co.id
             INNER JOIN "List" l ON co."listId" = l.id
             INNER JOIN "Mission" m ON l."missionId" = m.id
+            INNER JOIN "Client" cl ON m."clientId" = cl.id
             INNER JOIN "Campaign" camp ON camp."missionId" = m.id
             INNER JOIN "SDRAssignment" sa ON sa."missionId" = m.id
             WHERE sa."sdrId" = $1
@@ -172,6 +175,19 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 
     const next = result[0];
 
+    // Fetch client bookingUrl separately (handles case where column doesn't exist yet)
+    let clientBookingUrl: string | undefined = undefined;
+    try {
+        const client = await prisma.client.findUnique({
+            where: { id: next.client_id },
+            select: { bookingUrl: true },
+        });
+        clientBookingUrl = client?.bookingUrl || undefined;
+    } catch (err) {
+        // Column might not exist yet, ignore
+        console.warn('Could not fetch client bookingUrl:', err);
+    }
+
     return successResponse({
         hasNext: true,
         priority: next.priority_label,
@@ -196,6 +212,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         campaignId: next.campaign_id,
         channel: next.mission_channel,
         script: next.campaign_script,
+        clientBookingUrl,
         lastAction: next.last_action_result ? {
             result: next.last_action_result,
             note: next.last_action_note,

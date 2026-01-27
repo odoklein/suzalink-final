@@ -19,6 +19,7 @@ const updateClientSchema = z.object({
     industry: z.string().optional(),
     email: z.string().email().optional().or(z.literal('')),
     phone: z.string().optional(),
+    bookingUrl: z.string().url().optional().or(z.literal('')),
 });
 
 // ============================================
@@ -91,6 +92,7 @@ export const PUT = withErrorHandler(async (
         email: data.email || undefined,
         phone: data.phone || undefined,
         industry: data.industry || undefined,
+        bookingUrl: data.bookingUrl || undefined,
     };
 
     const client = await prisma.client.update({

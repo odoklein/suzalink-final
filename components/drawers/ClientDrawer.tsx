@@ -15,6 +15,8 @@ import {
     Users,
     Calendar,
     TrendingUp,
+    Link as LinkIcon,
+    ExternalLink,
 } from "lucide-react";
 
 // ============================================
@@ -59,6 +61,7 @@ export function ClientDrawer({
         industry: "",
         email: "",
         phone: "",
+        bookingUrl: "",
     });
 
     // Reset form when client changes
@@ -69,6 +72,7 @@ export function ClientDrawer({
                 industry: client.industry || "",
                 email: client.email || "",
                 phone: client.phone || "",
+                bookingUrl: (client as any).bookingUrl || "",
             });
             setIsEditing(false);
         }
@@ -236,6 +240,19 @@ export function ClientDrawer({
                                 onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                                 icon={<Phone className="w-4 h-4 text-slate-400" />}
                             />
+                            <div>
+                                <Input
+                                    label="URL de réservation (Calendly, etc.)"
+                                    type="url"
+                                    value={formData.bookingUrl}
+                                    onChange={(e) => setFormData(prev => ({ ...prev, bookingUrl: e.target.value }))}
+                                    icon={<LinkIcon className="w-4 h-4 text-slate-400" />}
+                                    placeholder="https://calendly.com/client-name"
+                                />
+                                <p className="text-xs text-slate-500 mt-1">
+                                    Les SDRs pourront utiliser cette URL pour planifier des rendez-vous lors des appels
+                                </p>
+                            </div>
                         </div>
                     ) : (
                         <div className="space-y-4">
@@ -293,6 +310,31 @@ export function ClientDrawer({
                                 value={new Date(client.createdAt).toLocaleDateString("fr-FR")}
                                 icon={<Calendar className="w-5 h-5 text-indigo-500" />}
                             />
+                            {(client as any).bookingUrl && (
+                                <DrawerField
+                                    label="URL de réservation"
+                                    value={
+                                        <div className="flex items-center gap-2">
+                                            <a
+                                                href={(client as any).bookingUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-indigo-600 hover:underline flex items-center gap-1"
+                                            >
+                                                {(client as any).bookingUrl}
+                                                <ExternalLink className="w-3.5 h-3.5" />
+                                            </a>
+                                            <button
+                                                onClick={() => copyToClipboard((client as any).bookingUrl, "URL de réservation")}
+                                                className="text-slate-400 hover:text-slate-600"
+                                            >
+                                                <Copy className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    }
+                                    icon={<LinkIcon className="w-5 h-5 text-indigo-500" />}
+                                />
+                            )}
                         </div>
                     )}
                 </DrawerSection>

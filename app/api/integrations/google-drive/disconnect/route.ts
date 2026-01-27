@@ -21,7 +21,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
             where: { id: session.user.id },
             data: {
                 googleDriveConnected: false,
-                googleDriveTokens: null,
+                googleDriveTokens: undefined,
                 googleDriveEmail: null,
             },
         });

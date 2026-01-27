@@ -5,6 +5,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { createNotification } from "@/lib/notifications";
+import { storageService } from "@/lib/storage/storage-service";
 import type { UserRole, Prisma } from "@prisma/client";
 import type {
     CommsChannelType,
@@ -137,8 +138,173 @@ export async function createThread(
 
     // Determine participants
     let participantIds: string[] = [creatorId];
+
     if (request.channelType === "DIRECT" && request.participantIds) {
         participantIds = [...participantIds, ...request.participantIds];
+    } else if (request.channelType === "MISSION" && request.anchorId) {
+        // Auto-add participants for mission threads:
+        // - All SDRs assigned to the mission
+        // - All Managers
+        // - All BDs who have the client in their portfolio
+        // - All Client users for that client
+        const mission = await prisma.mission.findUnique({
+            where: { id: request.anchorId },
+            include: {
+                sdrAssignments: {
+                    select: { sdrId: true },
+                },
+                client: {
+                    include: {
+                        bdAssignments: {
+                            where: { isActive: true },
+                            select: { bdUserId: true },
+                        },
+                        users: {
+                            where: { role: "CLIENT", isActive: true },
+                            select: { id: true },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (mission) {
+            const sdrIds = mission.sdrAssignments.map((a) => a.sdrId);
+            const bdIds = mission.client.bdAssignments.map((a) => a.bdUserId);
+            const clientUserIds = mission.client.users.map((u) => u.id);
+
+            // Get all managers
+            const managers = await prisma.user.findMany({
+                where: { role: "MANAGER", isActive: true },
+                select: { id: true },
+            });
+            const managerIds = managers.map((m) => m.id);
+
+            // Combine all participant IDs (remove duplicates)
+            participantIds = [
+                ...new Set([
+                    creatorId,
+                    ...sdrIds,
+                    ...bdIds,
+                    ...clientUserIds,
+                    ...managerIds,
+                ]),
+            ];
+        }
+    } else if (request.channelType === "CLIENT" && request.anchorId) {
+        // Auto-add participants for client threads:
+        // - All Managers
+        // - All BDs who have the client in their portfolio
+        // - All Client users for that client
+        const client = await prisma.client.findUnique({
+            where: { id: request.anchorId },
+            include: {
+                bdAssignments: {
+                    where: { isActive: true },
+                    select: { bdUserId: true },
+                },
+                users: {
+                    where: { role: "CLIENT", isActive: true },
+                    select: { id: true },
+                },
+            },
+        });
+
+        if (client) {
+            const bdIds = client.bdAssignments.map((a) => a.bdUserId);
+            const clientUserIds = client.users.map((u) => u.id);
+
+            // Get all managers
+            const managers = await prisma.user.findMany({
+                where: { role: "MANAGER", isActive: true },
+                select: { id: true },
+            });
+            const managerIds = managers.map((m) => m.id);
+
+            // Combine all participant IDs (remove duplicates)
+            participantIds = [
+                ...new Set([
+                    creatorId,
+                    ...bdIds,
+                    ...clientUserIds,
+                    ...managerIds,
+                ]),
+            ];
+        }
+    } else if (request.channelType === "CAMPAIGN" && request.anchorId) {
+        // Auto-add participants for campaign threads:
+        // - All SDRs assigned to the parent mission
+        // - All Managers
+        // - All BDs who have the client in their portfolio
+        const campaign = await prisma.campaign.findUnique({
+            where: { id: request.anchorId },
+            include: {
+                mission: {
+                    include: {
+                        sdrAssignments: {
+                            select: { sdrId: true },
+                        },
+                        client: {
+                            include: {
+                                bdAssignments: {
+                                    where: { isActive: true },
+                                    select: { bdUserId: true },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (campaign?.mission) {
+            const sdrIds = campaign.mission.sdrAssignments.map((a) => a.sdrId);
+            const bdIds = campaign.mission.client.bdAssignments.map((a) => a.bdUserId);
+
+            // Get all managers
+            const managers = await prisma.user.findMany({
+                where: { role: "MANAGER", isActive: true },
+                select: { id: true },
+            });
+            const managerIds = managers.map((m) => m.id);
+
+            // Combine all participant IDs (remove duplicates)
+            participantIds = [
+                ...new Set([
+                    creatorId,
+                    ...sdrIds,
+                    ...bdIds,
+                    ...managerIds,
+                ]),
+            ];
+        }
+    } else if (request.channelType === "GROUP" && request.anchorId) {
+        // Auto-add all group members
+        const group = await prisma.commsGroup.findUnique({
+            where: { id: request.anchorId },
+            include: {
+                members: {
+                    select: { userId: true },
+                },
+            },
+        });
+
+        if (group) {
+            const memberIds = group.members.map((m) => m.userId);
+            participantIds = [
+                ...new Set([
+                    creatorId,
+                    ...memberIds,
+                ]),
+            ];
+        }
+    } else if (request.channelType === "BROADCAST") {
+        // For broadcasts, add all active users (or filter by audience if specified)
+        const allUsers = await prisma.user.findMany({
+            where: { isActive: true },
+            select: { id: true },
+        });
+        participantIds = allUsers.map((u) => u.id);
     }
 
     // Create thread with initial message in a transaction
@@ -182,7 +348,8 @@ export async function createThread(
     // Send notifications to participants (except creator)
     const otherParticipants = participantIds.filter((id) => id !== creatorId);
     for (const userId of otherParticipants) {
-        await createNotification(userId, {
+        await createNotification({
+            userId,
             title: request.isBroadcast ? "Nouvelle annonce" : "Nouvelle discussion",
             message: `${request.subject}`,
             type: "info",
@@ -239,7 +406,14 @@ export async function getInboxThreads(
         prisma.commsThread.findMany({
             where: baseWhere,
             include: {
-                channel: true,
+                channel: {
+                    include: {
+                        mission: { select: { id: true, name: true } },
+                        client: { select: { id: true, name: true } },
+                        campaign: { select: { id: true, name: true } },
+                        group: { select: { id: true, name: true } },
+                    },
+                },
                 createdBy: { select: { id: true, name: true } },
                 participants: {
                     where: { userId },
@@ -262,11 +436,11 @@ export async function getInboxThreads(
     ]);
 
     return {
-        threads: threads.map((thread) => ({
+        threads: await Promise.all(threads.map(async (thread) => ({
             id: thread.id,
             channelId: thread.channelId,
             channelType: thread.channel.type as CommsChannelType,
-            channelName: getChannelName(thread.channel),
+            channelName: await getChannelName(thread.channel),
             subject: thread.subject,
             status: thread.status as CommsThreadStatus,
             isBroadcast: thread.isBroadcast,
@@ -279,14 +453,14 @@ export async function getInboxThreads(
             unreadCount: thread.participants[0]?.unreadCount || 0,
             lastMessage: thread.messages[0]
                 ? {
-                      content: truncateContent(thread.messages[0].content, 100),
-                      authorName: thread.messages[0].author.name,
-                      createdAt: thread.messages[0].createdAt.toISOString(),
-                  }
+                    content: truncateContent(thread.messages[0].content, 100),
+                    authorName: thread.messages[0].author.name,
+                    createdAt: thread.messages[0].createdAt.toISOString(),
+                }
                 : undefined,
             createdAt: thread.createdAt.toISOString(),
             updatedAt: thread.updatedAt.toISOString(),
-        })),
+        }))),
         total,
     };
 }
@@ -304,7 +478,14 @@ export async function getThread(
             participants: { some: { userId } },
         },
         include: {
-            channel: true,
+            channel: {
+                include: {
+                    mission: { select: { id: true, name: true } },
+                    client: { select: { id: true, name: true } },
+                    campaign: { select: { id: true, name: true } },
+                    group: { select: { id: true, name: true } },
+                },
+            },
             createdBy: { select: { id: true, name: true } },
             participants: {
                 include: {
@@ -322,6 +503,12 @@ export async function getThread(
                         },
                     },
                     attachments: true,
+                    readReceipts: {
+                        include: {
+                            user: { select: { id: true, name: true } },
+                        },
+                    },
+                    reactions: true,
                 },
             },
         },
@@ -340,11 +527,24 @@ export async function getThread(
         },
     });
 
+    // Upsert read receipts for current user for all messages
+    try {
+        await prisma.commsMessageReadReceipt.createMany({
+            data: thread.messages.map((m) => ({
+                messageId: m.id,
+                userId,
+            })),
+            skipDuplicates: true,
+        });
+    } catch {
+        /* table may not exist yet if migration not applied */
+    }
+
     return {
         id: thread.id,
         channelId: thread.channelId,
         channelType: thread.channel.type as CommsChannelType,
-        channelName: getChannelName(thread.channel),
+        channelName: await getChannelName(thread.channel),
         subject: thread.subject,
         status: thread.status as CommsThreadStatus,
         isBroadcast: thread.isBroadcast,
@@ -389,6 +589,17 @@ export async function getThread(
                 size: a.size,
                 url: a.url || undefined,
             })),
+            readBy: (m as { readReceipts?: { user: { id: string; name: string }; readAt: Date }[] }).readReceipts
+                ?.filter((r) => r.user.id !== m.authorId)
+                .map((r) => ({
+                    userId: r.user.id,
+                    userName: r.user.name,
+                    readAt: (r.readAt as Date).toISOString(),
+                })),
+            reactions: aggregateReactions(
+                (m as { reactions?: { emoji: string; userId: string }[] }).reactions ?? [],
+                userId
+            ),
             isEdited: m.isEdited,
             isDeleted: m.isDeleted,
             isOwnMessage: m.authorId === userId,
@@ -513,7 +724,8 @@ export async function addMessage(
 
     if (thread) {
         for (const p of thread.participants) {
-            await createNotification(p.userId, {
+            await createNotification({
+                userId: p.userId,
                 title: "Nouveau message",
                 message: `${thread.subject}: ${truncateContent(request.content, 50)}`,
                 type: "info",
@@ -525,7 +737,8 @@ export async function addMessage(
     // Notify mentioned users
     if (request.mentionIds) {
         for (const mentionedUserId of request.mentionIds) {
-            await createNotification(mentionedUserId, {
+            await createNotification({
+                userId: mentionedUserId,
                 title: "Vous avez été mentionné",
                 message: `Dans: ${thread?.subject}`,
                 type: "info",
@@ -535,6 +748,100 @@ export async function addMessage(
     }
 
     return message.id;
+}
+
+const COMMS_ATTACHMENT_ALLOWED_TYPES = [
+    "image/*",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/plain",
+    "text/csv",
+];
+const COMMS_ATTACHMENT_MAX_SIZE = 15 * 1024 * 1024; // 15MB
+
+/**
+ * Add attachments to an existing message. Uploads to storage and creates CommsAttachment records.
+ */
+export async function addAttachmentsToMessage(
+    messageId: string,
+    files: { buffer: Buffer; filename: string; mimeType: string; size: number }[],
+    userId: string
+): Promise<void> {
+    if (files.length === 0) return;
+    for (const f of files) {
+        if (f.size > COMMS_ATTACHMENT_MAX_SIZE) {
+            throw new Error(`Fichier trop volumineux: ${f.filename} (max 15 Mo)`);
+        }
+        if (!storageService.isAllowedType(f.mimeType, COMMS_ATTACHMENT_ALLOWED_TYPES)) {
+            throw new Error(`Type non autorisé: ${f.filename}`);
+        }
+    }
+    const folder = "comms";
+    for (const f of files) {
+        const { key, url } = await storageService.upload(
+            f.buffer,
+            { filename: f.filename, mimeType: f.mimeType, size: f.size, folder },
+            userId
+        );
+        await prisma.commsAttachment.create({
+            data: {
+                messageId,
+                filename: f.filename,
+                mimeType: f.mimeType,
+                size: f.size,
+                storageKey: key,
+                url,
+            },
+        });
+    }
+}
+
+/**
+ * Toggle a reaction on a message. If user already reacted with this emoji, remove it; otherwise add it.
+ */
+export async function addOrRemoveReaction(
+    messageId: string,
+    userId: string,
+    emoji: string
+): Promise<"added" | "removed"> {
+    const message = await prisma.commsMessage.findUnique({
+        where: { id: messageId },
+        select: { threadId: true },
+    });
+    if (!message) throw new Error("Message not found");
+
+    const participant = await prisma.commsParticipant.findUnique({
+        where: {
+            threadId_userId: { threadId: message.threadId, userId },
+        },
+    });
+    if (!participant) throw new Error("Not a participant");
+
+    const allowed = ["👍", "❤️", "😂", "🎉", "👀", "🔥"];
+    if (!allowed.includes(emoji)) throw new Error("Invalid emoji");
+
+    const existing = await prisma.commsMessageReaction.findUnique({
+        where: {
+            messageId_userId_emoji: { messageId, userId, emoji },
+        },
+    });
+
+    if (existing) {
+        await prisma.commsMessageReaction.delete({
+            where: { id: existing.id },
+        });
+        return "removed";
+    }
+
+    await prisma.commsMessageReaction.create({
+        data: { messageId, userId, emoji },
+    });
+    return "added";
 }
 
 /**
@@ -899,29 +1206,70 @@ export async function canAccessChannel(
 // UTILITY FUNCTIONS
 // ============================================
 
-function getChannelName(channel: {
+async function getChannelName(channel: {
     type: string;
     name?: string | null;
     missionId?: string | null;
     clientId?: string | null;
     campaignId?: string | null;
-}): string {
+    groupId?: string | null;
+    mission?: { name: string } | null;
+    client?: { name: string } | null;
+    campaign?: { name: string } | null;
+    group?: { name: string } | null;
+}): Promise<string> {
     if (channel.name) return channel.name;
-    
-    // Return a placeholder - in real usage, we'd join to get the actual name
+
+    // Use included relations if available
     switch (channel.type) {
         case "MISSION":
+            if (channel.mission) return channel.mission.name;
+            // Fallback: fetch if not included
+            if (channel.missionId) {
+                const mission = await prisma.mission.findUnique({
+                    where: { id: channel.missionId },
+                    select: { name: true },
+                });
+                return mission?.name || "Mission";
+            }
             return "Mission";
         case "CLIENT":
+            if (channel.client) return channel.client.name;
+            // Fallback: fetch if not included
+            if (channel.clientId) {
+                const client = await prisma.client.findUnique({
+                    where: { id: channel.clientId },
+                    select: { name: true },
+                });
+                return client?.name || "Client";
+            }
             return "Client";
         case "CAMPAIGN":
+            if (channel.campaign) return channel.campaign.name;
+            // Fallback: fetch if not included
+            if (channel.campaignId) {
+                const campaign = await prisma.campaign.findUnique({
+                    where: { id: channel.campaignId },
+                    select: { name: true },
+                });
+                return campaign?.name || "Campagne";
+            }
             return "Campagne";
+        case "GROUP":
+            if (channel.group) return channel.group.name;
+            // Fallback: fetch if not included
+            if (channel.groupId) {
+                const group = await prisma.commsGroup.findUnique({
+                    where: { id: channel.groupId },
+                    select: { name: true },
+                });
+                return group?.name || "Groupe";
+            }
+            return "Groupe";
         case "DIRECT":
             return "Message direct";
         case "BROADCAST":
             return "Annonces";
-        case "GROUP":
-            return "Groupe";
         default:
             return "Discussion";
     }
@@ -939,4 +1287,21 @@ function getInitials(name: string): string {
         .join("")
         .toUpperCase()
         .substring(0, 2);
+}
+
+function aggregateReactions(
+    reactions: { emoji: string; userId: string }[],
+    currentUserId: string
+): { emoji: string; count: number; userIds: string[] }[] {
+    const byEmoji = new Map<string, string[]>();
+    for (const r of reactions) {
+        const arr = byEmoji.get(r.emoji) ?? [];
+        if (!arr.includes(r.userId)) arr.push(r.userId);
+        byEmoji.set(r.emoji, arr);
+    }
+    return Array.from(byEmoji.entries()).map(([emoji, userIds]) => ({
+        emoji,
+        count: userIds.length,
+        userIds,
+    }));
 }

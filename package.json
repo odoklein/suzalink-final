@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "db:reset": "tsx prisma/reset.ts",
-    "db:verify": "tsx prisma/verify-reset.ts"
+    "db:verify": "tsx prisma/verify-reset.ts",
+    "worker:enrichment": "tsx workers/enrichment.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.968.0",
@@ -37,7 +38,9 @@
     "react-dom": "19.2.3",
     "react-dropzone": "^14.3.8",
     "react-hook-form": "^7.71.0",
+    "react-markdown": "^10.1.0",
     "recharts": "^3.6.0",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.4.0",
     "zod": "^4.3.5"
   },

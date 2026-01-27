@@ -4,6 +4,7 @@ import {
     successResponse,
     errorResponse,
     requireRole,
+    requireAuth,
     withErrorHandler,
     validateRequest,
     getPaginationParams,
@@ -16,7 +17,8 @@ import bcrypt from 'bcryptjs';
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(['MANAGER']);
+    // Allow all authenticated users to search (needed for direct messages)
+    const session = await requireAuth();
     const { searchParams } = new URL(request.url);
     const { page, limit, skip } = getPaginationParams(searchParams);
 
@@ -46,6 +48,9 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
             { email: { contains: search, mode: 'insensitive' } },
         ];
     }
+
+    // Exclude current user from search results (can't message yourself)
+    where.id = { not: session.user.id };
 
     const [users, total] = await Promise.all([
         prisma.user.findMany({

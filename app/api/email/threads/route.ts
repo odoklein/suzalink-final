@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) {
         }
 
         // Build where clause
-        const where: Parameters<typeof prisma.emailThread.findMany>[0]['where'] = {
+        const where: any = {
             mailboxId: { in: mailboxIds },
         };
 

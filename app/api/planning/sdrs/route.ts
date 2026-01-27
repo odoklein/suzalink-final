@@ -17,9 +17,9 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     const roleFilter = searchParams.get('role'); // Optional filter: SDR, BUSINESS_DEVELOPER, or null for all
 
     // Build role filter
-    const roleCondition: { role: { in: string[] } } | { role: string } = roleFilter
-        ? { role: roleFilter }
-        : { role: { in: ['SDR', 'BUSINESS_DEVELOPER'] } };
+    const roleCondition = roleFilter
+        ? { role: roleFilter as any }
+        : { role: { in: ['SDR', 'BUSINESS_DEVELOPER'] as any } };
 
     // Get all SDRs and BDs with their mission assignments
     const teamMembers = await prisma.user.findMany({

@@ -68,31 +68,6 @@ export const GET = withErrorHandler(async (
                     name: true,
                 },
             },
-            sharedWith: {
-                include: {
-                    user: {
-                        select: {
-                            id: true,
-                            name: true,
-                            email: true,
-                        },
-                    },
-                },
-            },
-            versions: {
-                select: {
-                    id: true,
-                    version: true,
-                    createdAt: true,
-                    uploadedBy: {
-                        select: {
-                            id: true,
-                            name: true,
-                        },
-                    },
-                },
-                orderBy: { version: 'desc' },
-            },
         },
     });
 

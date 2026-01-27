@@ -86,19 +86,19 @@ export function Modal({
 
     return (
         <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
             onClick={handleOverlayClick}
         >
             {/* Overlay */}
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in" />
+            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[4px] animate-fade-in transition-all duration-300" />
 
             {/* Modal */}
             <div
                 ref={modalRef}
                 tabIndex={-1}
                 className={cn(
-                    "relative w-full bg-white border border-slate-200 rounded-2xl shadow-2xl",
-                    "animate-scale-in",
+                    "relative w-full bg-white/95 backdrop-blur-xl supports-[backdrop-filter]:bg-white/80 border border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.12)] rounded-3xl overflow-hidden flex flex-col",
+                    "transform transition-all duration-300 ease-out animate-scale-in max-h-[85vh]",
                     SIZES[size],
                     className
                 )}
@@ -106,15 +106,15 @@ export function Modal({
             >
                 {/* Header */}
                 {(title || showCloseButton) && (
-                    <div className="flex items-start justify-between p-6 pb-0">
-                        <div>
+                    <div className="flex-shrink-0 flex items-start justify-between px-6 py-5 border-b border-slate-100/50 bg-gradient-to-b from-white/50 to-transparent">
+                        <div className="pr-8">
                             {title && (
-                                <h2 className="text-xl font-semibold text-slate-900">
+                                <h2 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-700">
                                     {title}
                                 </h2>
                             )}
                             {description && (
-                                <p className="text-sm text-slate-500 mt-1">
+                                <p className="text-sm text-slate-500 mt-1.5 font-medium">
                                     {description}
                                 </p>
                             )}
@@ -122,7 +122,7 @@ export function Modal({
                         {showCloseButton && (
                             <button
                                 onClick={onClose}
-                                className="p-2 -m-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                                className="absolute right-4 top-4 p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100/80 rounded-full transition-all duration-200 hover:rotate-90 z-10"
                             >
                                 <X className="w-5 h-5" />
                             </button>
@@ -131,7 +131,7 @@ export function Modal({
                 )}
 
                 {/* Content */}
-                <div className="p-6">{children}</div>
+                <div className="p-6 md:p-8 overflow-y-auto custom-scrollbar flex-1">{children}</div>
             </div>
         </div>
     );

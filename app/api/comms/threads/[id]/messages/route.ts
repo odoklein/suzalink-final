@@ -6,14 +6,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { addMessage, editMessage, deleteMessage } from "@/lib/comms/service";
+import { prisma } from "@/lib/prisma";
+import { addMessage, addAttachmentsToMessage, editMessage, deleteMessage } from "@/lib/comms/service";
+import {
+    publishMessageCreated,
+    publishMessageUpdated,
+    publishMessageDeleted,
+} from "@/lib/comms/realtime";
 import type { CreateMessageRequest } from "@/lib/comms/types";
 
 interface RouteParams {
     params: Promise<{ id: string }>;
 }
 
-// POST /api/comms/threads/[id]/messages - Add a message
+// POST /api/comms/threads/[id]/messages - Add a message (JSON or FormData with files)
 export async function POST(request: NextRequest, { params }: RouteParams) {
     try {
         const session = await getServerSession(authOptions);
@@ -22,23 +28,74 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         }
 
         const { id: threadId } = await params;
-        const body = await request.json();
+        const contentType = request.headers.get("content-type") ?? "";
+        let content: string;
+        let mentionIds: string[] | undefined;
+        let files: File[] = [];
 
-        if (!body.content || body.content.trim().length === 0) {
+        if (contentType.includes("multipart/form-data")) {
+            const form = await request.formData();
+            const c = form.get("content");
+            content = typeof c === "string" ? c.trim() : "";
+            const m = form.get("mentionIds");
+            if (typeof m === "string" && m) {
+                try {
+                    mentionIds = JSON.parse(m) as string[];
+                } catch {
+                    mentionIds = undefined;
+                }
+            }
+            const fs = form.getAll("files").filter((f): f is File => f instanceof File);
+            files = fs;
+        } else {
+            const body = await request.json();
+            content = body.content?.trim() ?? "";
+            mentionIds = body.mentionIds;
+        }
+
+        if (!content && files.length === 0) {
             return NextResponse.json(
-                { error: "Le contenu du message est requis" },
+                { error: "Le contenu du message ou au moins un fichier est requis" },
                 { status: 400 }
             );
+        }
+        if (!content) {
+            content = "[Pièces jointes]";
         }
 
         const messageRequest: CreateMessageRequest = {
             threadId,
-            content: body.content.trim(),
-            mentionIds: body.mentionIds,
-            attachmentIds: body.attachmentIds,
+            content,
+            mentionIds,
         };
 
         const messageId = await addMessage(messageRequest, session.user.id);
+
+        if (files.length > 0) {
+            const bufs = await Promise.all(
+                files.map(async (f) => ({
+                    buffer: Buffer.from(await f.arrayBuffer()),
+                    filename: f.name,
+                    mimeType: f.type || "application/octet-stream",
+                    size: f.size,
+                }))
+            );
+            await addAttachmentsToMessage(messageId, bufs, session.user.id);
+        }
+
+        const msg = await prisma.commsMessage.findUnique({
+            where: { id: messageId },
+            select: { createdAt: true },
+        });
+        if (msg) {
+            await publishMessageCreated(
+                threadId,
+                messageId,
+                session.user.id,
+                content,
+                msg.createdAt.toISOString()
+            );
+        }
 
         return NextResponse.json({ id: messageId }, { status: 201 });
     } catch (error) {
@@ -67,7 +124,20 @@ export async function PATCH(request: NextRequest) {
             );
         }
 
+        const existing = await prisma.commsMessage.findUnique({
+            where: { id: body.messageId },
+            select: { threadId: true },
+        });
+        if (!existing) {
+            return NextResponse.json({ error: "Message non trouvé" }, { status: 404 });
+        }
+
         await editMessage(body.messageId, body.content.trim(), session.user.id);
+        await publishMessageUpdated(
+            existing.threadId,
+            body.messageId,
+            body.content.trim()
+        );
 
         return NextResponse.json({ success: true });
     } catch (error) {
@@ -96,8 +166,17 @@ export async function DELETE(request: NextRequest) {
             );
         }
 
+        const existing = await prisma.commsMessage.findUnique({
+            where: { id: body.messageId },
+            select: { threadId: true },
+        });
+        if (!existing) {
+            return NextResponse.json({ error: "Message non trouvé" }, { status: 404 });
+        }
+
         const isManager = session.user.role === "MANAGER";
         await deleteMessage(body.messageId, session.user.id, isManager);
+        await publishMessageDeleted(existing.threadId, body.messageId);
 
         return NextResponse.json({ success: true });
     } catch (error) {

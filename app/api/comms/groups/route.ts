@@ -10,16 +10,30 @@ import { getUserGroups, createGroup } from "@/lib/comms/service";
 import type { CreateGroupRequest } from "@/lib/comms/types";
 
 // GET /api/comms/groups - List user's groups
-export async function GET() {
+export async function GET(request: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
         if (!session?.user?.id) {
             return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
         }
 
+        const { searchParams } = new URL(request.url);
+        const search = searchParams.get("search");
+
         const groups = await getUserGroups(session.user.id);
 
-        return NextResponse.json({ groups });
+        // Filter by search if provided
+        let filteredGroups = groups;
+        if (search) {
+            const searchLower = search.toLowerCase();
+            filteredGroups = groups.filter(
+                (g) =>
+                    g.name.toLowerCase().includes(searchLower) ||
+                    g.description?.toLowerCase().includes(searchLower)
+            );
+        }
+
+        return NextResponse.json({ groups: filteredGroups });
     } catch (error) {
         console.error("Error fetching groups:", error);
         return NextResponse.json(

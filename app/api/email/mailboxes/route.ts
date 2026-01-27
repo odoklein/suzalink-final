@@ -31,14 +31,11 @@ export async function GET(req: NextRequest) {
         const type = searchParams.get('type') as MailboxType | null;
 
         // Get owned mailboxes
-        const whereClause: Parameters<typeof prisma.mailbox.findMany>[0]['where'] = {
+        const whereClause = {
             ownerId: session.user.id,
             isActive: true,
+            ...(type && { type }),
         };
-
-        if (type) {
-            whereClause.type = type;
-        }
 
         const ownedMailboxes = await prisma.mailbox.findMany({
             where: whereClause,

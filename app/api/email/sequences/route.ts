@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
         const campaignId = searchParams.get('campaignId');
 
         // Build where clause
-        const where: Parameters<typeof prisma.emailSequence.findMany>[0]['where'] = {
+        const where: any = {
             createdById: session.user.id,
         };
 

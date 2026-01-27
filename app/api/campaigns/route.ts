@@ -38,6 +38,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 
     const missionId = searchParams.get('missionId');
     const isActive = searchParams.get('isActive');
+    const search = searchParams.get('search');
 
     const where: any = {};
 
@@ -47,6 +48,13 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 
     if (isActive !== null) {
         where.isActive = isActive === 'true';
+    }
+
+    if (search) {
+        where.OR = [
+            { name: { contains: search, mode: 'insensitive' } },
+            { icp: { contains: search, mode: 'insensitive' } },
+        ];
     }
 
     const [campaigns, total] = await Promise.all([

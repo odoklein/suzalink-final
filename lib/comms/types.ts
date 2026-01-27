@@ -65,6 +65,7 @@ export interface CreateMessageRequest {
     content: string;
     mentionIds?: string[];
     attachmentIds?: string[];
+    parentMessageId?: string;
 }
 
 // Thread update
@@ -148,11 +149,25 @@ export interface CommsParticipantView {
     joinedAt: string;
 }
 
+export interface CommsMessageReadByView {
+    userId: string;
+    userName: string;
+    readAt: string;
+}
+
+export interface CommsMessageReactionView {
+    emoji: string;
+    count: number;
+    userIds: string[];
+}
+
 export interface CommsMessageView {
     id: string;
     threadId: string;
     type: CommsMessageType;
     content: string;
+    parentMessageId?: string | null;
+    parentPreview?: { authorName: string; content: string };
     author: {
         id: string;
         name: string;
@@ -161,6 +176,8 @@ export interface CommsMessageView {
     };
     mentions: CommsMentionView[];
     attachments: CommsAttachmentView[];
+    readBy?: CommsMessageReadByView[];
+    reactions?: CommsMessageReactionView[];
     isEdited: boolean;
     isDeleted: boolean;
     isOwnMessage: boolean;

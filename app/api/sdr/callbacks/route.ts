@@ -52,6 +52,7 @@ export async function GET() {
                         name: true,
                         mission: {
                             select: {
+                                id: true,
                                 name: true,
                                 client: {
                                     select: {
@@ -88,7 +89,20 @@ export async function GET() {
             });
 
             if (!newerAction) {
-                activeCallbacks.push(action);
+                // Transform the response to match frontend expectations
+                // Frontend expects: callback.mission.client.name
+                // API returns: action.campaign.mission.client.name
+                activeCallbacks.push({
+                    id: action.id,
+                    createdAt: action.createdAt,
+                    note: action.note || undefined,
+                    contact: action.contact,
+                    mission: action.campaign?.mission ? {
+                        id: action.campaign.mission.id || action.campaignId,
+                        name: action.campaign.mission.name,
+                        client: action.campaign.mission.client,
+                    } : null,
+                });
             }
         }
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { X, Target, Building2, FileText, Users, MessageCircle, Megaphone, Search, Loader2 } from "lucide-react";
+import { X, Target, Building2, FileText, Users, MessageCircle, Megaphone, Search, Loader2, Send, ArrowLeft } from "lucide-react";
 import { Modal, Input, Button } from "@/components/ui";
 import type { CommsChannelType, CreateThreadRequest } from "@/lib/comms/types";
 
@@ -30,49 +30,42 @@ const CHANNEL_OPTIONS: {
     description: string;
     roles: string[];
 }[] = [
-    {
-        type: "MISSION",
-        label: "Mission",
-        icon: Target,
-        description: "Discussion liée à une mission",
-        roles: ["MANAGER", "SDR", "BUSINESS_DEVELOPER"],
-    },
-    {
-        type: "CLIENT",
-        label: "Client",
-        icon: Building2,
-        description: "Discussion liée à un client",
-        roles: ["MANAGER", "BUSINESS_DEVELOPER"],
-    },
-    {
-        type: "CAMPAIGN",
-        label: "Campagne",
-        icon: FileText,
-        description: "Discussion liée à une campagne",
-        roles: ["MANAGER", "SDR", "BUSINESS_DEVELOPER"],
-    },
-    {
-        type: "GROUP",
-        label: "Groupe",
-        icon: Users,
-        description: "Discussion avec un groupe",
-        roles: ["MANAGER", "BUSINESS_DEVELOPER"],
-    },
-    {
-        type: "DIRECT",
-        label: "Message direct",
-        icon: MessageCircle,
-        description: "Discussion privée avec un collègue",
-        roles: ["MANAGER", "SDR", "BUSINESS_DEVELOPER", "DEVELOPER"],
-    },
-    {
-        type: "BROADCAST",
-        label: "Annonce",
-        icon: Megaphone,
-        description: "Annonce à l'équipe (managers uniquement)",
-        roles: ["MANAGER"],
-    },
-];
+        {
+            type: "DIRECT",
+            label: "Message direct",
+            icon: MessageCircle,
+            description: "Envoyer un message privé",
+            roles: ["MANAGER", "SDR", "BUSINESS_DEVELOPER", "DEVELOPER"],
+        },
+        {
+            type: "MISSION",
+            label: "Discussion mission",
+            icon: Target,
+            description: "Tous les assignés verront ce message",
+            roles: ["MANAGER", "SDR", "BUSINESS_DEVELOPER"],
+        },
+        {
+            type: "CLIENT",
+            label: "Discussion client",
+            icon: Building2,
+            description: "Discussion liée à un client",
+            roles: ["MANAGER", "BUSINESS_DEVELOPER"],
+        },
+        {
+            type: "GROUP",
+            label: "Groupe",
+            icon: Users,
+            description: "Discussion de groupe",
+            roles: ["MANAGER", "BUSINESS_DEVELOPER"],
+        },
+        {
+            type: "BROADCAST",
+            label: "Annonce",
+            icon: Megaphone,
+            description: "Annonce à toute l'équipe",
+            roles: ["MANAGER"],
+        },
+    ];
 
 export function NewThreadModal({
     isOpen,
@@ -83,13 +76,12 @@ export function NewThreadModal({
     defaultAnchorId,
     defaultAnchorName,
 }: NewThreadModalProps) {
-    const [step, setStep] = useState<"type" | "anchor" | "compose">("type");
+    const [step, setStep] = useState<"type" | "recipient" | "compose">("type");
     const [channelType, setChannelType] = useState<CommsChannelType | null>(
         defaultChannelType || null
     );
     const [anchorId, setAnchorId] = useState<string | null>(defaultAnchorId || null);
     const [anchorName, setAnchorName] = useState<string>(defaultAnchorName || "");
-    const [subject, setSubject] = useState("");
     const [message, setMessage] = useState("");
     const [isBroadcast, setIsBroadcast] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -109,7 +101,6 @@ export function NewThreadModal({
             setChannelType(defaultChannelType || null);
             setAnchorId(defaultAnchorId || null);
             setAnchorName(defaultAnchorName || "");
-            setSubject("");
             setMessage("");
             setIsBroadcast(false);
             setSelectedUser(null);
@@ -158,16 +149,52 @@ export function NewThreadModal({
 
                 const res = await fetch(endpoint);
                 if (res.ok) {
-                    const data = await res.json();
+                    const response = await res.json();
+
+                    // Handle different response formats
+                    let items: any[] = [];
+
+                    if (response.success === true) {
+                        const responseData = response.data;
+
+                        if (Array.isArray(responseData)) {
+                            items = responseData;
+                        } else if (responseData?.users) {
+                            items = responseData.users || [];
+                        } else if (responseData?.campaigns) {
+                            items = responseData.campaigns || [];
+                        } else if (responseData?.missions) {
+                            items = responseData.missions || [];
+                        } else if (responseData?.clients) {
+                            items = responseData.clients || [];
+                        } else if (responseData?.groups) {
+                            items = responseData.groups || [];
+                        }
+                    } else if (response.missions) {
+                        items = response.missions || [];
+                    } else if (response.campaigns) {
+                        items = response.campaigns || [];
+                    } else if (response.users) {
+                        items = response.users || [];
+                    } else if (response.clients) {
+                        items = response.clients || [];
+                    } else if (response.groups) {
+                        items = response.groups || [];
+                    } else if (Array.isArray(response)) {
+                        items = response;
+                    }
+
                     // Normalize results
-                    const items: SelectableItem[] = (data.missions || data.clients || data.campaigns || data.groups || data.users || data || []).map(
-                        (item: { id: string; name: string; email?: string; clientName?: string }) => ({
+                    const normalizedItems: SelectableItem[] = items.map(
+                        (item: { id: string; name: string; email?: string; clientName?: string; client?: { name: string } }) => ({
                             id: item.id,
                             name: item.name,
-                            subtitle: item.email || item.clientName,
+                            subtitle: item.email || item.clientName || item.client?.name,
                         })
                     );
-                    setSearchResults(items.slice(0, 10));
+                    setSearchResults(normalizedItems.slice(0, 10));
+                } else {
+                    setSearchResults([]);
                 }
             } catch (error) {
                 console.error("Search error:", error);
@@ -186,11 +213,11 @@ export function NewThreadModal({
             setIsBroadcast(true);
             setStep("compose");
         } else {
-            setStep("anchor");
+            setStep("recipient");
         }
     };
 
-    const handleSelectAnchor = (item: SelectableItem) => {
+    const handleSelectRecipient = (item: SelectableItem) => {
         if (channelType === "DIRECT") {
             setSelectedUser(item);
         }
@@ -200,13 +227,21 @@ export function NewThreadModal({
     };
 
     const handleSubmit = async () => {
-        if (!channelType || !subject.trim() || !message.trim()) return;
+        if (!channelType || !message.trim()) return;
+
+        // For non-direct types, we need an anchor
+        if (channelType !== "DIRECT" && channelType !== "BROADCAST" && !anchorId) return;
 
         setIsSubmitting(true);
         try {
             const request: CreateThreadRequest = {
                 channelType,
-                subject: subject.trim(),
+                // For DIRECT messages, use recipient name as subject
+                subject: channelType === "DIRECT" && selectedUser
+                    ? `Message avec ${selectedUser.name}`
+                    : channelType === "BROADCAST"
+                        ? "Annonce"
+                        : `Discussion - ${anchorName}`,
                 initialMessage: message.trim(),
                 isBroadcast,
             };
@@ -228,16 +263,46 @@ export function NewThreadModal({
         opt.roles.includes(userRole)
     );
 
+    const getRecipientPlaceholder = () => {
+        switch (channelType) {
+            case "DIRECT": return "Rechercher un collègue...";
+            case "MISSION": return "Rechercher une mission...";
+            case "CLIENT": return "Rechercher un client...";
+            case "GROUP": return "Rechercher un groupe...";
+            default: return "Rechercher...";
+        }
+    };
+
+    const getRecipientLabel = () => {
+        switch (channelType) {
+            case "DIRECT": return "Envoyer à";
+            case "MISSION": return "Mission";
+            case "CLIENT": return "Client";
+            case "GROUP": return "Groupe";
+            default: return "Destinataire";
+        }
+    };
+
     return (
         <Modal isOpen={isOpen} onClose={onClose} size="md">
             <div className="p-6">
                 {/* Header */}
                 <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-lg font-semibold text-slate-900">
-                        {step === "type" && "Nouvelle discussion"}
-                        {step === "anchor" && `Sélectionner ${channelType === "DIRECT" ? "un destinataire" : channelType === "GROUP" ? "un groupe" : "un contexte"}`}
-                        {step === "compose" && "Composer le message"}
-                    </h2>
+                    <div className="flex items-center gap-3">
+                        {step !== "type" && (
+                            <button
+                                onClick={() => setStep(step === "compose" ? "recipient" : "type")}
+                                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                            >
+                                <ArrowLeft className="w-4 h-4" />
+                            </button>
+                        )}
+                        <h2 className="text-lg font-semibold text-slate-900">
+                            {step === "type" && "Nouveau message"}
+                            {step === "recipient" && getRecipientLabel()}
+                            {step === "compose" && (selectedUser?.name || anchorName || "Nouveau message")}
+                        </h2>
+                    </div>
                     <button
                         onClick={onClose}
                         className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
@@ -253,45 +318,40 @@ export function NewThreadModal({
                             <button
                                 key={opt.type}
                                 onClick={() => handleSelectType(opt.type)}
-                                className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 hover:border-indigo-200 hover:bg-indigo-50/50 transition-colors text-left"
+                                className="flex items-center gap-4 p-4 rounded-xl border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 transition-all text-left group"
                             >
-                                <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center">
-                                    <opt.icon className="w-5 h-5 text-slate-600" />
+                                <div className={cn(
+                                    "w-12 h-12 rounded-xl flex items-center justify-center transition-colors",
+                                    "bg-slate-100 group-hover:bg-indigo-100"
+                                )}>
+                                    <opt.icon className="w-6 h-6 text-slate-600 group-hover:text-indigo-600" />
                                 </div>
-                                <div>
-                                    <p className="font-medium text-slate-900">{opt.label}</p>
-                                    <p className="text-xs text-slate-500">{opt.description}</p>
+                                <div className="flex-1">
+                                    <p className="font-semibold text-slate-900">{opt.label}</p>
+                                    <p className="text-sm text-slate-500">{opt.description}</p>
                                 </div>
                             </button>
                         ))}
                     </div>
                 )}
 
-                {/* Step 2: Select anchor */}
-                {step === "anchor" && (
+                {/* Step 2: Select recipient */}
+                {step === "recipient" && (
                     <div>
-                        {/* Back button */}
-                        <button
-                            onClick={() => setStep("type")}
-                            className="text-sm text-slate-500 hover:text-slate-700 mb-4"
-                        >
-                            ← Retour
-                        </button>
-
                         {/* Search input */}
                         <div className="relative mb-4">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                             <Input
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder={`Rechercher ${channelType === "DIRECT" ? "un utilisateur" : channelType === "GROUP" ? "un groupe" : "..."}`}
-                                className="pl-9"
+                                placeholder={getRecipientPlaceholder()}
+                                className="pl-10 h-11"
                                 autoFocus
                             />
                         </div>
 
                         {/* Results */}
-                        <div className="max-h-64 overflow-y-auto">
+                        <div className="max-h-72 overflow-y-auto">
                             {isSearching && (
                                 <div className="flex items-center justify-center py-8">
                                     <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />
@@ -299,26 +359,34 @@ export function NewThreadModal({
                             )}
                             {!isSearching && searchResults.length === 0 && searchQuery && (
                                 <p className="text-sm text-slate-500 text-center py-8">
-                                    Aucun résultat trouvé
+                                    Aucun résultat pour "{searchQuery}"
                                 </p>
+                            )}
+                            {!isSearching && searchResults.length === 0 && !searchQuery && (
+                                <div className="text-center py-8">
+                                    <Search className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                                    <p className="text-sm text-slate-500">
+                                        Commencez à taper pour rechercher
+                                    </p>
+                                </div>
                             )}
                             {!isSearching && searchResults.length > 0 && (
                                 <div className="space-y-1">
                                     {searchResults.map((item) => (
                                         <button
                                             key={item.id}
-                                            onClick={() => handleSelectAnchor(item)}
-                                            className="w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-slate-50 transition-colors text-left"
+                                            onClick={() => handleSelectRecipient(item)}
+                                            className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-colors text-left group"
                                         >
-                                            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-xs font-medium text-slate-600">
+                                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center text-sm font-semibold text-slate-600 group-hover:from-indigo-100 group-hover:to-indigo-200 group-hover:text-indigo-600 transition-colors">
                                                 {item.name.charAt(0).toUpperCase()}
                                             </div>
-                                            <div>
-                                                <p className="text-sm font-medium text-slate-900">
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-medium text-slate-900 truncate">
                                                     {item.name}
                                                 </p>
                                                 {item.subtitle && (
-                                                    <p className="text-xs text-slate-500">
+                                                    <p className="text-xs text-slate-500 truncate">
                                                         {item.subtitle}
                                                     </p>
                                                 )}
@@ -331,55 +399,42 @@ export function NewThreadModal({
                     </div>
                 )}
 
-                {/* Step 3: Compose */}
+                {/* Step 3: Compose - Simplified for direct messages */}
                 {step === "compose" && (
                     <div className="space-y-4">
-                        {/* Back button (if not from defaults) */}
-                        {!defaultAnchorId && (
-                            <button
-                                onClick={() => setStep(channelType === "BROADCAST" ? "type" : "anchor")}
-                                className="text-sm text-slate-500 hover:text-slate-700"
-                            >
-                                ← Retour
-                            </button>
-                        )}
-
-                        {/* Context indicator */}
-                        {anchorName && (
-                            <div className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg">
-                                <span className="text-xs text-slate-500">Contexte:</span>
-                                <span className="text-sm font-medium text-slate-700">
-                                    {anchorName}
-                                </span>
+                        {/* Recipient indicator */}
+                        <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center text-sm font-semibold text-indigo-600">
+                                {(selectedUser?.name || anchorName || "?").charAt(0).toUpperCase()}
                             </div>
-                        )}
-
-                        {/* Subject */}
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Sujet
-                            </label>
-                            <Input
-                                value={subject}
-                                onChange={(e) => setSubject(e.target.value)}
-                                placeholder="Objet de la discussion"
-                                autoFocus={!anchorName}
-                            />
+                            <div>
+                                <p className="text-xs text-slate-500">
+                                    {channelType === "DIRECT" ? "Message à" : channelType === "BROADCAST" ? "Annonce à" : "Discussion"}
+                                </p>
+                                <p className="text-sm font-medium text-slate-900">
+                                    {selectedUser?.name || anchorName || (channelType === "BROADCAST" ? "Toute l'équipe" : "...")}
+                                </p>
+                            </div>
                         </div>
 
                         {/* Message */}
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Message
-                            </label>
                             <textarea
                                 value={message}
                                 onChange={(e) => setMessage(e.target.value)}
                                 placeholder="Écrivez votre message..."
-                                rows={4}
-                                className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none"
+                                rows={5}
+                                autoFocus
+                                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none"
                             />
                         </div>
+
+                        {/* Note for mission threads */}
+                        {channelType === "MISSION" && (
+                            <p className="text-xs text-slate-500 bg-blue-50 text-blue-700 px-3 py-2 rounded-lg">
+                                💡 Tous les SDR et managers assignés à cette mission verront cette discussion.
+                            </p>
+                        )}
 
                         {/* Actions */}
                         <div className="flex justify-end gap-2 pt-2">
@@ -388,12 +443,16 @@ export function NewThreadModal({
                             </Button>
                             <Button
                                 onClick={handleSubmit}
-                                disabled={!subject.trim() || !message.trim() || isSubmitting}
+                                disabled={!message.trim() || isSubmitting}
+                                className="gap-2"
                             >
                                 {isSubmitting ? (
                                     <Loader2 className="w-4 h-4 animate-spin" />
                                 ) : (
-                                    "Créer la discussion"
+                                    <>
+                                        <Send className="w-4 h-4" />
+                                        Envoyer
+                                    </>
                                 )}
                             </Button>
                         </div>

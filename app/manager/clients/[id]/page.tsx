@@ -27,7 +27,11 @@ import {
     Calendar,
     CheckCircle2,
     XCircle,
-    Copy
+    Copy,
+    CalendarCheck,
+    User,
+    Briefcase,
+    FileText
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -72,6 +76,56 @@ interface Client {
     users?: User[];
 }
 
+interface Meeting {
+    id: string;
+    createdAt: string;
+    contact: {
+        id: string;
+        firstName?: string;
+        lastName?: string;
+        title?: string;
+        email?: string;
+        company: {
+            id: string;
+            name: string;
+            industry?: string;
+        };
+    };
+    campaign: {
+        id: string;
+        name: string;
+        missionId: string;
+        mission: {
+            id: string;
+            name: string;
+        };
+    };
+    sdr: {
+        id: string;
+        name: string;
+        email: string;
+    };
+}
+
+interface MeetingsData {
+    totalMeetings: number;
+    byMission: Array<{
+        missionId: string;
+        missionName: string;
+        count: number;
+        meetings: Meeting[];
+    }>;
+    byCampaign: Array<{
+        campaignId: string;
+        campaignName: string;
+        missionId: string;
+        missionName: string;
+        count: number;
+        meetings: Meeting[];
+    }>;
+    allMeetings: Meeting[];
+}
+
 const CHANNEL_LABELS = {
     CALL: "Appel",
     EMAIL: "Email",
@@ -97,7 +151,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
         industry: "",
         email: "",
         phone: "",
+        bookingUrl: "",
     });
+    const [meetingsData, setMeetingsData] = useState<MeetingsData | null>(null);
+    const [isLoadingMeetings, setIsLoadingMeetings] = useState(true);
 
     // ============================================
     // FETCH CLIENT
@@ -116,6 +173,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                     industry: json.data.industry || "",
                     email: json.data.email || "",
                     phone: json.data.phone || "",
+                    bookingUrl: json.data.bookingUrl || "",
                 });
             } else {
                 showError("Erreur", json.error);
@@ -132,6 +190,32 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     useEffect(() => {
         fetchClient();
     }, [resolvedParams.id]);
+
+    // ============================================
+    // FETCH MEETINGS
+    // ============================================
+
+    const fetchMeetings = async () => {
+        if (!resolvedParams.id) return;
+        setIsLoadingMeetings(true);
+        try {
+            const res = await fetch(`/api/clients/${resolvedParams.id}/meetings`);
+            const json = await res.json();
+            if (json.success) {
+                setMeetingsData(json.data);
+            }
+        } catch (err) {
+            console.error("Failed to fetch meetings:", err);
+        } finally {
+            setIsLoadingMeetings(false);
+        }
+    };
+
+    useEffect(() => {
+        if (client) {
+            fetchMeetings();
+        }
+    }, [client]);
 
     // ============================================
     // UPDATE CLIENT
@@ -274,7 +358,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             </div>
 
             {/* Stats Overview */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <Card className="p-6 border-none shadow-sm bg-white hover:shadow-md transition-shadow">
                     <div className="flex items-center justify-between">
                         <div>
@@ -310,7 +394,168 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                         </div>
                     </div>
                 </Card>
+                <Card className="p-6 border-none shadow-sm bg-white hover:shadow-md transition-shadow">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-sm font-medium text-slate-500">RDV pris</p>
+                            <p className="text-3xl font-bold text-slate-900 mt-2">
+                                {meetingsData?.totalMeetings || 0}
+                            </p>
+                        </div>
+                        <div className="w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center">
+                            <CalendarCheck className="w-6 h-6 text-rose-600" />
+                        </div>
+                    </div>
+                </Card>
             </div>
+
+            {/* Meetings Section */}
+            {meetingsData && meetingsData.totalMeetings > 0 && (
+                <Card className="border-slate-200">
+                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                        <div className="flex items-center justify-between">
+                            <h2 className="font-bold text-slate-900 flex items-center gap-2">
+                                <CalendarCheck className="w-5 h-5 text-rose-500" />
+                                Rendez-vous pris ({meetingsData.totalMeetings})
+                            </h2>
+                            <div className="flex items-center gap-4 text-sm text-slate-600">
+                                {meetingsData.byMission.length > 0 && (
+                                    <span className="flex items-center gap-1.5">
+                                        <Target className="w-4 h-4" />
+                                        {meetingsData.byMission.length} mission{meetingsData.byMission.length > 1 ? 's' : ''}
+                                    </span>
+                                )}
+                                {meetingsData.byCampaign.length > 0 && (
+                                    <span className="flex items-center gap-1.5">
+                                        <FileText className="w-4 h-4" />
+                                        {meetingsData.byCampaign.length} campagne{meetingsData.byCampaign.length > 1 ? 's' : ''}
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="p-6">
+                        {/* Compact Summary Cards */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+                            {meetingsData.byMission.map((missionGroup) => (
+                                <div
+                                    key={missionGroup.missionId}
+                                    className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-lg p-3 border border-slate-200"
+                                >
+                                    <div className="flex items-center justify-between mb-2">
+                                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                                            <Target className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+                                            <h4 className="font-semibold text-slate-900 text-sm truncate">
+                                                {missionGroup.missionName}
+                                            </h4>
+                                        </div>
+                                        <Badge variant="primary" className="text-xs flex-shrink-0 ml-2">
+                                            {missionGroup.count}
+                                        </Badge>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {missionGroup.meetings.slice(0, 4).map((meeting) => (
+                                            <span
+                                                key={meeting.id}
+                                                className="inline-flex items-center gap-1 text-xs bg-white px-2 py-1 rounded border border-slate-200 text-slate-700"
+                                                title={`${meeting.contact.firstName} ${meeting.contact.lastName} - ${meeting.contact.company.name}`}
+                                            >
+                                                <User className="w-3 h-3 text-slate-400" />
+                                                <span className="truncate max-w-[120px]">
+                                                    {meeting.contact.firstName} {meeting.contact.lastName}
+                                                </span>
+                                            </span>
+                                        ))}
+                                        {missionGroup.meetings.length > 4 && (
+                                            <span className="inline-flex items-center text-xs text-slate-500 px-2 py-1">
+                                                +{missionGroup.meetings.length - 4}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Compact Meetings Table */}
+                        <div className="border border-slate-200 rounded-lg overflow-hidden">
+                            <div className="bg-slate-50 px-4 py-2.5 border-b border-slate-200">
+                                <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                                    <Calendar className="w-4 h-4" />
+                                    Liste des rendez-vous
+                                </h3>
+                            </div>
+                            <div className="divide-y divide-slate-100 max-h-[500px] overflow-y-auto">
+                                {meetingsData.allMeetings.map((meeting) => (
+                                    <div
+                                        key={meeting.id}
+                                        className="px-4 py-3 hover:bg-slate-50 transition-colors"
+                                    >
+                                        <div className="flex items-center justify-between gap-4">
+                                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                <div className="w-8 h-8 rounded-lg bg-rose-50 flex items-center justify-center flex-shrink-0">
+                                                    <User className="w-4 h-4 text-rose-600" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <span className="font-semibold text-slate-900 text-sm">
+                                                            {meeting.contact.firstName} {meeting.contact.lastName}
+                                                        </span>
+                                                        {meeting.contact.title && (
+                                                            <>
+                                                                <span className="text-slate-300">•</span>
+                                                                <span className="text-xs text-slate-500">{meeting.contact.title}</span>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-2 mt-1 flex-wrap text-xs text-slate-600">
+                                                        <span className="flex items-center gap-1">
+                                                            <Briefcase className="w-3 h-3 text-slate-400" />
+                                                            {meeting.contact.company.name}
+                                                        </span>
+                                                        {meeting.contact.company.industry && (
+                                                            <>
+                                                                <span className="text-slate-300">•</span>
+                                                                <span>{meeting.contact.company.industry}</span>
+                                                            </>
+                                                        )}
+                                                        <span className="text-slate-300">•</span>
+                                                        <span className="flex items-center gap-1">
+                                                            <Target className="w-3 h-3 text-slate-400" />
+                                                            {meeting.campaign.mission.name}
+                                                        </span>
+                                                        <span className="text-slate-300">•</span>
+                                                        <span>{meeting.campaign.name}</span>
+                                                        <span className="text-slate-300">•</span>
+                                                        <span className="flex items-center gap-1">
+                                                            <Users className="w-3 h-3 text-slate-400" />
+                                                            {meeting.sdr.name}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="text-right flex-shrink-0">
+                                                <p className="text-xs font-medium text-slate-900">
+                                                    {new Date(meeting.createdAt).toLocaleDateString("fr-FR", {
+                                                        day: "numeric",
+                                                        month: "short",
+                                                    })}
+                                                </p>
+                                                <p className="text-xs text-slate-500 mt-0.5">
+                                                    {new Date(meeting.createdAt).toLocaleTimeString("fr-FR", {
+                                                        hour: "2-digit",
+                                                        minute: "2-digit",
+                                                    })}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </Card>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Left Column: Contact & Team */}
@@ -552,6 +797,18 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                         onChange={(e) => setEditFormData(prev => ({ ...prev, phone: e.target.value }))}
                         icon={<Phone className="w-4 h-4 text-slate-400" />}
                     />
+                    <div>
+                        <Input
+                            label="URL de réservation (Calendly, etc.)"
+                            type="url"
+                            value={editFormData.bookingUrl}
+                            onChange={(e) => setEditFormData(prev => ({ ...prev, bookingUrl: e.target.value }))}
+                            placeholder="https://calendly.com/client-name"
+                        />
+                        <p className="text-xs text-slate-500 mt-1">
+                            Les SDRs pourront utiliser cette URL pour planifier des rendez-vous lors des appels
+                        </p>
+                    </div>
                 </div>
                 <ModalFooter>
                     <Button variant="ghost" onClick={() => setShowEditModal(false)}>

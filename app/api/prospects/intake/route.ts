@@ -15,7 +15,7 @@ import crypto from 'crypto';
 
 const intakeSchema = z.object({
   sourceId: z.string().optional(), // Can come from query param or body
-  payload: z.record(z.any()).min(1, 'Payload cannot be empty'),
+  payload: z.record(z.any()).refine(val => Object.keys(val).length > 0, 'Payload cannot be empty'),
   apiKey: z.string().optional(), // For API key authentication (can be in header or body)
 });
 

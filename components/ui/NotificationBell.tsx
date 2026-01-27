@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Bell, Check, Info, AlertTriangle, XCircle, CheckCircle2 } from "lucide-react";
+import { Bell, Check, Info, AlertTriangle, XCircle, CheckCircle2, ChevronRight, Settings } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { cn } from "@/lib/utils";
 
 interface Notification {
     id: string;
@@ -16,11 +18,25 @@ interface Notification {
 }
 
 export function NotificationBell() {
+    const { data: session } = useSession();
     const [isOpen, setIsOpen] = useState(false);
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [unreadCount, setUnreadCount] = useState(0);
     const containerRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
+
+    // Get the correct notifications page based on user role
+    const getNotificationsPageUrl = () => {
+        const role = session?.user?.role;
+        if (role === "SDR" || role === "BUSINESS_DEVELOPER") {
+            return "/sdr/notifications";
+        } else if (role === "MANAGER") {
+            return "/manager/notifications";
+        } else if (role === "DEVELOPER") {
+            return "/developer/notifications";
+        }
+        return "/sdr/notifications"; // Default fallback
+    };
 
     useEffect(() => {
         loadNotifications();
@@ -83,6 +99,21 @@ export function NotificationBell() {
         }
     };
 
+    const formatDate = (dateString: string) => {
+        const date = new Date(dateString);
+        const now = new Date();
+        const diffMs = now.getTime() - date.getTime();
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+
+        if (diffMins < 1) return "À l'instant";
+        if (diffMins < 60) return `${diffMins}min`;
+        if (diffHours < 24) return `${diffHours}h`;
+        if (diffDays < 7) return `${diffDays}j`;
+        return date.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+    };
+
     const getIcon = (type: string) => {
         switch (type) {
             case "success": return <CheckCircle2 className="w-5 h-5 text-emerald-500" />;
@@ -92,76 +123,124 @@ export function NotificationBell() {
         }
     };
 
+    const displayNotifications = notifications.slice(0, 5);
+
     return (
         <div className="relative" ref={containerRef}>
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="relative p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors"
+                className={cn(
+                    "relative p-2.5 rounded-lg transition-all duration-200",
+                    isOpen
+                        ? "bg-indigo-100 text-indigo-600"
+                        : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                )}
             >
                 <Bell className="w-5 h-5" />
                 {unreadCount > 0 && (
-                    <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white">
+                    <span className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-gradient-to-br from-red-500 to-red-600 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white shadow-sm">
                         {unreadCount > 9 ? "9+" : unreadCount}
                     </span>
                 )}
             </button>
 
             {isOpen && (
-                <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden animate-scale-in origin-top-right">
-                    <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-gray-50/50">
-                        <h3 className="font-semibold text-gray-900">Notifications</h3>
+                <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border border-slate-200 rounded-2xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                    {/* Header */}
+                    <div className="flex items-center justify-between p-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+                        <div className="flex items-center gap-2">
+                            <h3 className="font-semibold text-slate-900">Notifications</h3>
+                            {unreadCount > 0 && (
+                                <span className="px-2 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-700 rounded-full">
+                                    {unreadCount} nouvelle{unreadCount > 1 ? "s" : ""}
+                                </span>
+                            )}
+                        </div>
                         {unreadCount > 0 && (
                             <button
                                 onClick={markAllAsRead}
-                                className="text-xs font-medium text-violet-600 hover:text-violet-700 flex items-center gap-1"
+                                className="text-xs font-medium text-indigo-600 hover:text-indigo-700 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-indigo-50 transition-colors"
                             >
                                 <Check className="w-3 h-3" />
-                                Tout marquer comme lu
+                                Tout lire
                             </button>
                         )}
                     </div>
 
+                    {/* Notification List */}
                     <div className="max-h-[400px] overflow-y-auto">
                         {notifications.length === 0 ? (
-                            <div className="p-8 text-center text-gray-500">
-                                <Bell className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                                <p className="text-sm">Aucune notification</p>
+                            <div className="p-8 text-center">
+                                <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
+                                    <Bell className="w-7 h-7 text-slate-400" />
+                                </div>
+                                <p className="text-sm font-medium text-slate-700 mb-1">Aucune notification</p>
+                                <p className="text-xs text-slate-500">Vous êtes à jour !</p>
                             </div>
                         ) : (
-                            <div className="divide-y divide-gray-100">
-                                {notifications.map((notification) => (
+                            <div className="divide-y divide-slate-100">
+                                {displayNotifications.map((notification) => (
                                     <div
                                         key={notification.id}
                                         onClick={() => markAsRead(notification.id, notification.link)}
-                                        className={`p-4 hover:bg-gray-50 transition-colors cursor-pointer ${!notification.isRead ? "bg-blue-50/30" : ""
-                                            }`}
+                                        className={cn(
+                                            "p-4 hover:bg-slate-50 transition-colors cursor-pointer group",
+                                            !notification.isRead && "bg-gradient-to-r from-indigo-50/50 to-white"
+                                        )}
                                     >
                                         <div className="flex items-start gap-3">
-                                            <div className="mt-0.5 flex-shrink-0">
+                                            <div className={cn(
+                                                "w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0",
+                                                notification.type === "success" && "bg-emerald-50",
+                                                notification.type === "warning" && "bg-amber-50",
+                                                notification.type === "error" && "bg-red-50",
+                                                notification.type === "info" && "bg-blue-50"
+                                            )}>
                                                 {getIcon(notification.type)}
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <p className={`text-sm ${!notification.isRead ? "font-semibold text-gray-900" : "font-medium text-gray-700"}`}>
+                                                <p className={cn(
+                                                    "text-sm line-clamp-1",
+                                                    !notification.isRead ? "font-semibold text-slate-900" : "font-medium text-slate-700"
+                                                )}>
                                                     {notification.title}
                                                 </p>
-                                                <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">
+                                                <p className="text-sm text-slate-500 mt-0.5 line-clamp-2">
                                                     {notification.message}
                                                 </p>
-                                                <p className="text-xs text-gray-400 mt-1.5">
-                                                    {new Date(notification.createdAt).toLocaleString()}
+                                                <p className="text-xs text-slate-400 mt-1.5">
+                                                    {formatDate(notification.createdAt)}
                                                 </p>
                                             </div>
-                                            {!notification.isRead && (
-                                                <div className="w-2 h-2 rounded-full bg-blue-500 mt-2" />
-                                            )}
+                                            <div className="flex items-center gap-1">
+                                                {!notification.isRead && (
+                                                    <div className="w-2 h-2 rounded-full bg-indigo-500" />
+                                                )}
+                                                {notification.link && (
+                                                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-slate-500 transition-colors" />
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         )}
                     </div>
+
+                    {/* Footer */}
+                    <div className="p-3 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                        <Link
+                            href={getNotificationsPageUrl()}
+                            onClick={() => setIsOpen(false)}
+                            className="text-sm font-medium text-indigo-600 hover:text-indigo-700 flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-indigo-50 transition-colors"
+                        >
+                            Voir toutes les notifications
+                            <ChevronRight className="w-4 h-4" />
+                        </Link>
+                    </div>
                 </div>
             )}
         </div>
     );
 }
+

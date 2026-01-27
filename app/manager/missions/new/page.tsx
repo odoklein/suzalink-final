@@ -2,9 +2,16 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Card, Button, Input, Select, useToast } from "@/components/ui";
-import { ArrowLeft, Target, Loader2 } from "lucide-react";
+import { useToast, Button } from "@/components/ui";
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { WizardForm, WizardStep } from "@/components/common/WizardForm";
+import { MissionDetails } from "./_components/MissionDetails";
+import { AudienceFilter } from "./_components/AudienceFilter";
+import { ReviewLaunch } from "./_components/ReviewLaunch";
+import { CreateMissionInput, createMissionAndEnrich } from "@/app/actions/mission-wizard";
+import { ExploriumSearchFilters } from "@/lib/explorium";
+import { Channel } from "@prisma/client";
 
 // ============================================
 // TYPES
@@ -15,34 +22,30 @@ interface Client {
     name: string;
 }
 
-interface FormData {
-    name: string;
-    objective: string;
-    channel: string;
-    clientId: string;
-    startDate: string;
-    endDate: string;
-}
-
 // ============================================
-// NEW MISSION PAGE
+// NEW MISSION WIZARD PAGE
 // ============================================
 
 export default function NewMissionPage() {
     const router = useRouter();
     const { success, error: showError } = useToast();
-    const [clients, setClients] = useState<Client[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
-    const [isSaving, setIsSaving] = useState(false);
-    const [formData, setFormData] = useState<FormData>({
+
+    // Data State
+    const [missionData, setMissionData] = useState<CreateMissionInput>({
         name: "",
         objective: "",
-        channel: "CALL",
+        channel: "CALL" as Channel,
         clientId: "",
         startDate: "",
         endDate: "",
     });
-    const [errors, setErrors] = useState<Record<string, string>>({});
+    const [filters, setFilters] = useState<ExploriumSearchFilters>({});
+
+    // UI State
+    const [clients, setClients] = useState<Client[]>([]);
+    const [isLoadingClients, setIsLoadingClients] = useState(true);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
 
     // ============================================
     // FETCH CLIENTS
@@ -50,7 +53,7 @@ export default function NewMissionPage() {
 
     useEffect(() => {
         const fetchClients = async () => {
-            setIsLoading(true);
+            setIsLoadingClients(true);
             try {
                 const res = await fetch("/api/clients");
                 const json = await res.json();
@@ -58,90 +61,114 @@ export default function NewMissionPage() {
                     setClients(json.data);
                     // Auto-select first client if only one
                     if (json.data.length === 1) {
-                        setFormData(prev => ({ ...prev, clientId: json.data[0].id }));
+                        setMissionData(prev => ({ ...prev, clientId: json.data[0].id }));
                     }
                 }
             } catch (err) {
                 console.error("Failed to fetch clients:", err);
             } finally {
-                setIsLoading(false);
+                setIsLoadingClients(false);
             }
         };
         fetchClients();
     }, []);
 
     // ============================================
-    // VALIDATION
+    // VALIDATION LOGIC
     // ============================================
 
-    const validate = (): boolean => {
-        const newErrors: Record<string, string> = {};
+    const step1Errors = (() => {
+        const errs: Record<string, string> = {};
+        if (!missionData.name.trim()) errs.name = "Le nom est requis";
+        if (!missionData.clientId) errs.clientId = "Le client est requis";
+        if (!missionData.channel) errs.channel = "Le canal est requis";
 
-        if (!formData.name.trim()) {
-            newErrors.name = "Le nom est requis";
-        }
-        if (!formData.clientId) {
-            newErrors.clientId = "Le client est requis";
-        }
-        if (!formData.channel) {
-            newErrors.channel = "Le canal est requis";
-        }
-        if (formData.startDate && formData.endDate) {
-            if (new Date(formData.endDate) < new Date(formData.startDate)) {
-                newErrors.endDate = "La date de fin doit être après la date de début";
+        if (missionData.startDate && missionData.endDate) {
+            if (new Date(missionData.endDate) < new Date(missionData.startDate)) {
+                errs.endDate = "La date de fin doit être après la date de début";
             }
         }
+        return errs;
+    })();
 
-        setErrors(newErrors);
-        return Object.keys(newErrors).length === 0;
-    };
+    const isStep1Valid = Object.keys(step1Errors).length === 0;
 
     // ============================================
     // SUBMIT
     // ============================================
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-
-        if (!validate()) return;
-
-        setIsSaving(true);
+    const handleComplete = async () => {
+        setIsSubmitting(true);
         try {
-            const res = await fetch("/api/missions", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    name: formData.name,
-                    objective: formData.objective || undefined,
-                    channel: formData.channel,
-                    clientId: formData.clientId,
-                    startDate: formData.startDate || undefined,
-                    endDate: formData.endDate || undefined,
-                }),
-            });
+            const res = await createMissionAndEnrich(missionData, filters);
 
-            const json = await res.json();
-
-            if (json.success) {
-                success("Mission créée", `${formData.name} a été créée avec succès`);
-                router.push(`/manager/missions/${json.data.id}`);
+            if (res.success) {
+                success(
+                    "Mission créée", 
+                    res.message || "La mission a été créée. La liste avec les entreprises Explorium est en cours de création en arrière-plan."
+                );
+                router.push(`/manager/missions/${res.missionId}`);
             } else {
-                showError("Erreur", json.error || "Impossible de créer la mission");
+                showError("Erreur", res.error || "Impossible de créer la mission");
+                setIsSubmitting(false);
             }
         } catch (err) {
-            console.error("Failed to create mission:", err);
-            showError("Erreur", "Impossible de créer la mission");
-        } finally {
-            setIsSaving(false);
+            console.error(err);
+            showError("Erreur", "Une erreur inattendue est survenue");
+            setIsSubmitting(false);
         }
     };
+
+    // ============================================
+    // STEPS CONFIG
+    // ============================================
+
+    const steps: WizardStep[] = [
+        {
+            id: "details",
+            label: "Détails Mission",
+            component: (
+                <MissionDetails
+                    data={missionData}
+                    onChange={setMissionData}
+                    clients={clients}
+                    errors={step1Errors}
+                />
+            ),
+            isValid: isStep1Valid,
+            validationError: !isStep1Valid ? "Veuillez corriger les erreurs" : undefined
+        },
+        {
+            id: "audience",
+            label: "Ciblage Audience",
+            component: (
+                <AudienceFilter
+                    filters={filters}
+                    onChange={setFilters}
+                />
+            ),
+            isValid: true, // Always valid to proceed, filters can be empty
+        },
+        {
+            id: "review",
+            label: "Récapitulatif",
+            component: (
+                <ReviewLaunch
+                    data={missionData}
+                    filters={filters}
+                    clientName={clients.find(c => c.id === missionData.clientId)?.name}
+                />
+            ),
+            isValid: true
+        }
+    ];
 
     // ============================================
     // RENDER
     // ============================================
 
     return (
-        <div className="max-w-2xl mx-auto space-y-6">
+        <div className="max-w-5xl mx-auto space-y-6 pb-20">
             {/* Header */}
             <div className="flex items-center gap-4">
                 <Link href="/manager/missions">
@@ -152,128 +179,21 @@ export default function NewMissionPage() {
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900">Nouvelle mission</h1>
                     <p className="text-slate-500 mt-1">
-                        Créez une nouvelle mission client
+                        Assistant de création de mission & enrichissement
                     </p>
                 </div>
             </div>
 
-            {/* Form */}
-            <Card>
-                <form onSubmit={handleSubmit} className="space-y-6">
-                    {/* Client */}
-                    <Select
-                        label="Client *"
-                        placeholder="Sélectionner un client..."
-                        options={clients.map(c => ({ value: c.id, label: c.name }))}
-                        value={formData.clientId}
-                        onChange={(value) => setFormData(prev => ({ ...prev, clientId: value }))}
-                        error={errors.clientId}
-                        searchable
-                    />
-
-                    {/* Mission Name */}
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">
-                            Nom de la mission *
-                        </label>
-                        <input
-                            type="text"
-                            value={formData.name}
-                            onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                            placeholder="Ex: Prospection SaaS Q1 2026"
-                            className={`w-full px-4 py-3 bg-white border rounded-xl text-slate-900 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 ${errors.name ? "border-red-500" : "border-slate-200"
-                                }`}
-                        />
-                        {errors.name && (
-                            <p className="text-sm text-red-500 mt-1">{errors.name}</p>
-                        )}
-                    </div>
-
-                    {/* Objective */}
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">
-                            Objectif
-                        </label>
-                        <textarea
-                            value={formData.objective}
-                            onChange={(e) => setFormData(prev => ({ ...prev, objective: e.target.value }))}
-                            placeholder="Ex: Générer 50 meetings qualifiés"
-                            rows={3}
-                            className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 resize-none"
-                        />
-                    </div>
-
-                    {/* Channel */}
-                    <Select
-                        label="Canal principal *"
-                        options={[
-                            { value: "CALL", label: "📞 Appel téléphonique" },
-                            { value: "EMAIL", label: "📧 Email" },
-                            { value: "LINKEDIN", label: "💼 LinkedIn" },
-                        ]}
-                        value={formData.channel}
-                        onChange={(value) => setFormData(prev => ({ ...prev, channel: value }))}
-                        error={errors.channel}
-                    />
-
-                    {/* Dates */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">
-                                Date de début
-                            </label>
-                            <input
-                                type="date"
-                                value={formData.startDate}
-                                onChange={(e) => setFormData(prev => ({ ...prev, startDate: e.target.value }))}
-                                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">
-                                Date de fin
-                            </label>
-                            <input
-                                type="date"
-                                value={formData.endDate}
-                                onChange={(e) => setFormData(prev => ({ ...prev, endDate: e.target.value }))}
-                                className={`w-full px-4 py-3 bg-white border rounded-xl text-slate-900 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 ${errors.endDate ? "border-red-500" : "border-slate-200"
-                                    }`}
-                            />
-                            {errors.endDate && (
-                                <p className="text-sm text-red-500 mt-1">{errors.endDate}</p>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
-                        <Link href="/manager/missions">
-                            <Button variant="ghost" type="button">
-                                Annuler
-                            </Button>
-                        </Link>
-                        <Button
-                            variant="primary"
-                            type="submit"
-                            disabled={isSaving}
-                            className="gap-2"
-                        >
-                            {isSaving ? (
-                                <>
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                    Création...
-                                </>
-                            ) : (
-                                <>
-                                    <Target className="w-4 h-4" />
-                                    Créer la mission
-                                </>
-                            )}
-                        </Button>
-                    </div>
-                </form>
-            </Card>
+            {/* Wizard */}
+            {isLoadingClients ? (
+                <div className="p-12 text-center text-slate-500">Chargement...</div>
+            ) : (
+                <WizardForm
+                    steps={steps}
+                    onComplete={handleComplete}
+                    isSubmitting={isSubmitting}
+                />
+            )}
         </div>
     );
 }

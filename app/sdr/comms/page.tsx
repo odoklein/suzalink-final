@@ -1,21 +1,726 @@
 "use client";
 
-import { PageHeader } from "@/components/ui/PageHeader";
-import { CommsInbox } from "@/components/comms";
-import { MessageSquare } from "lucide-react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useSession } from "next-auth/react";
+import { cn } from "@/lib/utils";
+import { useCommsRealtime } from "@/hooks/useCommsRealtime";
+import { useToast } from "@/components/ui/Toast";
+import type { CommsRealtimePayload } from "@/lib/comms/events";
+import {
+    MessageSquare,
+    Plus,
+    Search,
+    RefreshCw,
+    Target,
+    Building2,
+    FileText,
+    Users,
+    MessageCircle,
+    Megaphone,
+    Inbox,
+    Clock,
+    TrendingUp,
+    ArrowUpRight,
+    ArrowDownRight,
+    Mail,
+    PanelLeftClose,
+    PanelLeft,
+    Loader2,
+    AlertCircle,
+} from "lucide-react";
+import { Button, Input } from "@/components/ui";
+import { ThreadList } from "@/components/comms/ThreadList";
+import { ThreadView } from "@/components/comms/ThreadView";
+import { NewThreadModal } from "@/components/comms/NewThreadModal";
+import { SearchPanel } from "@/components/comms/SearchPanel";
+import type {
+    CommsThreadListItem,
+    CommsThreadView,
+    CommsInboxStats,
+    CommsInboxFilters,
+    CommsChannelType,
+    CommsThreadStatus,
+    CreateThreadRequest,
+} from "@/lib/comms/types";
+
+// ============================================
+// STAT CARD COMPONENT
+// ============================================
+
+function StatCard({
+    icon: Icon,
+    label,
+    value,
+    subValue,
+    trend,
+    color,
+}: {
+    icon: React.ElementType;
+    label: string;
+    value: string | number;
+    subValue?: string;
+    trend?: { value: number; isPositive: boolean };
+    color: "indigo" | "emerald" | "amber" | "rose" | "blue" | "purple";
+}) {
+    const colors = {
+        indigo: "from-indigo-500 to-indigo-600",
+        emerald: "from-emerald-500 to-emerald-600",
+        amber: "from-amber-500 to-amber-600",
+        rose: "from-rose-500 to-rose-600",
+        blue: "from-blue-500 to-blue-600",
+        purple: "from-purple-500 to-purple-600",
+    };
+
+    return (
+        <div className="relative overflow-hidden bg-white rounded-2xl border border-slate-200 p-5 group hover:shadow-lg hover:shadow-slate-200/50 transition-all duration-300">
+            <div className="flex items-start justify-between">
+                <div>
+                    <p className="text-sm font-medium text-slate-500 mb-1">{label}</p>
+                    <p className="text-3xl font-bold text-slate-900">{value}</p>
+                    {subValue && (
+                        <p className="text-sm text-slate-400 mt-1">{subValue}</p>
+                    )}
+                    {trend && (
+                        <div className={cn(
+                            "flex items-center gap-1 mt-2 text-sm font-medium",
+                            trend.isPositive ? "text-emerald-600" : "text-rose-600"
+                        )}>
+                            {trend.isPositive ? (
+                                <ArrowUpRight className="w-4 h-4" />
+                            ) : (
+                                <ArrowDownRight className="w-4 h-4" />
+                            )}
+                            <span>{trend.value}%</span>
+                        </div>
+                    )}
+                </div>
+                <div className={cn(
+                    "w-12 h-12 rounded-xl bg-gradient-to-br flex items-center justify-center shadow-lg",
+                    colors[color]
+                )}>
+                    <Icon className="w-6 h-6 text-white" />
+                </div>
+            </div>
+            <div className={cn(
+                "absolute -right-4 -bottom-4 w-24 h-24 rounded-full opacity-10 bg-gradient-to-br",
+                colors[color]
+            )} />
+        </div>
+    );
+}
+
+// ============================================
+// FILTER OPTIONS
+// ============================================
+
+const FILTER_OPTIONS: {
+    type: CommsChannelType | "all";
+    label: string;
+    icon: typeof Target;
+}[] = [
+        { type: "all", label: "Tous", icon: MessageSquare },
+        { type: "MISSION", label: "Missions", icon: Target },
+        { type: "CLIENT", label: "Clients", icon: Building2 },
+        { type: "CAMPAIGN", label: "Campagnes", icon: FileText },
+        { type: "GROUP", label: "Groupes", icon: Users },
+        { type: "DIRECT", label: "Directs", icon: MessageCircle },
+        { type: "BROADCAST", label: "Annonces", icon: Megaphone },
+    ];
+
+// ============================================
+// CUSTOM HOOK FOR DEBOUNCED VALUE
+// ============================================
+
+function useDebounce<T>(value: T, delay: number): T {
+    const [debouncedValue, setDebouncedValue] = useState<T>(value);
+
+    useEffect(() => {
+        const handler = setTimeout(() => {
+            setDebouncedValue(value);
+        }, delay);
+
+        return () => {
+            clearTimeout(handler);
+        };
+    }, [value, delay]);
+
+    return debouncedValue;
+}
+
+// ============================================
+// MAIN PAGE COMPONENT
+// ============================================
 
 export default function SDRCommsPage() {
+    const { data: session } = useSession();
+    const { error, success } = useToast();
+
+    const [threads, setThreads] = useState<CommsThreadListItem[]>([]);
+    const [selectedThread, setSelectedThread] = useState<CommsThreadView | null>(null);
+    const [stats, setStats] = useState<CommsInboxStats | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isRefreshing, setIsRefreshing] = useState(false);
+    const [isLoadingThread, setIsLoadingThread] = useState(false);
+    const [showNewThreadModal, setShowNewThreadModal] = useState(false);
+    const [showSearchPanel, setShowSearchPanel] = useState(false);
+    const [isListCollapsed, setIsListCollapsed] = useState(false);
+
+    // Filters
+    const [filters, setFilters] = useState<CommsInboxFilters>({});
+    const [searchQuery, setSearchQuery] = useState("");
+    const debouncedSearchQuery = useDebounce(searchQuery, 400);
+    const selectedThreadIdRef = useRef<string | null>(null);
+    selectedThreadIdRef.current = selectedThread?.id ?? null;
+
+    // Typing indicators per thread - support multiple users
+    const [typingByThread, setTypingByThread] = useState<Record<string, string[]>>({});
+    const typingTimeoutRef = useRef<Record<string, Record<string, ReturnType<typeof setTimeout>>>>({});
+
+    // Fetch threads
+    const fetchThreads = useCallback(async (refresh = false) => {
+        if (refresh) setIsRefreshing(true);
+        else setIsLoading(true);
+
+        try {
+            const params = new URLSearchParams();
+            if (filters.type) params.set("type", filters.type);
+            if (filters.status) params.set("status", filters.status);
+            if (filters.unreadOnly) params.set("unreadOnly", "true");
+            if (debouncedSearchQuery) params.set("search", debouncedSearchQuery);
+
+            const res = await fetch(`/api/comms/threads?${params}`);
+            if (res.ok) {
+                const data = await res.json();
+                setThreads(data.threads || []);
+            } else {
+                error("Erreur", "Impossible de charger les discussions");
+            }
+        } catch (error) {
+            console.error("Error fetching threads:", error);
+            error("Erreur", "Impossible de charger les discussions");
+        } finally {
+            setIsLoading(false);
+            setIsRefreshing(false);
+        }
+    }, [filters, debouncedSearchQuery, error]);
+
+    // Fetch stats
+    const fetchStats = useCallback(async () => {
+        try {
+            const res = await fetch("/api/comms/inbox/stats");
+            if (res.ok) {
+                const data = await res.json();
+                setStats(data);
+            }
+        } catch (error) {
+            console.error("Error fetching stats:", error);
+        }
+    }, []);
+
+    // Fetch thread details
+    const fetchThreadDetails = useCallback(async (threadId: string) => {
+        setIsLoadingThread(true);
+        try {
+            const res = await fetch(`/api/comms/threads/${threadId}`);
+            if (res.ok) {
+                const data = await res.json();
+                setSelectedThread(data);
+            } else {
+                error("Erreur", "Impossible de charger la discussion");
+            }
+        } catch (error) {
+            console.error("Error fetching thread:", error);
+            error("Erreur", "Impossible de charger la discussion");
+        } finally {
+            setIsLoadingThread(false);
+        }
+    }, [error]);
+
+    // Real-time: refetch on message/thread events; track typing (multiple users)
+    const handleRealtimeEvent = useCallback(
+        (payload: CommsRealtimePayload) => {
+            const tid = payload.threadId;
+            const userName = payload.userName;
+
+            if (payload.type === "typing_start" && tid && userName) {
+                // Initialize timeout map for thread if needed
+                if (!typingTimeoutRef.current[tid]) {
+                    typingTimeoutRef.current[tid] = {};
+                }
+
+                // Clear existing timeout for this user
+                if (typingTimeoutRef.current[tid][userName]) {
+                    clearTimeout(typingTimeoutRef.current[tid][userName]);
+                }
+
+                // Add user to typing list
+                setTypingByThread((prev) => {
+                    const current = prev[tid] || [];
+                    if (!current.includes(userName)) {
+                        return { ...prev, [tid]: [...current, userName] };
+                    }
+                    return prev;
+                });
+
+                // Set timeout to remove user
+                typingTimeoutRef.current[tid][userName] = setTimeout(() => {
+                    setTypingByThread((prev) => {
+                        const current = prev[tid] || [];
+                        return { ...prev, [tid]: current.filter(n => n !== userName) };
+                    });
+                    delete typingTimeoutRef.current[tid][userName];
+                }, 5000);
+
+            } else if (payload.type === "typing_stop" && tid && userName) {
+                setTypingByThread((prev) => {
+                    const current = prev[tid] || [];
+                    return { ...prev, [tid]: current.filter(n => n !== userName) };
+                });
+                if (typingTimeoutRef.current[tid]?.[userName]) {
+                    clearTimeout(typingTimeoutRef.current[tid][userName]);
+                    delete typingTimeoutRef.current[tid][userName];
+                }
+            }
+
+            if (!tid) return;
+
+            if (
+                payload.type === "message_created" ||
+                payload.type === "message_updated" ||
+                payload.type === "message_deleted" ||
+                payload.type === "thread_status_updated"
+            ) {
+                // Only refetch the affected thread in the list (optimized)
+                if (selectedThreadIdRef.current === tid) {
+                    fetchThreadDetails(tid);
+                }
+                // Refresh stats and thread list
+                fetchStats();
+                fetchThreads(true);
+            }
+        },
+        [fetchThreads, fetchStats, fetchThreadDetails]
+    );
+
+    useCommsRealtime({
+        enabled: !!session?.user?.id,
+        onEvent: handleRealtimeEvent,
+    });
+
+    // Initial load
+    useEffect(() => {
+        fetchThreads();
+        fetchStats();
+    }, [fetchThreads, fetchStats]);
+
+    // Handle thread selection
+    const handleSelectThread = (thread: CommsThreadListItem) => {
+        fetchThreadDetails(thread.id);
+    };
+
+    // Handle close thread panel
+    const handleCloseThread = () => {
+        setSelectedThread(null);
+        fetchThreads(true);
+    };
+
+    // Handle status change
+    const handleStatusChange = async (status: CommsThreadStatus) => {
+        if (!selectedThread) return;
+
+        try {
+            const res = await fetch(`/api/comms/threads/${selectedThread.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ status }),
+            });
+
+            if (res.ok) {
+                success("Succès", `Discussion ${status === "RESOLVED" ? "résolue" : "archivée"}`);
+                fetchThreadDetails(selectedThread.id);
+                fetchThreads(true);
+            } else {
+                error("Erreur", "Impossible de modifier le statut");
+            }
+        } catch (error) {
+            console.error("Error updating status:", error);
+            error("Erreur", "Impossible de modifier le statut");
+        }
+    };
+
+    // Handle send message
+    const handleSendMessage = async (
+        content: string,
+        opts?: { mentionIds?: string[]; files?: File[] }
+    ) => {
+        if (!selectedThread) return;
+
+        try {
+            const hasFiles = !!opts?.files?.length;
+            let res: Response;
+
+            if (hasFiles) {
+                const form = new FormData();
+                form.set("content", content);
+                if (opts.mentionIds?.length) {
+                    form.set("mentionIds", JSON.stringify(opts.mentionIds));
+                }
+                for (const f of opts.files!) {
+                    form.append("files", f);
+                }
+                res = await fetch(`/api/comms/threads/${selectedThread.id}/messages`, {
+                    method: "POST",
+                    body: form,
+                });
+            } else {
+                res = await fetch(`/api/comms/threads/${selectedThread.id}/messages`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        content,
+                        mentionIds: opts?.mentionIds ?? [],
+                    }),
+                });
+            }
+
+            if (res.ok) {
+                fetchThreadDetails(selectedThread.id);
+                fetchStats();
+            } else {
+                error("Erreur", "Impossible d'envoyer le message");
+            }
+        } catch (error) {
+            console.error("Error sending message:", error);
+            error("Erreur", "Impossible d'envoyer le message");
+        }
+    };
+
+    // Handle create thread
+    const handleCreateThread = async (request: CreateThreadRequest) => {
+        try {
+            const res = await fetch("/api/comms/threads", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(request),
+            });
+
+            if (res.ok) {
+                const { id } = await res.json();
+                success("Succès", "Discussion créée");
+                fetchThreads(true);
+                fetchStats();
+                fetchThreadDetails(id);
+            } else {
+                error("Erreur", "Impossible de créer la discussion");
+            }
+        } catch (error) {
+            console.error("Error creating thread:", error);
+            error("Erreur", "Impossible de créer la discussion");
+        }
+    };
+
+    // Handle filter change
+    const handleFilterChange = (type: CommsChannelType | "all") => {
+        setFilters((prev) => ({
+            ...prev,
+            type: type === "all" ? undefined : type,
+        }));
+    };
+
+    // Calculate stats from data
+    const totalUnread = stats?.totalUnread || 0;
+    const openThreads = useMemo(() => threads.filter(t => t.status === "OPEN").length, [threads]);
+
+    // Format typing indicator text
+    const getTypingText = (threadId: string) => {
+        const users = typingByThread[threadId] || [];
+        if (users.length === 0) return undefined;
+        if (users.length === 1) return users[0];
+        if (users.length === 2) return `${users[0]} et ${users[1]}`;
+        return `${users[0]} et ${users.length - 1} autres`;
+    };
+
     return (
-        <div className="p-6 space-y-6">
-            <PageHeader
-                title="Communications"
-                subtitle="Discussions avec l'équipe et les missions"
-                icon={<MessageSquare className="w-5 h-5" />}
-            />
-            
-            <div className="h-[calc(100vh-200px)]">
-                <CommsInbox />
+        <div className="space-y-6 pb-10">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+                <div>
+                    <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                            <MessageSquare className="w-6 h-6 text-white" />
+                        </div>
+                        <div>
+                            <h1 className="text-2xl font-bold text-slate-900">Communications</h1>
+                            <p className="text-sm text-slate-500">
+                                Discussions avec l'équipe et les missions
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => fetchThreads(true)}
+                        disabled={isRefreshing}
+                        className={cn(
+                            "p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors disabled:opacity-50"
+                        )}
+                        title="Actualiser"
+                    >
+                        <RefreshCw className={cn("w-4 h-4 text-slate-500", isRefreshing && "animate-spin")} />
+                    </button>
+                    <button
+                        onClick={() => setShowSearchPanel(true)}
+                        className="p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
+                        title="Recherche avancée"
+                    >
+                        <Search className="w-4 h-4 text-slate-500" />
+                    </button>
+                    <Button
+                        onClick={() => setShowNewThreadModal(true)}
+                        className="h-10 px-5 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-medium shadow-lg shadow-indigo-500/25"
+                    >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Nouveau message
+                    </Button>
+                </div>
             </div>
+
+            {/* Stats Cards */}
+            <div className="grid grid-cols-4 gap-5">
+                <StatCard
+                    icon={Inbox}
+                    label="Non lus"
+                    value={totalUnread}
+                    subValue="messages"
+                    color="indigo"
+                />
+                <StatCard
+                    icon={MessageSquare}
+                    label="Discussions ouvertes"
+                    value={openThreads}
+                    subValue="en cours"
+                    color="emerald"
+                />
+                <StatCard
+                    icon={MessageCircle}
+                    label="Directs"
+                    value={stats?.unreadByType?.DIRECT || 0}
+                    subValue="non lus"
+                    color="blue"
+                />
+                <StatCard
+                    icon={Target}
+                    label="Missions"
+                    value={stats?.unreadByType?.MISSION || 0}
+                    subValue="non lus"
+                    color="amber"
+                />
+            </div>
+
+            {/* Main Content */}
+            <div className="grid grid-cols-12 gap-6">
+                {/* Thread List Panel */}
+                <div className={cn(
+                    "transition-all duration-300",
+                    isListCollapsed ? "col-span-1" : "col-span-4"
+                )}>
+                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden h-[80vh] flex flex-col">
+                        {/* List Header */}
+                        <div className={cn(
+                            "border-b border-slate-200 p-4",
+                            isListCollapsed && "p-2 flex items-center justify-center"
+                        )}>
+                            {!isListCollapsed ? (
+                                <>
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div className="flex items-center gap-2">
+                                            <h2 className="font-semibold text-slate-900">Messages</h2>
+                                            {totalUnread > 0 && (
+                                                <span className="px-2 py-0.5 text-xs font-medium text-white bg-indigo-500 rounded-full">
+                                                    {totalUnread}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <button
+                                            onClick={() => setIsListCollapsed(true)}
+                                            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                                            title="Réduire le panneau"
+                                        >
+                                            <PanelLeftClose className="w-4 h-4" />
+                                        </button>
+                                    </div>
+
+                                    {/* Search */}
+                                    <div className="relative mb-3">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                        <Input
+                                            value={searchQuery}
+                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                            placeholder="Rechercher..."
+                                            className="pl-9 h-9 text-sm bg-slate-50 border-slate-200 focus:bg-white"
+                                        />
+                                    </div>
+
+                                    {/* Filter Pills */}
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {FILTER_OPTIONS.map((opt) => (
+                                            <button
+                                                key={opt.type}
+                                                onClick={() => handleFilterChange(opt.type)}
+                                                className={cn(
+                                                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all",
+                                                    (filters.type === opt.type || (opt.type === "all" && !filters.type))
+                                                        ? "bg-indigo-100 text-indigo-700 shadow-sm"
+                                                        : "text-slate-600 hover:bg-slate-100"
+                                                )}
+                                            >
+                                                <opt.icon className="w-3.5 h-3.5" />
+                                                {opt.label}
+                                                {stats && opt.type !== "all" && stats.unreadByType[opt.type as CommsChannelType] > 0 && (
+                                                    <span className="px-1.5 py-0.5 text-[10px] bg-indigo-500 text-white rounded-full">
+                                                        {stats.unreadByType[opt.type as CommsChannelType]}
+                                                    </span>
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    {/* Active filter indicator */}
+                                    {(filters.type || debouncedSearchQuery) && (
+                                        <div className="mt-3 flex items-center justify-between">
+                                            <span className="text-xs text-slate-500">
+                                                {threads.length} résultat{threads.length !== 1 ? "s" : ""}
+                                            </span>
+                                            <button
+                                                onClick={() => {
+                                                    setFilters({});
+                                                    setSearchQuery("");
+                                                }}
+                                                className="text-xs text-indigo-600 hover:text-indigo-700"
+                                            >
+                                                Effacer les filtres
+                                            </button>
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <div className="flex flex-col items-center gap-2">
+                                    <button
+                                        onClick={() => setIsListCollapsed(false)}
+                                        className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                                        title="Développer le panneau"
+                                    >
+                                        <PanelLeft className="w-5 h-5" />
+                                    </button>
+                                    {totalUnread > 0 && (
+                                        <span className="px-2 py-0.5 text-xs font-medium text-white bg-indigo-500 rounded-full">
+                                            {totalUnread}
+                                        </span>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Thread List */}
+                        <div className={cn(
+                            "flex-1 overflow-y-auto",
+                            isListCollapsed && "hidden"
+                        )}>
+                            {isLoading ? (
+                                <div className="space-y-2 p-4">
+                                    {[1, 2, 3, 4, 5].map((i) => (
+                                        <div
+                                            key={i}
+                                            className="animate-pulse bg-slate-100 rounded-xl h-20"
+                                        />
+                                    ))}
+                                </div>
+                            ) : threads.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center h-full py-12">
+                                    <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                                        <MessageSquare className="w-8 h-8 text-slate-400" />
+                                    </div>
+                                    <h3 className="text-lg font-semibold text-slate-900 mb-2">
+                                        {debouncedSearchQuery || filters.type ? "Aucun résultat" : "Aucune discussion"}
+                                    </h3>
+                                    <p className="text-sm text-slate-500 text-center max-w-xs">
+                                        {debouncedSearchQuery || filters.type
+                                            ? "Essayez de modifier vos filtres"
+                                            : "Envoyez un premier message pour commencer"
+                                        }
+                                    </p>
+                                </div>
+                            ) : (
+                                <ThreadList
+                                    threads={threads}
+                                    selectedId={selectedThread?.id}
+                                    onSelect={handleSelectThread}
+                                    currentUserId={session?.user?.id}
+                                />
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Thread View Panel */}
+                <div className={cn(
+                    "transition-all duration-300",
+                    isListCollapsed ? "col-span-11" : "col-span-8"
+                )}>
+                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden h-[80vh]">
+                        {isLoadingThread ? (
+                            <div className="flex items-center justify-center h-full">
+                                <div className="flex flex-col items-center gap-3">
+                                    <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+                                    <p className="text-sm text-slate-500">Chargement...</p>
+                                </div>
+                            </div>
+                        ) : selectedThread ? (
+                            <ThreadView
+                                thread={selectedThread}
+                                onClose={handleCloseThread}
+                                onStatusChange={handleStatusChange}
+                                onSendMessage={handleSendMessage}
+                                onReactionToggle={() => selectedThread && fetchThreadDetails(selectedThread.id)}
+                                currentUserId={session?.user?.id || ""}
+                                typingUserName={getTypingText(selectedThread.id)}
+                            />
+                        ) : (
+                            <div className="flex-1 flex flex-col items-center justify-center h-full">
+                                <div className="text-center">
+                                    <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center mx-auto mb-5">
+                                        <Mail className="w-10 h-10 text-indigo-500" />
+                                    </div>
+                                    <h3 className="text-xl font-semibold text-slate-900 mb-2">
+                                        Sélectionnez une discussion
+                                    </h3>
+                                    <p className="text-sm text-slate-500 max-w-sm">
+                                        Choisissez une conversation dans la liste pour commencer
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* New thread modal */}
+            <NewThreadModal
+                isOpen={showNewThreadModal}
+                onClose={() => setShowNewThreadModal(false)}
+                onSubmit={handleCreateThread}
+                userRole={session?.user?.role || ""}
+            />
+
+            {/* Search panel */}
+            <SearchPanel
+                isOpen={showSearchPanel}
+                onClose={() => setShowSearchPanel(false)}
+                onResultClick={(threadId) => {
+                    fetchThreadDetails(threadId);
+                    setShowSearchPanel(false);
+                }}
+            />
         </div>
     );
 }
