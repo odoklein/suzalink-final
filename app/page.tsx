@@ -20,6 +20,9 @@ export default async function HomePage() {
         redirect(getRedirectPath(session.user.role));
     }
 
+    // Redirect to login page for visitors
+    redirect('/login');
+
     return (
         <div className="min-h-screen flex flex-col bg-[#0f172a] text-slate-100 overflow-hidden selection:bg-indigo-500/30">
             {/* Background Effects */}
