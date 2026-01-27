@@ -24,6 +24,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 
     const roleFilter = searchParams.get('role');
     const search = searchParams.get('search');
+    const excludeSelf = searchParams.get('excludeSelf') !== 'false'; // Default to true for backward compatibility
 
     const where: any = {};
     const statusFilter = searchParams.get('status'); // 'active', 'inactive', 'all'
@@ -50,7 +51,11 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     }
 
     // Exclude current user from search results (can't message yourself)
-    where.id = { not: session.user.id };
+    // But managers always see all users including themselves for management purposes
+    if (excludeSelf && session.user.role !== 'MANAGER') {
+        where.id = { not: session.user.id };
+    }
+    // If manager, they see all users regardless of excludeSelf parameter
 
     const [users, total] = await Promise.all([
         prisma.user.findMany({
@@ -121,27 +126,57 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     const password = data.password || Math.random().toString(36).slice(-8);
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const user = await prisma.user.create({
-        data: {
-            name: data.name,
-            email: data.email,
-            password: hashedPassword,
-            role: data.role,
-            isActive: true,
-            clientId: data.clientId,
-        },
-        select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
-            isActive: true,
-            createdAt: true,
-        },
+    // Create user and assign default permissions in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+        // Create the user
+        const user = await tx.user.create({
+            data: {
+                name: data.name,
+                email: data.email,
+                password: hashedPassword,
+                role: data.role,
+                isActive: true,
+                clientId: data.clientId,
+            },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true,
+                isActive: true,
+                createdAt: true,
+            },
+        });
+
+        // Get default permissions for the role from RolePermission
+        const rolePermissions = await tx.rolePermission.findMany({
+            where: {
+                role: data.role,
+                granted: true,
+            },
+            include: {
+                permission: true,
+            },
+        });
+
+        // Create UserPermission entries for all default role permissions
+        // This ensures the user explicitly has these permissions
+        if (rolePermissions.length > 0) {
+            await tx.userPermission.createMany({
+                data: rolePermissions.map((rp) => ({
+                    userId: user.id,
+                    permissionId: rp.permissionId,
+                    granted: true,
+                })),
+                skipDuplicates: true,
+            });
+        }
+
+        return user;
     });
 
     return successResponse({
-        ...user,
+        ...result,
         generatedPassword: !data.password ? password : undefined,
     }, 201);
 });

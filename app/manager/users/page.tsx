@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Modal, ModalFooter, ConfirmModal } from "@/components/ui/Modal";
 import { Badge } from "@/components/ui/Badge";
+import { useToast } from "@/components/ui/Toast";
 
 // ============================================
 // TYPES
@@ -74,6 +75,8 @@ const ROLE_LABELS: Record<string, string> = {
 // ============================================
 
 export default function UsersPage() {
+    const { success, error: showError } = useToast();
+    
     // State
     const [users, setUsers] = useState<User[]>([]);
     const [loading, setLoading] = useState(true);
@@ -117,6 +120,8 @@ export default function UsersPage() {
             if (search) params.set("search", search);
             if (roleFilter) params.set("role", roleFilter);
             if (statusFilter !== "all") params.set("status", statusFilter);
+            // Include all users (including self) for managers
+            params.set("excludeSelf", "false");
 
             const res = await fetch(`/api/users?${params}`);
             const json = await res.json();
@@ -193,14 +198,23 @@ export default function UsersPage() {
 
             if (!json.success) {
                 setFormErrors({ general: json.error });
+                showError("Erreur", json.error || "Impossible de créer l'utilisateur");
                 return;
             }
 
             setShowCreateModal(false);
             resetForm();
             fetchUsers();
+            
+            const roleLabel = ROLE_LABELS[formData.role] || formData.role;
+            success(
+                "Utilisateur créé",
+                `${formData.name} a été créé avec le rôle ${roleLabel}. Les permissions par défaut ont été assignées.`
+            );
         } catch (err) {
-            setFormErrors({ general: "Erreur lors de la création" });
+            const errorMessage = "Erreur lors de la création";
+            setFormErrors({ general: errorMessage });
+            showError("Erreur", errorMessage);
         } finally {
             setFormLoading(false);
         }
@@ -398,7 +412,7 @@ export default function UsersPage() {
             <PageHeader
                 title="Gestion des Utilisateurs"
                 subtitle="Gérez les utilisateurs, leurs rôles et permissions"
-                action={
+                actions={
                     <button
                         onClick={() => setShowCreateModal(true)}
                         className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors"
@@ -598,56 +612,56 @@ export default function UsersPage() {
                 title="Nouvel utilisateur"
                 size="md"
             >
-                <div className="space-y-4">
+                <div className="space-y-5">
                     {formErrors.general && (
                         <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
                             {formErrors.general}
                         </div>
                     )}
                     
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Nom</label>
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-medium text-slate-700">Nom</label>
                         <input
                             type="text"
                             value={formData.name}
                             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm transition-all duration-200 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
                             placeholder="Jean Dupont"
                         />
                         {formErrors.name && <p className="text-red-500 text-xs mt-1">{formErrors.name}</p>}
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-medium text-slate-700">Email</label>
                         <input
                             type="email"
                             value={formData.email}
                             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm transition-all duration-200 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
                             placeholder="jean@example.com"
                         />
                         {formErrors.email && <p className="text-red-500 text-xs mt-1">{formErrors.email}</p>}
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">
-                            Mot de passe <span className="text-slate-400">(optionnel)</span>
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-medium text-slate-700">
+                            Mot de passe <span className="text-slate-400 font-normal">(optionnel)</span>
                         </label>
                         <input
                             type="password"
                             value={formData.password}
                             onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm transition-all duration-200 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
                             placeholder="Laissez vide pour générer automatiquement"
                         />
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Rôle</label>
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-medium text-slate-700">Rôle</label>
                         <select
                             value={formData.role}
                             onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm transition-all duration-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
                         >
                             <option value="SDR">SDR</option>
                             <option value="BUSINESS_DEVELOPER">Business Developer</option>
@@ -656,26 +670,26 @@ export default function UsersPage() {
                             <option value="CLIENT">Client</option>
                         </select>
                     </div>
-
-                    <ModalFooter>
-                        <button
-                            onClick={() => {
-                                setShowCreateModal(false);
-                                resetForm();
-                            }}
-                            className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                        >
-                            Annuler
-                        </button>
-                        <button
-                            onClick={handleCreate}
-                            disabled={formLoading}
-                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
-                        >
-                            {formLoading ? "Création..." : "Créer"}
-                        </button>
-                    </ModalFooter>
                 </div>
+
+                <ModalFooter>
+                    <button
+                        onClick={() => {
+                            setShowCreateModal(false);
+                            resetForm();
+                        }}
+                        className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                    >
+                        Annuler
+                    </button>
+                    <button
+                        onClick={handleCreate}
+                        disabled={formLoading}
+                        className="px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {formLoading ? "Création..." : "Créer"}
+                    </button>
+                </ModalFooter>
             </Modal>
 
             {/* Edit Modal */}
@@ -688,51 +702,52 @@ export default function UsersPage() {
                 title="Modifier l'utilisateur"
                 size="md"
             >
-                <div className="space-y-4">
+                <div className="space-y-5">
                     {formErrors.general && (
                         <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
                             {formErrors.general}
                         </div>
                     )}
                     
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Nom</label>
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-medium text-slate-700">Nom</label>
                         <input
                             type="text"
                             value={formData.name}
                             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm transition-all duration-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
                         />
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-medium text-slate-700">Email</label>
                         <input
                             type="email"
                             value={formData.email}
                             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm transition-all duration-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
                         />
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">
-                            Nouveau mot de passe <span className="text-slate-400">(laisser vide pour conserver)</span>
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-medium text-slate-700">
+                            Nouveau mot de passe <span className="text-slate-400 font-normal">(laisser vide pour conserver)</span>
                         </label>
                         <input
                             type="password"
                             value={formData.password}
                             onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm transition-all duration-200 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                            placeholder="Laisser vide pour conserver le mot de passe actuel"
                         />
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Rôle</label>
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-medium text-slate-700">Rôle</label>
                         <select
                             value={formData.role}
                             onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm transition-all duration-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
                         >
                             <option value="SDR">SDR</option>
                             <option value="BUSINESS_DEVELOPER">Business Developer</option>
@@ -741,26 +756,26 @@ export default function UsersPage() {
                             <option value="CLIENT">Client</option>
                         </select>
                     </div>
-
-                    <ModalFooter>
-                        <button
-                            onClick={() => {
-                                setShowEditModal(false);
-                                resetForm();
-                            }}
-                            className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                        >
-                            Annuler
-                        </button>
-                        <button
-                            onClick={handleUpdate}
-                            disabled={formLoading}
-                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
-                        >
-                            {formLoading ? "Enregistrement..." : "Enregistrer"}
-                        </button>
-                    </ModalFooter>
                 </div>
+
+                <ModalFooter>
+                    <button
+                        onClick={() => {
+                            setShowEditModal(false);
+                            resetForm();
+                        }}
+                        className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                    >
+                        Annuler
+                    </button>
+                    <button
+                        onClick={handleUpdate}
+                        disabled={formLoading}
+                        className="px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {formLoading ? "Enregistrement..." : "Enregistrer"}
+                    </button>
+                </ModalFooter>
             </Modal>
 
             {/* Permissions Modal */}
