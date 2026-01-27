@@ -9,8 +9,7 @@ import { WizardForm, WizardStep } from "@/components/common/WizardForm";
 import { MissionDetails } from "./_components/MissionDetails";
 import { AudienceFilter } from "./_components/AudienceFilter";
 import { ReviewLaunch } from "./_components/ReviewLaunch";
-import { CreateMissionInput, createMissionAndEnrich } from "@/app/actions/mission-wizard";
-import { ExploriumSearchFilters } from "@/lib/explorium";
+import { CreateMissionInput, createMission } from "@/app/actions/mission-wizard";
 import { Channel } from "@prisma/client";
 
 // ============================================
@@ -39,7 +38,6 @@ export default function NewMissionPage() {
         startDate: "",
         endDate: "",
     });
-    const [filters, setFilters] = useState<ExploriumSearchFilters>({});
 
     // UI State
     const [clients, setClients] = useState<Client[]>([]);
@@ -100,12 +98,12 @@ export default function NewMissionPage() {
     const handleComplete = async () => {
         setIsSubmitting(true);
         try {
-            const res = await createMissionAndEnrich(missionData, filters);
+            const res = await createMission(missionData);
 
             if (res.success) {
                 success(
                     "Mission créée", 
-                    res.message || "La mission a été créée. La liste avec les entreprises Explorium est en cours de création en arrière-plan."
+                    res.message || "La mission a été créée avec succès."
                 );
                 router.push(`/manager/missions/${res.missionId}`);
             } else {
@@ -139,23 +137,11 @@ export default function NewMissionPage() {
             validationError: !isStep1Valid ? "Veuillez corriger les erreurs" : undefined
         },
         {
-            id: "audience",
-            label: "Ciblage Audience",
-            component: (
-                <AudienceFilter
-                    filters={filters}
-                    onChange={setFilters}
-                />
-            ),
-            isValid: true, // Always valid to proceed, filters can be empty
-        },
-        {
             id: "review",
             label: "Récapitulatif",
             component: (
                 <ReviewLaunch
                     data={missionData}
-                    filters={filters}
                     clientName={clients.find(c => c.id === missionData.clientId)?.name}
                 />
             ),
@@ -179,7 +165,7 @@ export default function NewMissionPage() {
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900">Nouvelle mission</h1>
                     <p className="text-slate-500 mt-1">
-                        Assistant de création de mission & enrichissement
+                        Assistant de création de mission
                     </p>
                 </div>
             </div>

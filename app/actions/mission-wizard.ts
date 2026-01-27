@@ -50,16 +50,15 @@ export async function searchCompanies(filters: ExploriumSearchFilters) {
 }
 
 /**
- * Server Action to create mission and start enrichment
+ * Server Action to create mission without Explorium enrichment
  */
-export async function createMissionAndEnrich(
-    missionData: CreateMissionInput,
-    audienceFilters: ExploriumSearchFilters
+export async function createMission(
+    missionData: CreateMissionInput
 ) {
     try {
         console.log("Creating mission...", missionData);
 
-        // 1. Create Mission
+        // Create Mission
         const mission = await prisma.mission.create({
             data: {
                 name: missionData.name,
@@ -74,22 +73,14 @@ export async function createMissionAndEnrich(
 
         console.log("Mission created:", mission.id);
 
-        // 2. Dispatch Background Job to fetch companies and create list
-        await enrichmentQueue.add("enrich-mission", {
-            missionId: mission.id,
-            filters: audienceFilters,
-        });
-
-        console.log("Enrichment job dispatched - list will be created in background");
-
-        // 3. Revalidate
+        // Revalidate
         revalidatePath("/manager/missions");
         revalidatePath(`/manager/missions/${mission.id}`);
 
         return { 
             success: true, 
             missionId: mission.id,
-            message: "Mission créée. La liste est en cours de création en arrière-plan avec les données Explorium."
+            message: "Mission créée avec succès."
         };
     } catch (error) {
         console.error("Failed to create mission:", error);

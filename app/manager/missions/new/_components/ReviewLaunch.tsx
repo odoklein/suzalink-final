@@ -2,16 +2,14 @@
 
 import { Card } from "@/components/ui";
 import { CreateMissionInput } from "@/app/actions/mission-wizard";
-import { ExploriumSearchFilters } from "@/lib/explorium";
-import { CheckCircle2, Target, Building, Calendar, Users } from "lucide-react";
+import { CheckCircle2, Target, Building, Calendar } from "lucide-react";
 
 interface ReviewLaunchProps {
     data: CreateMissionInput;
-    filters: ExploriumSearchFilters;
     clientName?: string;
 }
 
-export function ReviewLaunch({ data, filters, clientName }: ReviewLaunchProps) {
+export function ReviewLaunch({ data, clientName }: ReviewLaunchProps) {
     return (
         <div className="max-w-3xl mx-auto space-y-6">
             <div className="text-center mb-8">
@@ -54,29 +52,6 @@ export function ReviewLaunch({ data, filters, clientName }: ReviewLaunchProps) {
                         </dd>
                     </div>
                 </dl>
-            </Card>
-
-            <Card className="p-6">
-                <h3 className="font-medium text-slate-900 mb-4 flex items-center gap-2">
-                    <Users className="w-5 h-5 text-indigo-600" />
-                    Ciblage Audience (Explorium)
-                </h3>
-                <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4 text-sm">
-                    {Object.entries(filters).map(([key, value]) => (
-                        <div key={key}>
-                            <dt className="text-slate-500 mb-1 capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</dt>
-                            <dd className="font-medium text-slate-900">
-                                {value || "Tous"}
-                            </dd>
-                        </div>
-                    ))}
-                    {Object.keys(filters).length === 0 && (
-                        <div className="col-span-2 text-slate-400 italic">Aucun filtre spécifique selectionné (Broad targeting)</div>
-                    )}
-                </dl>
-                <div className="mt-6 p-4 bg-blue-50 border border-blue-100 rounded-lg text-sm text-blue-700">
-                    ℹ️ Une fois validé, un job d'enrichissement s'exécutera en arrière-plan pour importer et enrichir les contacts correspondants.
-                </div>
             </Card>
         </div>
     );
