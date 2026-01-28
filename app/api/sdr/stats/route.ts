@@ -51,25 +51,8 @@ export async function GET() {
             },
         });
 
-        // Callbacks pending (CALLBACK_REQUESTED that haven't been followed up)
+        // Callbacks pending: CALLBACK_REQUESTED this week (simplified count)
         const callbacksPending = await prisma.action.count({
-            where: {
-                sdrId,
-                result: "CALLBACK_REQUESTED",
-                contact: {
-                    actions: {
-                        none: {
-                            createdAt: {
-                                gt: prisma.action.fields.createdAt,
-                            },
-                        },
-                    },
-                },
-            },
-        });
-
-        // Simple callbacks count for now (last 7 days with CALLBACK_REQUESTED)
-        const callbacksSimple = await prisma.action.count({
             where: {
                 sdrId,
                 result: "CALLBACK_REQUESTED",
@@ -119,7 +102,7 @@ export async function GET() {
             data: {
                 actionsToday,
                 meetingsBooked,
-                callbacksPending: callbacksSimple, // Simplified for now
+                callbacksPending,
                 opportunitiesGenerated,
                 weeklyProgress: Math.max(0, weeklyProgress),
             },

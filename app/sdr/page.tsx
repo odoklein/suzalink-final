@@ -156,7 +156,7 @@ export default function SDRDashboardPage() {
             {/* Welcome Header */}
             <div className="text-center py-4">
                 <h1 className="text-2xl font-bold text-slate-900">
-                    {getGreeting()}, {session?.user?.name?.split(" ")[0]}! 👋
+                    {getGreeting()}, {session?.user?.name?.split(" ")[0] ?? "vous"} ! 👋
                 </h1>
                 <p className="text-slate-500 mt-1">
                     Voici votre journée en un coup d'œil
@@ -213,6 +213,17 @@ export default function SDRDashboardPage() {
                     </div>
                 </Card>
             </div>
+
+            {/* No missions assigned */}
+            {missions.length === 0 && (
+                <Card className="!p-6 border-dashed border-2 bg-slate-50/50 text-center">
+                    <Target className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                    <h3 className="font-semibold text-slate-700">Aucune mission assignée</h3>
+                    <p className="text-sm text-slate-500 mt-1">
+                        Contactez votre manager pour être assigné à une mission.
+                    </p>
+                </Card>
+            )}
 
             {/* Active Mission Card */}
             {activeMission && (
@@ -333,24 +344,28 @@ export default function SDRDashboardPage() {
                 </div>
             </Card>
 
-            {/* Weekly Progress */}
+            {/* Weekly Progress (evolution vs last week) */}
             {stats && (
                 <Card className="!p-4">
                     <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-medium text-slate-900">Cette semaine</h3>
+                        <h3 className="font-medium text-slate-900">Évolution vs semaine dernière</h3>
                         <div className="flex items-center gap-1 text-emerald-600 text-sm">
                             <TrendingUp className="w-4 h-4" />
-                            <span>Beau travail !</span>
+                            <span>{stats.weeklyProgress != null && stats.weeklyProgress >= 0 ? "Beau travail !" : "À toi de jouer"}</span>
                         </div>
                     </div>
                     <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                         <div
-                            className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 rounded-full"
-                            style={{ width: `${Math.min(stats.weeklyProgress || 0, 100)}%` }}
+                            className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 rounded-full transition-all duration-500"
+                            style={{ width: `${Math.min(Math.max(stats.weeklyProgress ?? 0, 0), 100)}%` }}
                         />
                     </div>
                     <p className="text-xs text-slate-500 mt-2">
-                        Continue comme ça ! Tu avances bien cette semaine.
+                        {stats.weeklyProgress != null && stats.weeklyProgress > 0
+                            ? "Tu as fait plus d'actions cette semaine que la précédente."
+                            : stats.weeklyProgress === 0
+                                ? "Même rythme que la semaine dernière."
+                                : "Continue comme ça !"}
                     </p>
                 </Card>
             )}
