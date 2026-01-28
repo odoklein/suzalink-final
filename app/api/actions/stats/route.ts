@@ -100,6 +100,24 @@ export async function GET(request: NextRequest) {
                 },
             });
 
+            // Get today's actions breakdown by result
+            const todayActionsByResult = await prisma.action.groupBy({
+                by: ["result"],
+                where: {
+                    sdrId: user.id,
+                    createdAt: { gte: startOfDay },
+                },
+                _count: true,
+            });
+
+            const todayMeetings = await prisma.action.count({
+                where: {
+                    sdrId: user.id,
+                    result: "MEETING_BOOKED",
+                    createdAt: { gte: startOfDay },
+                },
+            });
+
             // Get monthly stats
             const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
@@ -123,6 +141,43 @@ export async function GET(request: NextRequest) {
                 ? ((meetingsBooked / totalActions) * 100).toFixed(1)
                 : 0;
 
+            // Per-mission breakdown (for team [id] Performance tab)
+            const actionsByMission = await prisma.action.findMany({
+                where: {
+                    sdrId: user.id,
+                    ...(Object.keys(dateFilter).length > 0 && { createdAt: dateFilter }),
+                },
+                select: {
+                    result: true,
+                    campaign: {
+                        select: {
+                            missionId: true,
+                            mission: { select: { name: true } },
+                        },
+                    },
+                },
+            });
+
+            const missionMap = new Map<string, { missionId: string; missionName: string; calls: number; meetings: number }>();
+            for (const a of actionsByMission) {
+                const missionId = a.campaign?.missionId ?? "";
+                const missionName = a.campaign?.mission?.name ?? "Mission";
+                if (!missionId) continue;
+                const existing = missionMap.get(missionId);
+                if (existing) {
+                    existing.calls += 1;
+                    if (a.result === "MEETING_BOOKED") existing.meetings += 1;
+                } else {
+                    missionMap.set(missionId, {
+                        missionId,
+                        missionName,
+                        calls: 1,
+                        meetings: a.result === "MEETING_BOOKED" ? 1 : 0,
+                    });
+                }
+            }
+            const byMission = Array.from(missionMap.values());
+
             userStats[user.id] = {
                 userId: user.id,
                 userName: user.name,
@@ -136,9 +191,15 @@ export async function GET(request: NextRequest) {
                 meetingsThisWeek: weeklyMeetings,
                 // Today
                 callsToday: todayActions,
+                meetingsToday: todayMeetings,
+                resultBreakdownToday: todayActionsByResult.map(a => ({
+                    result: a.result,
+                    count: a._count,
+                })),
                 // Monthly
                 callsThisMonth: monthlyActions,
                 meetingsThisMonth: monthlyMeetings,
+                byMission,
             };
         }
 

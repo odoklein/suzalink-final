@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useToast } from "@/components/ui";
+import { useToast, Card } from "@/components/ui";
 import {
     ArrowLeft,
     User,
@@ -96,6 +96,7 @@ interface DetailedMetrics {
 
     // Results breakdown
     resultBreakdown: { result: string; count: number; percentage: number }[];
+    resultBreakdownToday: { result: string; count: number; percentage: number }[];
 
     // Daily trend (last 14 days)
     dailyTrend: { date: string; calls: number; meetings: number; hours: number }[];
@@ -416,8 +417,65 @@ export default function TeamMemberDetailPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [activeTab, setActiveTab] = useState<"overview" | "schedule" | "performance" | "history">("overview");
+    const [activeTimeTodaySeconds, setActiveTimeTodaySeconds] = useState(0);
+    const [isCurrentlyActive, setIsCurrentlyActive] = useState(false);
+    const [userStats, setUserStats] = useState<any>({});
+    const [historyActions, setHistoryActions] = useState<Array<{
+        id: string;
+        time: string;
+        createdAt: string;
+        result?: string;
+        contactOrCompanyName?: string;
+        campaignName?: string;
+    }>>([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [todayActions, setTodayActions] = useState<Array<{
+        id: string;
+        time: string;
+        createdAt: string;
+        result?: string;
+        contactOrCompanyName?: string;
+        campaignName?: string;
+    }>>([]);
 
     const weekDates = useMemo(() => getWeekDates(), []);
+
+    // Fetch history when History tab is selected
+    useEffect(() => {
+        if (activeTab !== "history" || !memberId) return;
+        let cancelled = false;
+        setHistoryLoading(true);
+        fetch(`/api/actions/recent?userId=${memberId}&limit=20`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (cancelled || !json.success) return;
+                setHistoryActions(Array.isArray(json.data) ? json.data : []);
+            })
+            .finally(() => { if (!cancelled) setHistoryLoading(false); });
+        return () => { cancelled = true; };
+    }, [activeTab, memberId]);
+
+    // Fetch today's actions for Overview tab
+    useEffect(() => {
+        if (activeTab !== "overview" || !memberId) return;
+        let cancelled = false;
+        fetch(`/api/actions/recent?userId=${memberId}&limit=10`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (cancelled || !json.success) return;
+                const actions = Array.isArray(json.data) ? json.data : [];
+                // Filter to today only
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const todayActions = actions.filter((a: { createdAt: string }) => {
+                    const actionDate = new Date(a.createdAt);
+                    return actionDate >= today;
+                });
+                setTodayActions(todayActions);
+            })
+            .catch(() => {});
+        return () => { cancelled = true; };
+    }, [activeTab, memberId]);
 
     // ============================================
     // FETCH DATA
@@ -428,15 +486,17 @@ export default function TeamMemberDetailPage() {
             setIsLoading(true);
             try {
                 // Fetch member details
-                const [memberRes, blocksRes, statsRes] = await Promise.all([
+                const [memberRes, blocksRes, statsRes, activityRes] = await Promise.all([
                     fetch(`/api/users/${memberId}`),
-                    fetch(`/api/planning?userId=${memberId}&startDate=${formatDate(weekDates[0])}&endDate=${formatDate(weekDates[4])}`),
+                    fetch(`/api/planning?sdrId=${memberId}&startDate=${formatDate(weekDates[0])}&endDate=${formatDate(weekDates[4])}`),
                     fetch(`/api/actions/stats?userId=${memberId}`),
+                    fetch(`/api/sdr/activity?userId=${memberId}`),
                 ]);
 
                 const memberJson = await memberRes.json();
                 const blocksJson = await blocksRes.json();
                 const statsJson = await statsRes.json();
+                const activityJson = await activityRes.json();
 
                 if (memberJson.success) {
                     setMember(memberJson.data);
@@ -446,9 +506,15 @@ export default function TeamMemberDetailPage() {
                     setBlocks(blocksJson.data.blocks || blocksJson.data || []);
                 }
 
+                if (activityJson.success) {
+                    setActiveTimeTodaySeconds(activityJson.data.totalActiveSecondsToday || 0);
+                    setIsCurrentlyActive(activityJson.data.isActive || false);
+                }
+
                 // Compute detailed metrics
                 const memberBlocks = blocksJson.data?.blocks || blocksJson.data || [];
-                const userStats = statsJson.data?.[memberId] || {};
+                const fetchedUserStats = statsJson.data?.[memberId] || {};
+                setUserStats(fetchedUserStats);
 
                 // Calculate hours from blocks
                 const todayStr = formatDate(new Date());
@@ -468,27 +534,27 @@ export default function TeamMemberDetailPage() {
                     .reduce((sum: number, b: ScheduleBlock) => sum + calcHours(b.startTime, b.endTime), 0);
 
                 // Build metrics from real data
-                const callsToday = userStats.callsToday || 0;
-                const callsThisWeek = userStats.callsThisWeek || memberJson.data?._count?.actions || 0;
-                const callsThisMonth = userStats.callsThisMonth || callsThisWeek * 4;
-                const totalCalls = userStats.totalActions || callsThisMonth;
+                const callsToday = fetchedUserStats.callsToday || 0;
+                const callsThisWeek = fetchedUserStats.callsThisWeek || memberJson.data?._count?.actions || 0;
+                const callsThisMonth = fetchedUserStats.callsThisMonth || callsThisWeek * 4;
+                const totalCalls = fetchedUserStats.totalActions || callsThisMonth;
 
-                const meetingsThisWeek = userStats.meetingsThisWeek || 0;
-                const meetingsThisMonth = userStats.meetingsThisMonth || meetingsThisWeek * 4;
-                const totalMeetings = userStats.meetingsBooked || meetingsThisMonth;
+                const meetingsThisWeek = fetchedUserStats.meetingsThisWeek || 0;
+                const meetingsThisMonth = fetchedUserStats.meetingsThisMonth || meetingsThisWeek * 4;
+                const totalMeetings = fetchedUserStats.meetingsBooked || meetingsThisMonth;
 
-                const conversionRateWeek = userStats.conversionRate ||
+                const conversionRateWeek = fetchedUserStats.conversionRate ||
                     (callsThisWeek > 0 ? Number(((meetingsThisWeek / callsThisWeek) * 100).toFixed(1)) : 0);
                 const conversionRateMonth = callsThisMonth > 0
                     ? Number(((meetingsThisMonth / callsThisMonth) * 100).toFixed(1))
                     : 0;
 
-                // Build result breakdown from real data if available
+                // Build result breakdown from real data if available (for week)
                 const resultBreakdown = [
                     { result: "MEETING_BOOKED", count: meetingsThisWeek, percentage: callsThisWeek > 0 ? Math.round((meetingsThisWeek / callsThisWeek) * 100) : 0 },
-                    { result: "INTERESTED", count: userStats.interested || 0, percentage: 0 },
-                    { result: "CALLBACK_REQUESTED", count: userStats.callbacks || 0, percentage: 0 },
-                    { result: "NO_RESPONSE", count: callsThisWeek - meetingsThisWeek - (userStats.interested || 0) - (userStats.callbacks || 0), percentage: 0 },
+                    { result: "INTERESTED", count: fetchedUserStats.interested || 0, percentage: 0 },
+                    { result: "CALLBACK_REQUESTED", count: fetchedUserStats.callbacks || 0, percentage: 0 },
+                    { result: "NO_RESPONSE", count: callsThisWeek - meetingsThisWeek - (fetchedUserStats.interested || 0) - (fetchedUserStats.callbacks || 0), percentage: 0 },
                     { result: "DISQUALIFIED", count: 0, percentage: 0 },
                 ].filter(r => r.count > 0);
 
@@ -498,22 +564,25 @@ export default function TeamMemberDetailPage() {
                     r.percentage = totalResults > 0 ? Math.round((r.count / totalResults) * 100) : 0;
                 });
 
-                // Get unique missions from blocks for mission performance
-                const missionMap = new Map<string, { missionId: string; missionName: string; calls: number; meetings: number }>();
-                for (const block of memberBlocks) {
-                    const existing = missionMap.get(block.missionId);
-                    if (existing) {
-                        // In real implementation, would need to count actions per mission
-                        existing.calls += 10; // placeholder
-                    } else {
-                        missionMap.set(block.missionId, {
-                            missionId: block.missionId,
-                            missionName: block.mission?.name || "Mission",
-                            calls: 10,
-                            meetings: 0,
-                        });
-                    }
-                }
+                // Build today's result breakdown
+                const todayResultBreakdown = (fetchedUserStats.resultBreakdownToday || []).map((item: { result: string; count: number }) => {
+                    const totalToday = (fetchedUserStats.resultBreakdownToday || []).reduce((sum: number, r: { count: number }) => sum + r.count, 0);
+                    return {
+                        result: item.result,
+                        count: item.count,
+                        percentage: totalToday > 0 ? Math.round((item.count / totalToday) * 100) : 0,
+                    };
+                });
+
+                // Mission performance: use real byMission from API when present
+                const missionPerformance = Array.isArray(userStats.byMission) && userStats.byMission.length > 0
+                    ? userStats.byMission
+                    : memberBlocks.map((b: ScheduleBlock) => ({
+                        missionId: b.missionId,
+                        missionName: b.mission?.name || "Mission",
+                        calls: 0,
+                        meetings: 0,
+                    }));
 
                 const detailedMetrics: DetailedMetrics = {
                     scheduledHours: {
@@ -552,9 +621,10 @@ export default function TeamMemberDetailPage() {
                         : 0,
                     avgCallDuration: 120, // Default 2 min average
                     resultBreakdown,
+                    resultBreakdownToday: todayResultBreakdown,
                     dailyTrend: [], // Would need daily action aggregation endpoint
                     hourlyDistribution: [], // Would need hourly action aggregation endpoint
-                    missionPerformance: Array.from(missionMap.values()),
+                    missionPerformance,
                     currentStreak: 0, // Would need streak tracking in DB
                     longestStreak: 0,
                     rank: 0,
@@ -574,6 +644,25 @@ export default function TeamMemberDetailPage() {
 
         fetchData();
     }, [memberId, weekDates, showError]);
+
+    // Refresh activity status periodically (every 30s) when Overview tab is active
+    useEffect(() => {
+        if (activeTab !== "overview" || !memberId) return;
+        
+        const interval = setInterval(() => {
+            fetch(`/api/sdr/activity?userId=${memberId}`)
+                .then((res) => res.json())
+                .then((json) => {
+                    if (json.success) {
+                        setActiveTimeTodaySeconds(json.data.totalActiveSecondsToday || 0);
+                        setIsCurrentlyActive(json.data.isActive || false);
+                    }
+                })
+                .catch(() => {});
+        }, 30000);
+
+        return () => clearInterval(interval);
+    }, [activeTab, memberId]);
 
     // ============================================
     // RENDER LOADING
@@ -625,18 +714,31 @@ export default function TeamMemberDetailPage() {
                         <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center text-lg font-bold text-indigo-600">
                             {getInitials(member.name)}
                         </div>
-                        <div>
-                            <h1 className="text-2xl font-bold text-slate-900">{member.name}</h1>
-                            <div className="flex items-center gap-3 mt-1">
-                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
-                                    {member.role}
-                                </span>
-                                <span className="flex items-center gap-1 text-sm text-slate-500">
-                                    <Mail className="w-3.5 h-3.5" />
-                                    {member.email}
-                                </span>
+                            <div>
+                                <h1 className="text-2xl font-bold text-slate-900">{member.name}</h1>
+                                <div className="flex items-center gap-3 mt-1">
+                                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+                                        {member.role}
+                                    </span>
+                                    <span className="flex items-center gap-1 text-sm text-slate-500">
+                                        <Mail className="w-3.5 h-3.5" />
+                                        {member.email}
+                                    </span>
+                                    <span className="flex items-center gap-1 text-sm text-slate-600">
+                                        <Clock className="w-3.5 h-3.5" />
+                                        Temps actif aujourd'hui: {formatHours(activeTimeTodaySeconds)}
+                                    </span>
+                                    {isCurrentlyActive ? (
+                                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+                                            En ligne
+                                        </span>
+                                    ) : (
+                                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
+                                            Hors ligne
+                                        </span>
+                                    )}
+                                </div>
                             </div>
-                        </div>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -715,70 +817,121 @@ export default function TeamMemberDetailPage() {
 
             {/* Tab Content */}
             {activeTab === "overview" && (
-                <div className="grid grid-cols-3 gap-6">
-                    {/* Left column */}
-                    <div className="space-y-6">
-                        {/* Daily trend */}
-                        <div className="bg-white rounded-2xl border border-slate-200 p-5">
-                            <h3 className="font-semibold text-slate-900 mb-4">Tendance 14 jours</h3>
-                            <MiniBarChart
-                                data={(metrics?.dailyTrend || []).map(d => ({
-                                    label: d.date.split("/")[0],
-                                    value: d.calls,
-                                }))}
-                            />
-                        </div>
-
-                        {/* Achievements */}
-                        <div className="bg-white rounded-2xl border border-slate-200 p-5">
-                            <div className="flex items-center gap-2 mb-4">
-                                <Trophy className="w-5 h-5 text-amber-500" />
-                                <h3 className="font-semibold text-slate-900">Succès</h3>
+                <div className="space-y-6">
+                    {/* Today Stats Row */}
+                    <div className="grid grid-cols-4 gap-4">
+                        <Card className="shadow-sm">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
+                                    <Clock className="w-5 h-5 text-indigo-500" />
+                                </div>
+                                <div>
+                                    <p className="text-2xl font-bold text-slate-900">{formatHours(activeTimeTodaySeconds)}</p>
+                                    <p className="text-sm text-slate-500">Temps actif aujourd'hui</p>
+                                </div>
                             </div>
-                            <div className="space-y-2">
-                                {(metrics?.achievements || []).map((a) => (
-                                    <AchievementBadge
-                                        key={a.id}
-                                        name={a.name}
-                                        icon={a.icon}
-                                        earnedAt={a.earnedAt}
-                                    />
-                                ))}
+                        </Card>
+                        <Card className="shadow-sm">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                                    <Phone className="w-5 h-5 text-blue-500" />
+                                </div>
+                                <div>
+                                    <p className="text-2xl font-bold text-slate-900">{metrics?.calls.today || 0}</p>
+                                    <p className="text-sm text-slate-500">Appels aujourd'hui</p>
+                                </div>
                             </div>
-                        </div>
+                        </Card>
+                        <Card className="shadow-sm">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center">
+                                    <Calendar className="w-5 h-5 text-emerald-500" />
+                                </div>
+                                <div>
+                                    <p className="text-2xl font-bold text-slate-900">{userStats?.meetingsToday || 0}</p>
+                                    <p className="text-sm text-slate-500">RDV aujourd'hui</p>
+                                </div>
+                            </div>
+                        </Card>
+                        <Card className="shadow-sm">
+                            <div className="flex items-center gap-3">
+                                <div className={cn(
+                                    "w-10 h-10 rounded-xl flex items-center justify-center",
+                                    isCurrentlyActive ? "bg-emerald-50" : "bg-slate-100"
+                                )}>
+                                    <div className={cn(
+                                        "w-3 h-3 rounded-full",
+                                        isCurrentlyActive ? "bg-emerald-500" : "bg-slate-400"
+                                    )} />
+                                </div>
+                                <div>
+                                    <p className="text-sm font-semibold text-slate-900">
+                                        {isCurrentlyActive ? "En ligne" : "Hors ligne"}
+                                    </p>
+                                    <p className="text-xs text-slate-500">Statut</p>
+                                </div>
+                            </div>
+                        </Card>
                     </div>
 
-                    {/* Center column */}
-                    <div className="space-y-6">
-                        {/* Result breakdown */}
-                        <div className="bg-white rounded-2xl border border-slate-200 p-5">
-                            <h3 className="font-semibold text-slate-900 mb-4">Résultats des appels</h3>
-                            <ResultBreakdown data={metrics?.resultBreakdown || []} />
-                        </div>
-
-                        {/* Hourly distribution */}
-                        <div className="bg-white rounded-2xl border border-slate-200 p-5">
-                            <h3 className="font-semibold text-slate-900 mb-4">Activité par heure</h3>
-                            <MiniBarChart
-                                data={(metrics?.hourlyDistribution || []).map(d => ({
-                                    label: d.hour,
-                                    value: d.calls,
-                                }))}
-                            />
-                        </div>
-                    </div>
-
-                    {/* Right column */}
-                    <div className="space-y-6">
-                        {/* Today's schedule */}
-                        <div className="bg-white rounded-2xl border border-slate-200 p-5">
-                            <div className="flex items-center justify-between mb-4">
-                                <h3 className="font-semibold text-slate-900">Planning du jour</h3>
-                                <span className="text-xs text-slate-400">
-                                    {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}
-                                </span>
+                    <div className="grid grid-cols-3 gap-6">
+                        {/* Left column - Short history preview */}
+                        <div className="space-y-6">
+                            <div className="bg-white rounded-2xl border border-slate-200 p-5">
+                                <h3 className="font-semibold text-slate-900 mb-4">Historique du jour</h3>
+                                {todayActions.length === 0 ? (
+                                    <p className="text-sm text-slate-500 text-center py-4">Aucune action aujourd'hui</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {todayActions.slice(0, 5).map((action) => {
+                                            const historyResultLabels: Record<string, string> = {
+                                                MEETING_BOOKED: "RDV pris",
+                                                INTERESTED: "Intéressé",
+                                                CALLBACK_REQUESTED: "Rappel",
+                                                NO_RESPONSE: "Pas de réponse",
+                                                BAD_CONTACT: "Mauvais contact",
+                                                DISQUALIFIED: "Non qualifié",
+                                            };
+                                            const resultLabel = action.result ? (historyResultLabels[action.result] ?? action.result) : "—";
+                                            const timeStr = action.createdAt
+                                                ? new Date(action.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+                                                : action.time ?? "—";
+                                            return (
+                                                <div key={action.id} className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg text-sm">
+                                                    <span className="text-xs text-slate-400 w-12">{timeStr}</span>
+                                                    <span className="flex-1 text-slate-700 truncate">{resultLabel}</span>
+                                                    {action.contactOrCompanyName && (
+                                                        <span className="text-xs text-slate-500 truncate max-w-[100px]">
+                                                            {action.contactOrCompanyName}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
                             </div>
-                            <ScheduleTimeline blocks={blocks} date={new Date()} />
+                        </div>
+
+                        {/* Center column - Résultats d'appel (today) */}
+                        <div className="space-y-6">
+                            <div className="bg-white rounded-2xl border border-slate-200 p-5">
+                                <h3 className="font-semibold text-slate-900 mb-4">Résultats d'appel (aujourd'hui)</h3>
+                                <ResultBreakdown data={metrics?.resultBreakdownToday || []} />
+                            </div>
+                        </div>
+
+                        {/* Right column - Planning du jour */}
+                        <div className="space-y-6">
+                            <div className="bg-white rounded-2xl border border-slate-200 p-5">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="font-semibold text-slate-900">Planning du jour</h3>
+                                    <span className="text-xs text-slate-400">
+                                        {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}
+                                    </span>
+                                </div>
+                                <ScheduleTimeline blocks={blocks} date={new Date()} />
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -878,7 +1031,50 @@ export default function TeamMemberDetailPage() {
             {activeTab === "history" && (
                 <div className="bg-white rounded-2xl border border-slate-200 p-5">
                     <h3 className="font-semibold text-slate-900 mb-4">Historique des actions</h3>
-                    <p className="text-slate-500">Historique détaillé des appels et actions à venir...</p>
+                    {historyLoading ? (
+                        <div className="flex items-center justify-center py-12">
+                            <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
+                        </div>
+                    ) : historyActions.length === 0 ? (
+                        <p className="text-slate-500">Aucune action enregistrée.</p>
+                    ) : (
+                        <div className="overflow-x-auto rounded-xl border border-slate-200">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="bg-slate-50 border-b border-slate-200">
+                                        <th className="text-left py-3 px-4 font-medium text-slate-600">Date</th>
+                                        <th className="text-left py-3 px-4 font-medium text-slate-600">Résultat</th>
+                                        <th className="text-left py-3 px-4 font-medium text-slate-600">Contact / Société</th>
+                                        <th className="text-left py-3 px-4 font-medium text-slate-600">Campagne</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {historyActions.map((item) => {
+                                        const historyResultLabels: Record<string, string> = {
+                                            MEETING_BOOKED: "RDV pris",
+                                            INTERESTED: "Intéressé",
+                                            CALLBACK_REQUESTED: "Rappel",
+                                            NO_RESPONSE: "Pas de réponse",
+                                            BAD_CONTACT: "Mauvais contact",
+                                            DISQUALIFIED: "Non qualifié",
+                                        };
+                                        const resultLabel = item.result ? (historyResultLabels[item.result] ?? item.result) : "—";
+                                        const dateStr = item.createdAt
+                                            ? new Date(item.createdAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+                                            : item.time ?? "—";
+                                        return (
+                                            <tr key={item.id} className="border-b border-slate-100 last:border-0">
+                                                <td className="py-3 px-4 text-slate-700">{dateStr}</td>
+                                                <td className="py-3 px-4 text-slate-700">{resultLabel}</td>
+                                                <td className="py-3 px-4 text-slate-700">{item.contactOrCompanyName ?? "—"}</td>
+                                                <td className="py-3 px-4 text-slate-700">{item.campaignName ?? "—"}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
                 </div>
             )}
         </div>

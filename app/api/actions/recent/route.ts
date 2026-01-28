@@ -19,10 +19,14 @@ export async function GET(request: NextRequest) {
         }
 
         const { searchParams } = new URL(request.url);
-        const limit = parseInt(searchParams.get("limit") || "10");
+        const limit = Math.min(parseInt(searchParams.get("limit") || "10") || 10, 100);
+        const offset = parseInt(searchParams.get("offset") || "0") || 0;
+        const userId = searchParams.get("userId");
 
         // Fetch recent actions with user and campaign info
         const recentActions = await prisma.action.findMany({
+            where: userId ? { sdrId: userId } : undefined,
+            skip: offset,
             take: limit,
             orderBy: { createdAt: "desc" },
             include: {
@@ -43,6 +47,11 @@ export async function GET(request: NextRequest) {
                         },
                     },
                 },
+                company: {
+                    select: {
+                        name: true,
+                    },
+                },
                 campaign: {
                     select: {
                         name: true,
@@ -51,8 +60,8 @@ export async function GET(request: NextRequest) {
             },
         });
 
-        // Fetch recent schedule block status changes
-        const recentBlocks = await prisma.scheduleBlock.findMany({
+        // Fetch recent schedule block status changes (only when not filtering by user)
+        const recentBlocks = userId ? [] : await prisma.scheduleBlock.findMany({
             take: limit,
             orderBy: { updatedAt: "desc" },
             where: {
@@ -82,6 +91,9 @@ export async function GET(request: NextRequest) {
             time: string;
             type: "call" | "meeting" | "schedule";
             createdAt: Date;
+            result?: string;
+            contactOrCompanyName?: string;
+            campaignName?: string;
         }[] = [];
 
         // Add action activities
@@ -124,6 +136,10 @@ export async function GET(request: NextRequest) {
                     type = "call";
             }
 
+            const contactOrCompanyName = action.contact
+                ? `${(action.contact.firstName || "").trim()} ${(action.contact.lastName || "").trim()}`.trim() || action.contact.company?.name
+                : action.company?.name;
+
             activities.push({
                 id: action.id,
                 user: userName,
@@ -132,6 +148,9 @@ export async function GET(request: NextRequest) {
                 time: formatRelativeTime(action.createdAt),
                 type,
                 createdAt: action.createdAt,
+                result: action.result,
+                contactOrCompanyName: contactOrCompanyName ?? undefined,
+                campaignName: action.campaign?.name,
             });
         }
 

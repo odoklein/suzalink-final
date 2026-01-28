@@ -267,6 +267,9 @@ model User {
   scheduleBlocks       ScheduleBlock[] @relation("SDRScheduleBlocks")
   createdScheduleBlocks ScheduleBlock[] @relation("CreatedScheduleBlocks")
   
+  // CRM Activity Tracking
+  crmActivityDays     CrmActivityDay[]
+  
   // Internal Communication Module
   createdCommsGroups      CommsGroup[]            @relation("CommsGroupCreator")
   commsGroupMemberships   CommsGroupMember[]
@@ -823,6 +826,31 @@ enum ScheduleBlockStatus {
   IN_PROGRESS
   COMPLETED
   CANCELLED
+}
+
+// ============================================
+// CRM ACTIVITY TRACKING
+// ============================================
+
+model CrmActivityDay {
+  id                      String    @id @default(cuid())
+  userId                  String
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date                    DateTime  @db.Date
+  
+  // Accumulated time for today (in seconds)
+  totalActiveSeconds      Int       @default(0)
+  
+  // Current session (null when paused)
+  currentSessionStartedAt DateTime?
+  lastActivityAt          DateTime?
+  
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  
+  @@unique([userId, date])
+  @@index([userId])
+  @@index([date])
 }
 
 // ============================================

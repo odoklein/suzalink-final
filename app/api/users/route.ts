@@ -332,29 +332,21 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
                 "actions.edit_contacts": { name: "Modifier contacts", category: "actions" },
             };
 
-            // Ensure all required permissions exist, create them if they don't
-            const permissionMap = new Map<string, string>();
-            
-            for (const code of defaultPermissionCodes) {
-                let permission = await tx.permission.findUnique({
-                    where: { code },
-                });
+            // Ensure all required permissions exist (batch fetch, then create missing)
+            const existingPermissions = await tx.permission.findMany({
+                where: { code: { in: defaultPermissionCodes } },
+            });
+            const permissionMap = new Map<string, string>(
+                existingPermissions.map((p) => [p.code, p.id])
+            );
 
-                if (!permission) {
-                    // Create the permission if it doesn't exist
-                    const def = PERMISSION_DEFINITIONS[code];
-                    if (def) {
-                        permission = await tx.permission.create({
-                            data: {
-                                code,
-                                name: def.name,
-                                category: def.category,
-                            },
-                        });
-                    }
-                }
-
-                if (permission) {
+            const missingCodes = defaultPermissionCodes.filter((code) => !permissionMap.has(code));
+            for (const code of missingCodes) {
+                const def = PERMISSION_DEFINITIONS[code];
+                if (def) {
+                    const permission = await tx.permission.create({
+                        data: { code, name: def.name, category: def.category },
+                    });
                     permissionMap.set(code, permission.id);
                 }
             }
@@ -376,6 +368,8 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
         }
 
         return user;
+    }, {
+        timeout: 20000, // 20s for many permissions (e.g. MANAGER)
     });
 
     return successResponse({

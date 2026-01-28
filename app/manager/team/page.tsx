@@ -411,24 +411,28 @@ function MemberCard({
     };
 
     const roleConfig = ROLE_COLORS[member.role] || ROLE_COLORS.SDR;
-    const statusConfig = STATUS_CONFIG[metrics.status];
+    const statusConfig = STATUS_CONFIG[metrics.status] ?? STATUS_CONFIG.offline;
 
     return (
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-xl hover:shadow-slate-200/50 transition-all duration-300 group">
             {/* Header with status */}
             <div className="relative p-5 pb-3">
                 <div className="flex items-start gap-4">
-                    {/* Avatar */}
-                    <div className="relative">
+                    {/* Avatar + status dot */}
+                    <div className="relative flex-shrink-0">
                         <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center text-lg font-bold text-indigo-600">
                             {getInitials(member.name)}
                         </div>
-                        {/* Status indicator */}
-                        <span className={cn(
-                            "absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white",
-                            statusConfig.color,
-                            statusConfig.pulse && "animate-pulse"
-                        )} />
+                        {/* Status indicator (En ligne / Hors ligne from activity chrono) */}
+                        <span
+                            className={cn(
+                                "absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-2 border-white shadow-sm",
+                                statusConfig.color,
+                                statusConfig.pulse && "animate-pulse"
+                            )}
+                            title={statusConfig.label}
+                            aria-hidden
+                        />
                     </div>
 
                     {/* Info */}
@@ -820,6 +824,18 @@ export default function TeamDashboardPage() {
                 setRecentActivities(activitiesJson.data || []);
             }
 
+            // Fetch SDR activity status (chrono online/offline) for each SDR/BD
+            const sdrAndBd = teamMembers.filter(m => ["SDR", "BUSINESS_DEVELOPER"].includes(m.role));
+            const activityResults = await Promise.all(
+                sdrAndBd.map((m) =>
+                    fetch(`/api/sdr/activity?userId=${m.id}`)
+                        .then((r) => r.json())
+                        .then((j) => ({ userId: m.id, isActive: !!j?.data?.isActive }))
+                        .catch(() => ({ userId: m.id, isActive: false }))
+                )
+            );
+            const activityByUserId = new Map(activityResults.map((a) => [a.userId, a.isActive]));
+
             // Compute metrics for each member
             const membersWithMetrics = teamMembers.map((member, index) => {
                 const memberBlocks = scheduleBlocks.filter(b => b.sdrId === member.id);
@@ -844,7 +860,7 @@ export default function TeamDashboardPage() {
                 const scheduledHoursThisWeek = dailyHours.reduce((sum, d) => sum + d.scheduled, 0);
                 const completedHoursThisWeek = dailyHours.reduce((sum, d) => sum + d.completed, 0);
 
-                // Determine status based on active blocks
+                // Determine status: prefer real-time chrono (activity API), then schedule blocks
                 const now = new Date();
                 const currentDateStr = formatDate(now);
                 const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
@@ -857,11 +873,14 @@ export default function TeamDashboardPage() {
                         b.status !== "CANCELLED";
                 });
 
+                const isActiveFromChrono = activityByUserId.get(member.id) === true;
+
                 let status: "online" | "busy" | "away" | "offline" = "offline";
-                if (activeBlock) {
+                if (isActiveFromChrono) {
+                    status = activeBlock?.status === "IN_PROGRESS" ? "busy" : "online";
+                } else if (activeBlock) {
                     status = activeBlock.status === "IN_PROGRESS" ? "busy" : "online";
                 } else if (member.isActive) {
-                    // Check if they have any scheduled block today
                     const hasBlockToday = memberBlocks.some(b => b.date.split("T")[0] === currentDateStr);
                     status = hasBlockToday ? "away" : "offline";
                 }
