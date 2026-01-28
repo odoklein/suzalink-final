@@ -39,7 +39,7 @@ const updateOpportunitySchema = z.object({
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(['MANAGER', 'CLIENT', 'SDR']);
+    const session = await requireRole(['MANAGER', 'CLIENT', 'SDR', 'BUSINESS_DEVELOPER']);
     const { searchParams } = new URL(request.url);
     const { page, limit, skip } = getPaginationParams(searchParams);
 
@@ -58,6 +58,18 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                 },
             },
         };
+    } else if (session.user.role === 'BUSINESS_DEVELOPER') {
+        const assignments = await prisma.sDRAssignment.findMany({
+            where: { sdrId: session.user.id },
+            select: { missionId: true },
+        });
+        const missionIds = assignments.map((a) => a.missionId);
+        if (missionIds.length === 0) {
+            return paginatedResponse([], 0, 1, limit);
+        }
+        where.contact = {
+            company: { list: { missionId: { in: missionIds } } },
+        };
     }
 
     // Filters
@@ -68,9 +80,16 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     if (urgency) where.urgency = urgency;
     if (handedOff !== null) where.handedOff = handedOff === 'true';
     if (missionId) {
-        where.contact = {
-            company: { list: { missionId } },
-        };
+        where.contact = where.contact
+            ? {
+                ...(where.contact as object),
+                company: {
+                    list: { missionId },
+                },
+            }
+            : {
+                company: { list: { missionId } },
+            };
     }
 
     const [opportunities, total] = await Promise.all([

@@ -47,6 +47,8 @@ interface Callback {
             name: string;
         };
     } | null;
+    /** Present when viewing as BD: SDR who created the callback */
+    sdr?: { id: string; name: string | null };
 }
 
 // ============================================
@@ -173,8 +175,13 @@ export default function SDRCallbacksPage() {
                                         </div>
 
                                         {/* Context Badge */}
-                                        {(callback.mission || callback.note || callback.callbackDate) && (
+                                        {(callback.mission || callback.note || callback.callbackDate || callback.sdr) && (
                                             <div className="flex flex-wrap items-center gap-3 mt-3">
+                                                {callback.sdr && (
+                                                    <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200">
+                                                        Assigné à: {callback.sdr.name ?? '—'}
+                                                    </Badge>
+                                                )}
                                                 {callback.mission?.client && (
                                                     <Badge variant="outline" className="bg-indigo-50/50 text-indigo-700 border-indigo-100 hover:bg-indigo-100 transition-colors">
                                                         Client: {callback.mission.client.name}

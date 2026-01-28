@@ -211,6 +211,18 @@ export const BD_NAV: NavSection[] = [
                 permission: "pages.action"
             },
             {
+                href: "/sdr/callbacks",
+                icon: Calendar,
+                label: "Rappels",
+                permission: "pages.action"
+            },
+            {
+                href: "/sdr/opportunities",
+                icon: Briefcase,
+                label: "Opportunités",
+                permission: "pages.opportunities"
+            },
+            {
                 href: "/bd/clients/new",
                 icon: UserPlus,
                 label: "Nouveau client",

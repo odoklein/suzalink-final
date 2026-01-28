@@ -19,21 +19,47 @@ export async function GET() {
             );
         }
 
-        // Fetch callbacks with callbackDate filtering
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        const userRole = (session.user as { role?: string }).role;
+        const isBusinessDeveloper = userRole === "BUSINESS_DEVELOPER";
+
+        // BUSINESS_DEVELOPER: scope by assigned missions (all SDRs' callbacks on those missions)
+        let missionIds: string[] = [];
+        if (isBusinessDeveloper) {
+            const assignments = await prisma.sDRAssignment.findMany({
+                where: { sdrId: session.user.id },
+                select: { missionId: true },
+            });
+            missionIds = assignments.map((a) => a.missionId);
+        }
+
+        const whereClause: {
+            sdrId?: string;
+            result: "CALLBACK_REQUESTED";
+            OR: Array<{ callbackDate: null } | { callbackDate: { lte: Date } }>;
+            campaign?: { missionId: { in: string[] } };
+        } = {
+            result: "CALLBACK_REQUESTED",
+            OR: [
+                { callbackDate: null },
+                { callbackDate: { lte: new Date() } },
+            ],
+        };
+
+        if (isBusinessDeveloper) {
+            if (missionIds.length === 0) {
+                return NextResponse.json({ success: true, data: [] });
+            }
+            whereClause.campaign = { missionId: { in: missionIds } };
+        } else {
+            whereClause.sdrId = session.user.id;
+        }
 
         const callbacks = await prisma.action.findMany({
-            where: {
-                sdrId: session.user.id,
-                result: "CALLBACK_REQUESTED",
-                // Show callbacks for today and past (overdue), or NULL dates (legacy)
-                OR: [
-                    { callbackDate: null },
-                    { callbackDate: { lte: new Date() } },
-                ],
-            },
+            where: whereClause,
             include: {
+                sdr: isBusinessDeveloper
+                    ? { select: { id: true, name: true } }
+                    : false,
                 contact: {
                     select: {
                         id: true,
@@ -122,6 +148,9 @@ export async function GET() {
                     name: action.campaign.mission.name,
                     client: action.campaign.mission.client,
                 } : null,
+                ...(isBusinessDeveloper && "sdr" in action && action.sdr
+                    ? { sdr: { id: action.sdr.id, name: action.sdr.name } }
+                    : {}),
             });
         }
 
