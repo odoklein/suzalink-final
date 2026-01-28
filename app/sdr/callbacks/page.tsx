@@ -33,6 +33,11 @@ interface Callback {
         company: {
             name: string;
         };
+    } | null;  // Contact can be null for company-only actions
+    company?: {  // Direct company reference for company-only callbacks
+        id: string;
+        name: string;
+        phone: string | null;
     };
     mission: {
         id: string;
@@ -131,7 +136,10 @@ export default function SDRCallbacksPage() {
                                     <div className="space-y-1">
                                         <div className="flex items-center gap-3">
                                             <h3 className="text-lg font-bold text-slate-900 group-hover:text-indigo-900 transition-colors">
-                                                {callback.contact.firstName} {callback.contact.lastName}
+                                                {callback.contact
+                                                    ? `${callback.contact.firstName || ''} ${callback.contact.lastName || ''}`.trim() || 'Contact inconnu'
+                                                    : callback.company?.name || 'Société inconnue'
+                                                }
                                             </h3>
                                             <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
                                                 {new Date(callback.createdAt).toLocaleDateString()}
@@ -141,9 +149,9 @@ export default function SDRCallbacksPage() {
                                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
                                             <div className="flex items-center gap-1.5 font-medium">
                                                 <Building2 className="w-4 h-4 text-slate-400" />
-                                                {callback.contact.company.name}
+                                                {callback.contact?.company.name || callback.company?.name || 'N/A'}
                                             </div>
-                                            {callback.contact.title && (
+                                            {callback.contact?.title && (
                                                 <div className="flex items-center gap-1.5 text-slate-500">
                                                     <span className="w-1 h-1 rounded-full bg-slate-300" />
                                                     {callback.contact.title}
@@ -170,10 +178,10 @@ export default function SDRCallbacksPage() {
                                 </div>
 
                                 <div className="flex items-center gap-3 pl-4 md:pl-0 border-t md:border-t-0 border-slate-50 pt-4 md:pt-0">
-                                    {callback.contact.phone && (
+                                    {(callback.contact?.phone || callback.company?.phone) && (
                                         <div className="hidden lg:block text-right mr-2">
                                             <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">Contact</p>
-                                            <p className="font-mono text-sm text-slate-700">{callback.contact.phone}</p>
+                                            <p className="font-mono text-sm text-slate-700">{callback.contact?.phone || callback.company?.phone}</p>
                                         </div>
                                     )}
 

@@ -9,7 +9,8 @@ import { Prisma } from '@prisma/client';
 // ============================================
 
 export interface CreateActionInput {
-    contactId: string;
+    contactId?: string;
+    companyId?: string;
     sdrId: string;
     campaignId: string;
     channel: 'CALL' | 'EMAIL' | 'LINKEDIN';
@@ -40,10 +41,16 @@ export class ActionService {
     async createAction(input: CreateActionInput): Promise<ActionWithRelations> {
         // Use transaction to ensure atomicity
         return await prisma.$transaction(async (tx) => {
+            // Validate that either contactId or companyId is provided
+            if (!input.contactId && !input.companyId) {
+                throw new Error('Either contactId or companyId must be provided');
+            }
+
             // 1. Create the action
             const action = await tx.action.create({
                 data: {
-                    contactId: input.contactId,
+                    contactId: input.contactId || null,
+                    companyId: input.companyId || null,
                     sdrId: input.sdrId,
                     campaignId: input.campaignId,
                     channel: input.channel,
@@ -52,19 +59,20 @@ export class ActionService {
                     duration: input.duration,
                 },
                 include: {
-                    contact: {
+                    contact: input.contactId ? {
                         include: { company: true },
-                    },
+                    } : undefined,
+                    company: input.companyId ? true : undefined,
                 },
             });
 
-            // 2. Auto-create opportunity for positive outcomes
-            if (this.shouldCreateOpportunity(input.result, input.note)) {
+            // 2. Auto-create opportunity for positive outcomes (only for contacts)
+            if (input.contactId && this.shouldCreateOpportunity(input.result, input.note)) {
                 await this.createOpportunityFromAction(tx, action, input.note!);
             }
 
-            // 3. Update contact completeness if enriched
-            if (input.note && input.result === 'BAD_CONTACT') {
+            // 3. Update contact completeness if enriched (only for contacts)
+            if (input.contactId && input.note && input.result === 'BAD_CONTACT') {
                 await this.handleBadContact(tx, input.contactId, input.note);
             }
 

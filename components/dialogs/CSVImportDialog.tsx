@@ -50,6 +50,7 @@ const FIELD_OPTIONS = [
     { value: "company.industry", label: "🏭 Industrie", group: "Société" },
     { value: "company.country", label: "🌍 Pays", group: "Société" },
     { value: "company.website", label: "🌐 Site web", group: "Société" },
+    { value: "company.phone", label: "📞 Téléphone société", group: "Société" },
     { value: "company.size", label: "👥 Taille", group: "Société" },
 
     // Contact fields
@@ -101,6 +102,10 @@ export function CSVImportDialog({ isOpen, onClose, onSuccess, missions }: Import
         if (lower.includes("website") || lower.includes("site") || lower.includes("url")) {
             return "company.website";
         }
+        if ((lower.includes("phone") || lower.includes("téléphone") || lower.includes("tel")) && 
+            (lower.includes("company") || lower.includes("société") || lower.includes("entreprise"))) {
+            return "company.phone";
+        }
         if (lower.includes("size") || lower.includes("taille") || lower.includes("employees")) {
             return "company.size";
         }
@@ -129,22 +134,73 @@ export function CSVImportDialog({ isOpen, onClose, onSuccess, missions }: Import
     };
 
     // ============================================
-    // PARSE CSV
+    // ADVANCED CSV PARSING
     // ============================================
+
+    const parseCSVLine = (line: string, delimiter: string = ','): string[] => {
+        const result: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            const nextChar = line[i + 1];
+            
+            if (char === '"') {
+                if (inQuotes && nextChar === '"') {
+                    // Escaped quote
+                    current += '"';
+                    i++; // Skip next quote
+                } else {
+                    // Toggle quote state
+                    inQuotes = !inQuotes;
+                }
+            } else if (char === delimiter && !inQuotes) {
+                // End of field
+                result.push(current.trim());
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+        
+        // Add last field
+        result.push(current.trim());
+        return result;
+    };
+
+    const detectDelimiter = (firstLine: string): string => {
+        const delimiters = [',', ';', '\t', '|'];
+        let maxCount = 0;
+        let detectedDelimiter = ',';
+        
+        for (const delim of delimiters) {
+            const count = (firstLine.match(new RegExp(`\\${delim}`, 'g')) || []).length;
+            if (count > maxCount) {
+                maxCount = count;
+                detectedDelimiter = delim;
+            }
+        }
+        
+        return detectedDelimiter;
+    };
 
     const parseCSV = useCallback((file: File) => {
         const reader = new FileReader();
         reader.onload = (e) => {
             const text = e.target?.result as string;
-            const lines = text.split('\n').filter(line => line.trim());
+            const lines = text.split(/\r?\n/).filter(line => line.trim());
 
             if (lines.length < 2) {
                 showError("Fichier invalide", "Le CSV doit contenir au moins une ligne d'en-tête et une ligne de données");
                 return;
             }
 
-            // Parse headers
-            const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+            // Detect delimiter
+            const delimiter = detectDelimiter(lines[0]);
+
+            // Parse headers with advanced parsing
+            const headers = parseCSVLine(lines[0], delimiter).map(h => h.replace(/^"|"$/g, ''));
             setCsvHeaders(headers);
 
             // Auto-detect mappings
@@ -154,9 +210,9 @@ export function CSVImportDialog({ isOpen, onClose, onSuccess, missions }: Import
             }));
             setMappings(autoMappings);
 
-            // Parse preview data (first 5 rows)
+            // Parse preview data (first 5 rows) with advanced parsing
             const dataRows = lines.slice(1, 6).map(line => {
-                const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+                const values = parseCSVLine(line, delimiter).map(v => v.replace(/^"|"$/g, ''));
                 const row: PreviewRow = {};
                 headers.forEach((header, i) => {
                     row[header] = values[i] || "";
@@ -219,9 +275,12 @@ export function CSVImportDialog({ isOpen, onClose, onSuccess, missions }: Import
                 const lines = text.split('\n').filter(line => line.trim());
                 const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
 
-                // Parse all data rows
+                // Detect delimiter
+                const delimiter = detectDelimiter(lines[0]);
+
+                // Parse all data rows with advanced parsing
                 const csvData = lines.slice(1).map(line => {
-                    const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+                    const values = parseCSVLine(line, delimiter).map(v => v.replace(/^"|"$/g, ''));
                     const row: Record<string, string> = {};
                     headers.forEach((header, i) => {
                         row[header] = values[i] || "";

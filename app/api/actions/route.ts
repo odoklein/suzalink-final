@@ -16,7 +16,8 @@ import { z } from 'zod';
 // ============================================
 
 const createActionSchema = z.object({
-    contactId: z.string().min(1, 'Contact requis'),
+    contactId: z.string().min(1, 'Contact requis').optional(),
+    companyId: z.string().min(1, 'Company requis').optional(),
     campaignId: z.string().min(1, 'Campagne requise'),
     channel: z.enum(['CALL', 'EMAIL', 'LINKEDIN']),
     result: z.enum([
@@ -29,6 +30,9 @@ const createActionSchema = z.object({
     ]),
     note: z.string().max(500, 'Note trop longue (max 500 caractères)').optional(),
     duration: z.number().positive().max(7200, 'Durée invalide').optional(),
+}).refine(data => data.contactId || data.companyId, {
+    message: 'Contact ou Company requis',
+    path: ['contactId'],
 });
 
 // ============================================
@@ -82,8 +86,14 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
 
     // Use service layer with transaction
     const action = await actionService.createAction({
-        ...data,
+        contactId: data.contactId,
+        companyId: data.companyId,
         sdrId: session.user.id,
+        campaignId: data.campaignId,
+        channel: data.channel,
+        result: data.result,
+        note: data.note,
+        duration: data.duration,
     });
 
     return successResponse(action, 201);

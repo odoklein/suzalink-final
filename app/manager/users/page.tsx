@@ -843,6 +843,33 @@ export default function UsersPage() {
 
                 <ModalFooter>
                     <button
+                        onClick={async () => {
+                            if (!selectedUser) return;
+                            try {
+                                setPermissionsLoading(true);
+                                const res = await fetch(`/api/users/${selectedUser.id}/reset-permissions`, {
+                                    method: "POST",
+                                });
+                                const json = await res.json();
+                                
+                                if (json.success) {
+                                    success("Permissions réinitialisées", "Les permissions par défaut ont été assignées.");
+                                    await fetchUserPermissions(selectedUser.id);
+                                } else {
+                                    showError("Erreur", json.error || "Impossible de réinitialiser les permissions");
+                                }
+                            } catch (err) {
+                                showError("Erreur", "Impossible de réinitialiser les permissions");
+                            } finally {
+                                setPermissionsLoading(false);
+                            }
+                        }}
+                        disabled={permissionsLoading}
+                        className="px-4 py-2 text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                        Réinitialiser aux valeurs par défaut
+                    </button>
+                    <button
                         onClick={() => {
                             setShowPermissionsModal(false);
                             setSelectedUser(null);

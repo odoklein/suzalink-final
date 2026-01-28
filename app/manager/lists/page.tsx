@@ -19,7 +19,6 @@ import {
     Download,
 } from "lucide-react";
 import Link from "next/link";
-import { CSVImportDialog } from "@/components/dialogs/CSVImportDialog";
 
 // ============================================
 // TYPES
@@ -49,10 +48,6 @@ interface ListData {
     };
 }
 
-interface Mission {
-    id: string;
-    name: string;
-}
 
 // ============================================
 // TYPE STYLES
@@ -72,11 +67,9 @@ export default function ListsPage() {
     const router = useRouter();
     const { success, error: showError } = useToast();
     const [lists, setLists] = useState<ListData[]>([]);
-    const [missions, setMissions] = useState<Mission[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
     const [typeFilter, setTypeFilter] = useState<string>("all");
-    const [showImportDialog, setShowImportDialog] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [deletingList, setDeletingList] = useState<ListData | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -105,35 +98,10 @@ export default function ListsPage() {
         }
     };
 
-    // ============================================
-    // FETCH MISSIONS
-    // ============================================
-
-    const fetchMissions = async () => {
-        try {
-            const res = await fetch("/api/missions?isActive=true");
-            const json = await res.json();
-            if (json.success) {
-                setMissions(json.data);
-            }
-        } catch (err) {
-            console.error("Failed to fetch missions:", err);
-        }
-    };
-
     useEffect(() => {
         fetchLists();
-        fetchMissions();
     }, []);
 
-    // ============================================
-    // HANDLE IMPORT SUCCESS
-    // ============================================
-
-    const handleImportSuccess = (listId: string) => {
-        fetchLists();
-        success("Import réussi!", "Votre liste a été créée avec succès");
-    };
 
     // ============================================
     // DELETE LIST
@@ -239,15 +207,16 @@ export default function ListsPage() {
                         <RefreshCw className={`w - 4 h - 4 ${isLoading ? "animate-spin" : ""} `} />
                     </Button>
                     <div className="flex items-center gap-2">
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => setShowImportDialog(true)}
-                            className="gap-2"
-                        >
-                            <Upload className="w-4 h-4" />
-                            Importer CSV
-                        </Button>
+                        <Link href="/manager/lists/import">
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                className="gap-2"
+                            >
+                                <Upload className="w-4 h-4" />
+                                Importer CSV
+                            </Button>
+                        </Link>
                         <Link href="/manager/lists/new">
                             <Button variant="primary" size="sm" className="gap-2">
                                 <Plus className="w-4 h-4" />
@@ -495,13 +464,6 @@ export default function ListsPage() {
                 isLoading={isDeleting}
             />
 
-            {/* CSV Import Dialog */}
-            <CSVImportDialog
-                isOpen={showImportDialog}
-                onClose={() => setShowImportDialog(false)}
-                onSuccess={handleImportSuccess}
-                missions={missions}
-            />
         </div>
     );
 }

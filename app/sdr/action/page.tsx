@@ -45,13 +45,14 @@ interface NextActionData {
         phone?: string;
         linkedin?: string;
         status: string;
-    };
+    } | null;
     company?: {
         id: string;
         name: string;
         industry?: string;
         website?: string;
         country?: string;
+        phone?: string | null;
     };
     campaignId?: string;
     channel?: Channel;
@@ -118,6 +119,7 @@ export default function SDRActionPage() {
     const [lists, setLists] = useState<ListItem[]>([]);
     const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
     const [selectedListId, setSelectedListId] = useState<string | null>(null);
+    const [viewType, setViewType] = useState<"all" | "companies" | "contacts">("all");
     const [activeTab, setActiveTab] = useState<string>("intro");
     const [showBookingModal, setShowBookingModal] = useState(false);
 
@@ -196,7 +198,11 @@ export default function SDRActionPage() {
 
     // Submit
     const handleSubmit = async () => {
-        if (!selectedResult || !currentAction?.contact || !currentAction.campaignId) return;
+        if (!selectedResult || !currentAction?.campaignId) return;
+        if (!currentAction.contact && !currentAction.company) {
+            setError("Aucun contact ou entreprise disponible");
+            return;
+        }
         if ((selectedResult === "INTERESTED" || selectedResult === "CALLBACK_REQUESTED") && !note.trim()) {
             setError("Note requise pour ce résultat");
             return;
@@ -211,7 +217,8 @@ export default function SDRActionPage() {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    contactId: currentAction.contact.id,
+                    contactId: currentAction.contact?.id,
+                    companyId: !currentAction.contact && currentAction.company ? currentAction.company.id : undefined,
                     campaignId: currentAction.campaignId,
                     channel: currentAction.channel,
                     result: selectedResult,
@@ -355,6 +362,15 @@ export default function SDRActionPage() {
                         <option value="all">Toutes les listes</option>
                         {filteredLists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                     </select>
+                    <select
+                        value={viewType}
+                        onChange={(e) => setViewType(e.target.value as "all" | "companies" | "contacts")}
+                        className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    >
+                        <option value="all">Tout afficher</option>
+                        <option value="companies">Sociétés uniquement</option>
+                        <option value="contacts">Contacts uniquement</option>
+                    </select>
                 </div>
                 <div className="flex items-center gap-4 text-sm">
                     <span className="text-slate-500">{actionsCompleted} actions</span>
@@ -421,66 +437,134 @@ export default function SDRActionPage() {
                         </div>
                     </Card>
 
-                    {/* Contact Card */}
+                    {/* Contact/Company Card */}
                     <Card>
-                        <div className="flex items-center gap-4 mb-4">
-                            <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center">
-                                <User className="w-6 h-6 text-indigo-600" />
-                            </div>
-                            <div>
-                                <p className="font-semibold text-slate-900">
-                                    {currentAction.contact?.firstName} {currentAction.contact?.lastName}
-                                </p>
-                                {currentAction.contact?.title && (
-                                    <Badge variant="default" className="mt-1">
-                                        {currentAction.contact.title}
-                                    </Badge>
-                                )}
-                            </div>
-                        </div>
+                        {currentAction.contact ? (
+                            <>
+                                <div className="flex items-center gap-4 mb-4">
+                                    <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center">
+                                        <User className="w-6 h-6 text-indigo-600" />
+                                    </div>
+                                    <div>
+                                        <p className="font-semibold text-slate-900">
+                                            {currentAction.contact.firstName} {currentAction.contact.lastName}
+                                        </p>
+                                        {currentAction.contact.title && (
+                                            <Badge variant="default" className="mt-1">
+                                                {currentAction.contact.title}
+                                            </Badge>
+                                        )}
+                                    </div>
+                                </div>
 
-                        {/* Contact Actions */}
-                        <div className="space-y-2">
-                            {currentAction.contact?.phone && (
-                                <a
-                                    href={`tel:${currentAction.contact.phone}`}
-                                    className="flex items-center justify-center gap-2 h-12 w-full text-sm font-medium text-white bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 rounded-xl transition-all shadow-lg shadow-indigo-500/20"
-                                >
-                                    <Phone className="w-4 h-4" />
-                                    {currentAction.contact.phone}
-                                </a>
-                            )}
-                            {currentAction.contact?.email && (
-                                <a
-                                    href={`mailto:${currentAction.contact.email}`}
-                                    className="flex items-center justify-center gap-2 h-11 w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors"
-                                >
-                                    <Mail className="w-4 h-4" />
-                                    {currentAction.contact.email}
-                                </a>
-                            )}
-                            {currentAction.contact?.linkedin && (
-                                <a
-                                    href={currentAction.contact.linkedin.startsWith("http") ? currentAction.contact.linkedin : `https://${currentAction.contact.linkedin}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center justify-center gap-2 h-11 w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors"
-                                >
-                                    <Linkedin className="w-4 h-4" />
-                                    LinkedIn
-                                </a>
-                            )}
-                            {currentAction.clientBookingUrl && (
-                                <Button
-                                    variant="primary"
-                                    onClick={() => setShowBookingModal(true)}
-                                    className="w-full gap-2"
-                                >
-                                    <Calendar className="w-4 h-4" />
-                                    Planifier un RDV
-                                </Button>
-                            )}
-                        </div>
+                                {/* Contact Actions */}
+                                <div className="space-y-2">
+                                    {/* Phone - validate it looks like a phone number (contains digits) */}
+                                    {(() => {
+                                        const phone = currentAction.contact.phone || (currentAction.channel === 'CALL' && currentAction.company?.phone ? currentAction.company.phone : null);
+                                        const isValidPhone = phone && /[\d+\-().\s]/.test(phone) && phone.length >= 8;
+                                        return isValidPhone ? (
+                                            <a
+                                                href={`tel:${phone}`}
+                                                className="flex items-center justify-center gap-2 h-12 w-full text-sm font-medium text-white bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 rounded-xl transition-all shadow-lg shadow-indigo-500/20"
+                                            >
+                                                <Phone className="w-4 h-4" />
+                                                {phone}
+                                            </a>
+                                        ) : null;
+                                    })()}
+                                    {/* Email - validate it looks like an email */}
+                                    {(() => {
+                                        const email = currentAction.contact.email;
+                                        const isValidEmail = email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+                                        return isValidEmail ? (
+                                            <a
+                                                href={`mailto:${email}`}
+                                                className="flex items-center justify-center gap-2 h-11 w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors"
+                                            >
+                                                <Mail className="w-4 h-4" />
+                                                {email}
+                                            </a>
+                                        ) : null;
+                                    })()}
+                                    {currentAction.contact.linkedin && (
+                                        <a
+                                            href={currentAction.contact.linkedin.startsWith("http") ? currentAction.contact.linkedin : `https://${currentAction.contact.linkedin}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center justify-center gap-2 h-11 w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors"
+                                        >
+                                            <Linkedin className="w-4 h-4" />
+                                            LinkedIn
+                                        </a>
+                                    )}
+                                    {/* Show warning if contact info is missing or invalid */}
+                                    {(() => {
+                                        const phone = currentAction.contact.phone || (currentAction.channel === 'CALL' && currentAction.company?.phone ? currentAction.company.phone : null);
+                                        const isValidPhone = phone && /[\d+\-().\s]/.test(phone) && phone.length >= 8;
+                                        const email = currentAction.contact.email;
+                                        const isValidEmail = email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+                                        if (currentAction.channel === 'CALL' && !isValidPhone) {
+                                            return (
+                                                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+                                                    <AlertCircle className="w-4 h-4 inline mr-2" />
+                                                    Aucun numéro de téléphone valide disponible
+                                                </div>
+                                            );
+                                        }
+                                        if (currentAction.channel === 'EMAIL' && !isValidEmail) {
+                                            return (
+                                                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+                                                    <AlertCircle className="w-4 h-4 inline mr-2" />
+                                                    Aucune adresse email valide disponible
+                                                </div>
+                                            );
+                                        }
+                                        return null;
+                                    })()}
+                                    {currentAction.clientBookingUrl && (
+                                        <Button
+                                            variant="primary"
+                                            onClick={() => setShowBookingModal(true)}
+                                            className="w-full gap-2"
+                                        >
+                                            <Calendar className="w-4 h-4" />
+                                            Planifier un RDV
+                                        </Button>
+                                    )}
+                                </div>
+                            </>
+                        ) : currentAction.company?.phone ? (
+                            <>
+                                <div className="flex items-center gap-4 mb-4">
+                                    <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center">
+                                        <Building2 className="w-6 h-6 text-indigo-600" />
+                                    </div>
+                                    <div>
+                                        <p className="font-semibold text-slate-900">
+                                            {currentAction.company.name}
+                                        </p>
+                                        <Badge variant="default" className="mt-1">
+                                            Entreprise
+                                        </Badge>
+                                    </div>
+                                </div>
+
+                                {/* Company Actions */}
+                                <div className="space-y-2">
+                                    {currentAction.company.phone && (
+                                        <a
+                                            href={`tel:${currentAction.company.phone}`}
+                                            className="flex items-center justify-center gap-2 h-12 w-full text-sm font-medium text-white bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 rounded-xl transition-all shadow-lg shadow-indigo-500/20"
+                                        >
+                                            <Phone className="w-4 h-4" />
+                                            {currentAction.company.phone}
+                                        </a>
+                                    )}
+                                </div>
+                            </>
+                        ) : null}
 
                         {/* Previous Note */}
                         {currentAction.lastAction?.note && (

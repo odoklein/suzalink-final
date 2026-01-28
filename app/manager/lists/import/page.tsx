@@ -13,6 +13,9 @@ import {
     AlertCircle,
     CheckCircle2,
     Table,
+    Building2,
+    User,
+    XCircle,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -44,7 +47,9 @@ const COMPANY_FIELDS = [
     { value: "company.industry", label: "Industrie" },
     { value: "company.country", label: "Pays" },
     { value: "company.website", label: "Site web" },
+    { value: "company.phone", label: "Téléphone société" },
     { value: "company.size", label: "Taille" },
+    { value: "__custom_company__", label: "➕ Champ personnalisé société..." },
 ];
 
 const CONTACT_FIELDS = [
@@ -54,6 +59,7 @@ const CONTACT_FIELDS = [
     { value: "contact.phone", label: "Téléphone" },
     { value: "contact.title", label: "Fonction" },
     { value: "contact.linkedin", label: "LinkedIn" },
+    { value: "__custom_contact__", label: "➕ Champ personnalisé contact..." },
 ];
 
 const ALL_FIELDS = [...COMPANY_FIELDS, ...CONTACT_FIELDS];
@@ -66,7 +72,7 @@ export default function ImportListPage() {
     const router = useRouter();
     const { success, error: showError } = useToast();
 
-    const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+    const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
     const [missions, setMissions] = useState<Mission[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
@@ -76,19 +82,23 @@ export default function ImportListPage() {
     const [missionId, setMissionId] = useState("");
     const [listName, setListName] = useState("");
 
-    // Step 2: Column mapping
+    // Step 2: Import Type Selection
+    const [importType, setImportType] = useState<"companies-only" | "companies-contacts">("companies-contacts");
+
+    // Step 3: Column mapping
     const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
     const [mappings, setMappings] = useState<ColumnMapping[]>([]);
     const [previewData, setPreviewData] = useState<PreviewRow[]>([]);
+    const [totalRows, setTotalRows] = useState(0); // Track actual row count
 
-    // Step 3: Validation
+    // Step 4: Validation
     const [validationResult, setValidationResult] = useState<{
         valid: number;
         errors: string[];
         warnings: string[];
     } | null>(null);
 
-    // Step 4: Import result
+    // Step 5: Import result
     const [importResult, setImportResult] = useState<{
         companies: number;
         contacts: number;
@@ -118,49 +128,121 @@ export default function ImportListPage() {
     }, []);
 
     // ============================================
-    // PARSE CSV
+    // ADVANCED CSV PARSING
     // ============================================
+
+    const parseCSVLine = (line: string, delimiter: string = ','): string[] => {
+        const result: string[] = [];
+        let current = '';
+        let inQuotes = false;
+
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            const nextChar = line[i + 1];
+
+            if (char === '"') {
+                if (inQuotes && nextChar === '"') {
+                    // Escaped quote
+                    current += '"';
+                    i++; // Skip next quote
+                } else {
+                    // Toggle quote state
+                    inQuotes = !inQuotes;
+                }
+            } else if (char === delimiter && !inQuotes) {
+                // End of field
+                result.push(current.trim());
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+
+        // Add last field
+        result.push(current.trim());
+        return result;
+    };
+
+    const detectDelimiter = (firstLine: string): string => {
+        const delimiters = [',', ';', '\t', '|'];
+        let maxCount = 0;
+        let detectedDelimiter = ',';
+
+        for (const delim of delimiters) {
+            const count = (firstLine.match(new RegExp(`\\${delim}`, 'g')) || []).length;
+            if (count > maxCount) {
+                maxCount = count;
+                detectedDelimiter = delim;
+            }
+        }
+
+        return detectedDelimiter;
+    };
 
     const parseCSV = useCallback((file: File) => {
         const reader = new FileReader();
         reader.onload = (e) => {
             const text = e.target?.result as string;
-            const lines = text.split('\n').filter(line => line.trim());
+            const lines = text.split(/\r?\n/).filter(line => line.trim());
 
             if (lines.length < 2) {
                 showError("Erreur", "Le fichier CSV doit contenir au moins une ligne d'en-tête et une ligne de données");
                 return;
             }
 
-            // Parse headers
-            const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+            // Detect delimiter
+            const delimiter = detectDelimiter(lines[0]);
+
+            // Parse headers with advanced parsing
+            const headers = parseCSVLine(lines[0], delimiter).map(h => h.replace(/^"|"$/g, ''));
             setCsvHeaders(headers);
 
-            // Initialize mappings with auto-detect
+            // Initialize mappings with auto-detect (FIXED: More specific patterns first)
             const autoMappings = headers.map(header => {
                 const lowerHeader = header.toLowerCase();
                 let targetField = "";
 
-                // Auto-detect common fields
-                if (lowerHeader.includes("company") || lowerHeader.includes("société") || lowerHeader.includes("entreprise")) {
+                // Auto-detect common fields - CHECK SPECIFIC PATTERNS FIRST
+                // Company phone (before generic company check)
+                if ((lowerHeader.includes("phone") || lowerHeader.includes("téléphone") || lowerHeader.includes("tel")) &&
+                    (lowerHeader.includes("company") || lowerHeader.includes("société") || lowerHeader.includes("entreprise"))) {
+                    targetField = "company.phone";
+                }
+                // Company size
+                else if (lowerHeader.includes("size") || lowerHeader.includes("taille") ||
+                    lowerHeader.includes("employees") || lowerHeader.includes("employés")) {
+                    targetField = "company.size";
+                }
+                // Generic company name (after specific company fields)
+                else if (lowerHeader.includes("company") || lowerHeader.includes("société") || lowerHeader.includes("entreprise") || lowerHeader.includes("organization")) {
                     targetField = "company.name";
-                } else if (lowerHeader.includes("industry") || lowerHeader.includes("secteur")) {
+                }
+                else if (lowerHeader.includes("industry") || lowerHeader.includes("secteur") || lowerHeader.includes("industrie")) {
                     targetField = "company.industry";
-                } else if (lowerHeader.includes("country") || lowerHeader.includes("pays")) {
+                }
+                else if (lowerHeader.includes("country") || lowerHeader.includes("pays")) {
                     targetField = "company.country";
-                } else if (lowerHeader.includes("website") || lowerHeader.includes("site")) {
+                }
+                else if (lowerHeader.includes("website") || lowerHeader.includes("site") || lowerHeader.includes("url")) {
                     targetField = "company.website";
-                } else if (lowerHeader.includes("firstname") || lowerHeader.includes("prénom") || lowerHeader === "first name") {
+                }
+                // Contact fields
+                else if (lowerHeader.includes("firstname") || lowerHeader.includes("prénom") || lowerHeader === "first name" || lowerHeader === "prenom") {
                     targetField = "contact.firstName";
-                } else if (lowerHeader.includes("lastname") || lowerHeader === "nom" || lowerHeader === "last name") {
+                }
+                else if (lowerHeader.includes("lastname") || lowerHeader === "nom" || lowerHeader === "last name" || lowerHeader.includes("surname")) {
                     targetField = "contact.lastName";
-                } else if (lowerHeader.includes("email") || lowerHeader.includes("mail")) {
+                }
+                else if (lowerHeader.includes("email") || lowerHeader.includes("mail") || lowerHeader.includes("e-mail")) {
                     targetField = "contact.email";
-                } else if (lowerHeader.includes("phone") || lowerHeader.includes("téléphone") || lowerHeader.includes("tel")) {
+                }
+                else if (lowerHeader.includes("phone") || lowerHeader.includes("téléphone") || lowerHeader.includes("tel") || lowerHeader.includes("mobile")) {
                     targetField = "contact.phone";
-                } else if (lowerHeader.includes("title") || lowerHeader.includes("fonction") || lowerHeader.includes("poste")) {
+                }
+                else if (lowerHeader.includes("title") || lowerHeader.includes("fonction") || lowerHeader.includes("poste") || lowerHeader.includes("job")) {
                     targetField = "contact.title";
-                } else if (lowerHeader.includes("linkedin")) {
+                }
+                else if (lowerHeader.includes("linkedin")) {
                     targetField = "contact.linkedin";
                 }
 
@@ -169,9 +251,9 @@ export default function ImportListPage() {
 
             setMappings(autoMappings);
 
-            // Parse preview data (first 5 rows)
+            // Parse preview data (first 5 rows) with advanced parsing
             const dataRows = lines.slice(1, 6).map(line => {
-                const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+                const values = parseCSVLine(line, delimiter).map(v => v.replace(/^"|"$/g, ''));
                 const row: PreviewRow = {};
                 headers.forEach((header, i) => {
                     row[header] = values[i] || "";
@@ -180,6 +262,9 @@ export default function ImportListPage() {
             });
 
             setPreviewData(dataRows);
+
+            // Set total row count for validation
+            setTotalRows(lines.length - 1);
 
             // Auto-generate list name from file
             if (!listName) {
@@ -214,24 +299,48 @@ export default function ImportListPage() {
             errors.push("Le champ 'Nom de société' est obligatoire");
         }
 
-        const hasContact = mappings.some(m => m.targetField.startsWith("contact."));
-        if (!hasContact) {
-            warnings.push("Aucun champ contact mappé - seules les sociétés seront importées");
+        // Check for duplicate mappings
+        const usedFields = new Map<string, string>();
+        for (const mapping of mappings) {
+            if (mapping.targetField && mapping.targetField !== "" &&
+                !mapping.targetField.startsWith("__custom")) {
+                const existing = usedFields.get(mapping.targetField);
+                if (existing) {
+                    errors.push(`Le champ "${mapping.targetField}" est mappé à la fois par "${existing}" et "${mapping.csvColumn}"`);
+                } else {
+                    usedFields.set(mapping.targetField, mapping.csvColumn);
+                }
+            }
         }
 
-        const hasEmail = mappings.some(m => m.targetField === "contact.email");
-        if (hasContact && !hasEmail) {
-            warnings.push("Pas d'email mappé - les contacts ne pourront pas être enrichis");
+        if (importType === "companies-contacts") {
+            const hasContact = mappings.some(m => m.targetField.startsWith("contact."));
+            if (!hasContact) {
+                warnings.push("Aucun champ contact mappé - seules les sociétés seront importées");
+            }
+
+            const hasEmail = mappings.some(m => m.targetField === "contact.email");
+            if (hasContact && !hasEmail) {
+                warnings.push("Pas d'email mappé - les contacts ne pourront pas être enrichis");
+            }
+        }
+
+        // Check for company phone if companies-only
+        if (importType === "companies-only") {
+            const hasCompanyPhone = mappings.some(m => m.targetField === "company.phone");
+            if (!hasCompanyPhone) {
+                warnings.push("Aucun téléphone société mappé - les SDR ne pourront pas appeler directement les sociétés");
+            }
         }
 
         setValidationResult({
-            valid: errors.length === 0 ? previewData.length : 0,
+            valid: errors.length === 0 ? totalRows : 0, // FIXED: Use totalRows instead of previewData.length
             errors,
             warnings,
         });
 
         if (errors.length === 0) {
-            setStep(3);
+            setStep(4);
         }
     };
 
@@ -250,11 +359,14 @@ export default function ImportListPage() {
             reader.onload = async (e) => {
                 const text = e.target?.result as string;
                 const lines = text.split('\n').filter(line => line.trim());
-                const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
 
-                // Parse all data rows
+                // FIXED: Detect delimiter first, then parse headers properly
+                const delimiter = detectDelimiter(lines[0]);
+                const headers = parseCSVLine(lines[0], delimiter).map(h => h.replace(/^"|"$/g, ''));
+
+                // Parse all data rows with advanced parsing
                 const csvData = lines.slice(1).map(line => {
-                    const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+                    const values = parseCSVLine(line, delimiter).map(v => v.replace(/^"|"$/g, ''));
                     const row: Record<string, string> = {};
                     headers.forEach((header, i) => {
                         row[header] = values[i] || "";
@@ -271,6 +383,7 @@ export default function ImportListPage() {
                         listName,
                         mappings,
                         csvData,
+                        importType, // Pass import type to API
                     }),
                 });
 
@@ -283,7 +396,7 @@ export default function ImportListPage() {
                         errors: json.data.errors,
                     });
 
-                    setStep(4);
+                    setStep(5);
                     success("Import réussi", `${json.data.companiesCreated} sociétés et ${json.data.contactsCreated} contacts importés`);
                 } else {
                     showError("Erreur", json.error || "L'import a échoué");
@@ -311,9 +424,10 @@ export default function ImportListPage() {
 
     const steps = [
         { num: 1, label: "Fichier" },
-        { num: 2, label: "Mapping" },
-        { num: 3, label: "Validation" },
-        { num: 4, label: "Import" },
+        { num: 2, label: "Type" },
+        { num: 3, label: "Mapping" },
+        { num: 4, label: "Validation" },
+        { num: 5, label: "Import" },
     ];
 
     // ============================================
@@ -330,8 +444,8 @@ export default function ImportListPage() {
                     </Button>
                 </Link>
                 <div>
-                    <h1 className="text-2xl font-bold text-white">Importer CSV</h1>
-                    <p className="text-neutral-500 mt-1">
+                    <h1 className="text-2xl font-bold text-slate-900">Importer CSV</h1>
+                    <p className="text-slate-500 mt-1">
                         Importez des sociétés et contacts depuis un fichier CSV
                     </p>
                 </div>
@@ -342,21 +456,21 @@ export default function ImportListPage() {
                 {steps.map((s, i) => (
                     <div key={s.num} className="flex items-center">
                         <div className={`flex items-center gap-2 px-4 py-2 rounded-full ${step >= s.num
-                            ? "bg-indigo-500/20 text-indigo-400"
-                            : "bg-neutral-800 text-neutral-500"
+                            ? "bg-indigo-50 text-indigo-600"
+                            : "bg-slate-100 text-slate-500"
                             }`}>
                             <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${step > s.num
                                 ? "bg-indigo-500 text-white"
                                 : step === s.num
-                                    ? "bg-indigo-500/30 text-indigo-400"
-                                    : "bg-neutral-700 text-neutral-400"
+                                    ? "bg-indigo-500 text-white"
+                                    : "bg-slate-300 text-slate-600"
                                 }`}>
                                 {step > s.num ? <Check className="w-3 h-3" /> : s.num}
                             </span>
                             <span className="text-sm font-medium">{s.label}</span>
                         </div>
                         {i < steps.length - 1 && (
-                            <div className={`w-12 h-0.5 mx-2 ${step > s.num ? "bg-indigo-500" : "bg-neutral-700"
+                            <div className={`w-12 h-0.5 mx-2 ${step > s.num ? "bg-indigo-500" : "bg-slate-200"
                                 }`} />
                         )}
                     </div>
@@ -377,7 +491,7 @@ export default function ImportListPage() {
                         />
 
                         <div>
-                            <label className="block text-sm font-medium text-neutral-400 mb-2">
+                            <label className="block text-sm font-medium text-slate-700 mb-2">
                                 Nom de la liste
                             </label>
                             <input
@@ -385,7 +499,7 @@ export default function ImportListPage() {
                                 value={listName}
                                 onChange={(e) => setListName(e.target.value)}
                                 placeholder="Sera généré automatiquement depuis le fichier"
-                                className="w-full px-4 py-3 bg-neutral-900 border border-neutral-700 rounded-xl text-white placeholder:text-neutral-500 focus:outline-none focus:border-indigo-500"
+                                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
                             />
                         </div>
 
@@ -411,55 +525,160 @@ export default function ImportListPage() {
                 </Card>
             )}
 
-            {/* Step 2: Column Mapping */}
+            {/* Step 2: Import Type Selection */}
             {step === 2 && (
+                <Card>
+                    <div className="space-y-6">
+                        <div>
+                            <h2 className="text-lg font-semibold text-slate-900 mb-2">Type d'import</h2>
+                            <p className="text-sm text-slate-500">
+                                Choisissez ce que vous souhaitez importer depuis votre fichier CSV
+                            </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <button
+                                onClick={() => setImportType("companies-only")}
+                                className={`p-6 rounded-xl border-2 transition-all text-left ${importType === "companies-only"
+                                    ? "border-indigo-500 bg-indigo-50"
+                                    : "border-slate-200 bg-white hover:border-slate-300"
+                                    }`}
+                            >
+                                <div className="flex items-start gap-4">
+                                    <div className={`w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 ${importType === "companies-only"
+                                        ? "bg-indigo-100 text-indigo-600"
+                                        : "bg-slate-100 text-slate-400"
+                                        }`}>
+                                        <Building2 className="w-6 h-6" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <h3 className="font-semibold text-slate-900 mb-1">Sociétés uniquement</h3>
+                                        <p className="text-sm text-slate-600">
+                                            Importez uniquement les sociétés. Les SDR pourront appeler directement les sociétés qui ont un numéro de téléphone.
+                                        </p>
+                                    </div>
+                                    {importType === "companies-only" && (
+                                        <Check className="w-5 h-5 text-indigo-600 flex-shrink-0" />
+                                    )}
+                                </div>
+                            </button>
+
+                            <button
+                                onClick={() => setImportType("companies-contacts")}
+                                className={`p-6 rounded-xl border-2 transition-all text-left ${importType === "companies-contacts"
+                                    ? "border-indigo-500 bg-indigo-50"
+                                    : "border-slate-200 bg-white hover:border-slate-300"
+                                    }`}
+                            >
+                                <div className="flex items-start gap-4">
+                                    <div className={`w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 ${importType === "companies-contacts"
+                                        ? "bg-indigo-100 text-indigo-600"
+                                        : "bg-slate-100 text-slate-400"
+                                        }`}>
+                                        <User className="w-6 h-6" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <h3 className="font-semibold text-slate-900 mb-1">Sociétés + Contacts</h3>
+                                        <p className="text-sm text-slate-600">
+                                            Importez les sociétés avec leurs contacts associés. Permet un ciblage plus précis.
+                                        </p>
+                                    </div>
+                                    {importType === "companies-contacts" && (
+                                        <Check className="w-5 h-5 text-indigo-600 flex-shrink-0" />
+                                    )}
+                                </div>
+                            </button>
+                        </div>
+
+                        <div className="flex justify-between">
+                            <Button variant="ghost" onClick={() => setStep(1)} className="gap-2">
+                                <ArrowLeft className="w-4 h-4" />
+                                Retour
+                            </Button>
+                            <Button
+                                variant="primary"
+                                onClick={() => setStep(3)}
+                                className="gap-2"
+                            >
+                                Suivant
+                                <ArrowRight className="w-4 h-4" />
+                            </Button>
+                        </div>
+                    </div>
+                </Card>
+            )}
+
+            {/* Step 3: Column Mapping */}
+            {step === 3 && (
                 <Card>
                     <div className="space-y-6">
                         <div className="flex items-center justify-between">
                             <div>
-                                <h2 className="text-lg font-semibold text-white">Mapper les colonnes</h2>
-                                <p className="text-sm text-neutral-500">
+                                <h2 className="text-lg font-semibold text-slate-900">Mapper les colonnes</h2>
+                                <p className="text-sm text-slate-500">
                                     Associez chaque colonne CSV à un champ de données
                                 </p>
                             </div>
-                            <div className="text-sm text-neutral-400">
+                            <div className="text-sm text-slate-500">
                                 {csvHeaders.length} colonnes détectées
                             </div>
                         </div>
 
                         <div className="space-y-3">
-                            {mappings.map((mapping, i) => (
-                                <div key={mapping.csvColumn} className="flex items-center gap-4 p-3 bg-neutral-800/50 rounded-xl">
-                                    <div className="flex-1">
-                                        <p className="text-sm font-medium text-white">{mapping.csvColumn}</p>
-                                        <p className="text-xs text-neutral-500 truncate">
-                                            Ex: {previewData[0]?.[mapping.csvColumn] || "—"}
-                                        </p>
+                            {mappings.map((mapping, i) => {
+                                // Filter fields based on import type
+                                const availableFields = importType === "companies-only"
+                                    ? COMPANY_FIELDS
+                                    : ALL_FIELDS;
+
+                                return (
+                                    <div key={mapping.csvColumn} className="flex items-center gap-4 p-3 bg-slate-50 rounded-xl">
+                                        <div className="flex-1">
+                                            <p className="text-sm font-medium text-slate-900">{mapping.csvColumn}</p>
+                                            <p className="text-xs text-slate-500 truncate">
+                                                Ex: {previewData[0]?.[mapping.csvColumn] || "—"}
+                                            </p>
+                                        </div>
+                                        <ArrowRight className="w-4 h-4 text-slate-400" />
+                                        <Select
+                                            options={availableFields}
+                                            value={mapping.targetField}
+                                            onChange={(value) => {
+                                                const newMappings = [...mappings];
+
+                                                // Handle custom field selection
+                                                if (value === "__custom_company__") {
+                                                    const fieldName = prompt("Nom du champ personnalisé (ex: revenue, techStack):");
+                                                    if (fieldName && fieldName.trim()) {
+                                                        newMappings[i].targetField = `company.${fieldName.trim()}`;
+                                                    }
+                                                } else if (value === "__custom_contact__") {
+                                                    const fieldName = prompt("Nom du champ personnalisé (ex: department, seniority):");
+                                                    if (fieldName && fieldName.trim()) {
+                                                        newMappings[i].targetField = `contact.${fieldName.trim()}`;
+                                                    }
+                                                } else {
+                                                    newMappings[i].targetField = value;
+                                                }
+
+                                                setMappings(newMappings);
+                                            }}
+                                            className="w-48"
+                                        />
                                     </div>
-                                    <ArrowRight className="w-4 h-4 text-neutral-600" />
-                                    <Select
-                                        options={ALL_FIELDS}
-                                        value={mapping.targetField}
-                                        onChange={(value) => {
-                                            const newMappings = [...mappings];
-                                            newMappings[i].targetField = value;
-                                            setMappings(newMappings);
-                                        }}
-                                        className="w-48"
-                                    />
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
 
                         {/* Preview */}
                         <div>
-                            <h3 className="text-sm font-medium text-neutral-400 mb-2">Aperçu des données</h3>
-                            <div className="overflow-x-auto">
+                            <h3 className="text-sm font-medium text-slate-700 mb-2">Aperçu des données</h3>
+                            <div className="overflow-x-auto border border-slate-200 rounded-xl">
                                 <table className="w-full text-sm">
                                     <thead>
-                                        <tr className="border-b border-neutral-800">
+                                        <tr className="border-b border-slate-200 bg-slate-50">
                                             {csvHeaders.slice(0, 5).map(h => (
-                                                <th key={h} className="text-left py-2 px-3 text-neutral-400 font-medium">
+                                                <th key={h} className="text-left py-2 px-3 text-slate-700 font-medium">
                                                     {h}
                                                 </th>
                                             ))}
@@ -467,9 +686,9 @@ export default function ImportListPage() {
                                     </thead>
                                     <tbody>
                                         {previewData.slice(0, 3).map((row, i) => (
-                                            <tr key={i} className="border-b border-neutral-800/50">
+                                            <tr key={i} className="border-b border-slate-100 last:border-0">
                                                 {csvHeaders.slice(0, 5).map(h => (
-                                                    <td key={h} className="py-2 px-3 text-neutral-300 truncate max-w-[200px]">
+                                                    <td key={h} className="py-2 px-3 text-slate-600 truncate max-w-[200px]">
                                                         {row[h] || "—"}
                                                     </td>
                                                 ))}
@@ -481,7 +700,7 @@ export default function ImportListPage() {
                         </div>
 
                         <div className="flex justify-between">
-                            <Button variant="ghost" onClick={() => setStep(1)} className="gap-2">
+                            <Button variant="ghost" onClick={() => setStep(2)} className="gap-2">
                                 <ArrowLeft className="w-4 h-4" />
                                 Retour
                             </Button>
@@ -494,25 +713,25 @@ export default function ImportListPage() {
                 </Card>
             )}
 
-            {/* Step 3: Validation */}
-            {step === 3 && validationResult && (
+            {/* Step 4: Validation */}
+            {step === 4 && validationResult && (
                 <Card>
                     <div className="space-y-6">
                         <div className="text-center py-8">
-                            <CheckCircle2 className="w-16 h-16 text-emerald-400 mx-auto mb-4" />
-                            <h2 className="text-xl font-semibold text-white">Prêt pour l&apos;import</h2>
-                            <p className="text-neutral-400 mt-1">
+                            <CheckCircle2 className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
+                            <h2 className="text-xl font-semibold text-slate-900">Prêt pour l&apos;import</h2>
+                            <p className="text-slate-500 mt-1">
                                 {validationResult.valid} lignes valides détectées
                             </p>
                         </div>
 
                         {validationResult.warnings.length > 0 && (
-                            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
+                            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
                                 <div className="flex items-start gap-3">
-                                    <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                                    <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
                                     <div>
-                                        <p className="font-medium text-amber-400">Avertissements</p>
-                                        <ul className="text-sm text-amber-300/80 mt-1 space-y-1">
+                                        <p className="font-medium text-amber-700">Avertissements</p>
+                                        <ul className="text-sm text-amber-600 mt-1 space-y-1">
                                             {validationResult.warnings.map((w, i) => (
                                                 <li key={i}>• {w}</li>
                                             ))}
@@ -522,18 +741,21 @@ export default function ImportListPage() {
                             </div>
                         )}
 
-                        <div className="bg-neutral-800/50 rounded-xl p-4">
-                            <h3 className="font-medium text-white mb-2">Résumé de l&apos;import</h3>
-                            <ul className="text-sm text-neutral-300 space-y-1">
-                                <li>• Liste: <span className="text-white">{listName}</span></li>
-                                <li>• Mission: <span className="text-white">{missions.find(m => m.id === missionId)?.name}</span></li>
-                                <li>• Fichier: <span className="text-white">{file?.name}</span></li>
-                                <li>• Lignes: <span className="text-white">{validationResult.valid}</span></li>
+                        <div className="bg-slate-50 rounded-xl p-4">
+                            <h3 className="font-medium text-slate-900 mb-2">Résumé de l&apos;import</h3>
+                            <ul className="text-sm text-slate-600 space-y-1">
+                                <li>• Liste: <span className="text-slate-900 font-medium">{listName}</span></li>
+                                <li>• Mission: <span className="text-slate-900 font-medium">{missions.find(m => m.id === missionId)?.name}</span></li>
+                                <li>• Type: <span className="text-slate-900 font-medium">
+                                    {importType === "companies-only" ? "Sociétés uniquement" : "Sociétés + Contacts"}
+                                </span></li>
+                                <li>• Fichier: <span className="text-slate-900 font-medium">{file?.name}</span></li>
+                                <li>• Lignes: <span className="text-slate-900 font-medium">{validationResult.valid}</span></li>
                             </ul>
                         </div>
 
                         <div className="flex justify-between">
-                            <Button variant="ghost" onClick={() => setStep(2)} className="gap-2">
+                            <Button variant="ghost" onClick={() => setStep(3)} className="gap-2">
                                 <ArrowLeft className="w-4 h-4" />
                                 Retour
                             </Button>
@@ -560,15 +782,15 @@ export default function ImportListPage() {
                 </Card>
             )}
 
-            {/* Step 4: Result */}
-            {step === 4 && importResult && (
+            {/* Step 5: Result */}
+            {step === 5 && importResult && (
                 <Card>
                     <div className="text-center py-12">
-                        <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-4">
-                            <Check className="w-8 h-8 text-emerald-400" />
+                        <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+                            <Check className="w-8 h-8 text-emerald-600" />
                         </div>
-                        <h2 className="text-xl font-semibold text-white">Import terminé !</h2>
-                        <p className="text-neutral-400 mt-1">
+                        <h2 className="text-xl font-semibold text-slate-900">Import terminé !</h2>
+                        <p className="text-slate-500 mt-1">
                             {importResult.companies} sociétés et {importResult.contacts} contacts importés
                         </p>
 

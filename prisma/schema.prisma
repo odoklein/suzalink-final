@@ -458,6 +458,7 @@ model List {
   name          String
   type          ListType
   source        String?   // Origin: Apollo, Clay, CSV, etc.
+  importConfig  Json?     // Store import configuration (type, mappings, custom fields)
   companies     Company[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -472,9 +473,12 @@ model Company {
   industry      String?
   website       String?
   size          String?
+  phone         String?   // Company phone number for direct calls
+  customData    Json?     // Store custom fields from CSV imports
   status        CompletenessStatus @default(INCOMPLETE)
   contacts      Contact[]
   opportunities Opportunity[]
+  actions       Action[]  // Actions can be on companies too
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -489,6 +493,7 @@ model Contact {
   email         String?
   phone         String?
   linkedin      String?
+  customData    Json?     // Store custom fields from CSV imports
   status        CompletenessStatus @default(INCOMPLETE)
   actions       Action[]
   opportunities Opportunity[]
@@ -503,8 +508,10 @@ model Contact {
 
 model Action {
   id            String       @id @default(cuid())
-  contactId     String
-  contact       Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contactId     String?      // Optional - can call company directly
+  contact       Contact?     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  companyId     String?      // Optional - for company-level actions
+  company       Company?     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   sdrId         String
   sdr           User         @relation("SDRActions", fields: [sdrId], references: [id])
   campaignId    String
@@ -512,8 +519,12 @@ model Action {
   channel       Channel
   result        ActionResult
   note          String?      @db.Text
+  callbackDate  DateTime?    // Auto-detected from note for CALLBACK_REQUESTED
   duration      Int?         // Duration in seconds
   createdAt     DateTime     @default(now())
+  
+  @@index([companyId])
+  @@index([callbackDate])
 }
 
 model Opportunity {
