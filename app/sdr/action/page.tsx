@@ -229,14 +229,16 @@ export default function SDRActionPage() {
             const json = await res.json();
             if (!json.success) {
                 setError(json.error || "Erreur");
-                setIsSubmitting(false);
                 return;
             }
             setShowSuccess(true);
             setActionsCompleted((prev) => prev + 1);
-            setTimeout(() => loadNextAction(), 800);
+            // Immediately load the next action and reset submitting state
+            await loadNextAction();
+            setShowSuccess(false);
         } catch {
             setError("Erreur de connexion");
+        } finally {
             setIsSubmitting(false);
         }
     };
@@ -300,14 +302,14 @@ export default function SDRActionPage() {
                     <select
                         value={selectedMissionId || ""}
                         onChange={handleMissionChange}
-                        className="flex-1 h-11 px-4 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        className="flex-1 h-11 px-4 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     >
                         {missions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>
                     <select
                         value={selectedListId || "all"}
                         onChange={handleListChange}
-                        className="flex-1 h-11 px-4 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        className="flex-1 h-11 px-4 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     >
                         <option value="all">Toutes les listes</option>
                         {filteredLists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -350,14 +352,14 @@ export default function SDRActionPage() {
                     <select
                         value={selectedMissionId || ""}
                         onChange={handleMissionChange}
-                        className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     >
                         {missions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>
                     <select
                         value={selectedListId || "all"}
                         onChange={handleListChange}
-                        className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     >
                         <option value="all">Toutes les listes</option>
                         {filteredLists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -365,7 +367,7 @@ export default function SDRActionPage() {
                     <select
                         value={viewType}
                         onChange={(e) => setViewType(e.target.value as "all" | "companies" | "contacts")}
-                        className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     >
                         <option value="all">Tout afficher</option>
                         <option value="companies">Sociétés uniquement</option>

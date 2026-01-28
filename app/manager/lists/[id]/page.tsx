@@ -52,8 +52,11 @@ interface Company {
     industry: string | null;
     country: string | null;
     website: string | null;
+    phone: string | null;
     size: string | null;
     status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
+    // JSON blob storing any custom fields imported from CSV
+    customData?: Record<string, any> | null;
     _count: {
         contacts: number;
     };
@@ -297,6 +300,31 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     };
 
     // ============================================
+    // CUSTOM COMPANY FIELDS (FROM CSV IMPORT)
+    // ============================================
+
+    // Discover all custom field keys present in this list's companies
+    const customCompanyFieldKeys = Array.from(
+        new Set(
+            companies.flatMap((company) =>
+                company.customData ? Object.keys(company.customData) : []
+            )
+        )
+    );
+
+    const formatCustomFieldLabel = (key: string) => {
+        // Convert snake_case / camelCase to "Title Case"
+        const withSpaces = key
+            .replace(/_/g, " ")
+            .replace(/([a-z])([A-Z])/g, "$1 $2");
+        return withSpaces
+            .split(" ")
+            .filter(Boolean)
+            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(" ");
+    };
+
+    // ============================================
     // COMPANY TABLE COLUMNS
     // ============================================
 
@@ -339,6 +367,16 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
             render: (value) => <span className="text-slate-600">{value || "—"}</span>,
         },
         {
+            key: "phone",
+            header: "Téléphone",
+            sortable: true,
+            render: (value) => (
+                <span className="text-slate-600">
+                    {value ? value : "—"}
+                </span>
+            ),
+        },
+        {
             key: "contacts",
             header: "Contacts",
             render: (_, company) => (
@@ -363,6 +401,20 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
             },
         },
     ];
+
+    // Dynamically build columns for any custom company fields imported from CSV
+    const customCompanyColumns: Column<Company>[] = customCompanyFieldKeys.map((fieldKey) => ({
+        key: `custom_${fieldKey}`,
+        header: formatCustomFieldLabel(fieldKey),
+        sortable: false,
+        render: (_, company) => {
+            const value = company.customData ? company.customData[fieldKey] : undefined;
+            if (value === null || value === undefined || value === "") {
+                return <span className="text-slate-400">—</span>;
+            }
+            return <span className="text-slate-600">{String(value)}</span>;
+        },
+    }));
 
     // ============================================
     // CONTACT TABLE COLUMNS
@@ -679,7 +731,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                     ) : (
                         <DataTable
                             data={companies}
-                            columns={companyColumns}
+                            columns={[...companyColumns, ...customCompanyColumns]}
                             keyField="id"
                             searchable
                             searchPlaceholder="Rechercher une société..."

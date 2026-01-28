@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { Prisma } from '@prisma/client';
+import { parseDateFromNote } from '@/lib/utils/parseDateFromNote';
 
 // ============================================
 // ACTION SERVICE
@@ -46,6 +47,12 @@ export class ActionService {
                 throw new Error('Either contactId or companyId must be provided');
             }
 
+            // Parse callback date from note if result is CALLBACK_REQUESTED
+            let callbackDate: Date | null = null;
+            if (input.result === 'CALLBACK_REQUESTED' && input.note) {
+                callbackDate = parseDateFromNote(input.note);
+            }
+
             // 1. Create the action
             const action = await tx.action.create({
                 data: {
@@ -56,6 +63,7 @@ export class ActionService {
                     channel: input.channel,
                     result: input.result,
                     note: input.note,
+                    callbackDate: callbackDate,
                     duration: input.duration,
                 },
                 include: {

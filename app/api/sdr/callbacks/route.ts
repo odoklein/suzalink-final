@@ -19,16 +19,19 @@ export async function GET() {
             );
         }
 
+        // Fetch callbacks with callbackDate filtering
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
         const callbacks = await prisma.action.findMany({
             where: {
                 sdrId: session.user.id,
                 result: "CALLBACK_REQUESTED",
-                // We want callbacks that haven't been completed yet.
-                // Logic: Action is a historical record. A "Callback requested" action means a callback IS requested.
-                // Ideally we should check if a SUBSEQUENT action exists for this contact?
-                // Or maybe we treat the "action" as the todo item itself if it's not marked done?
-                // The current schema treats actions as logs.
-                // Simple logic: return all actions with CALLBACK_REQUESTED from the last 30 days that don't have a newer action on the same contact.
+                // Show callbacks for today and past (overdue), or NULL dates (legacy)
+                OR: [
+                    { callbackDate: null },
+                    { callbackDate: { lte: new Date() } },
+                ],
             },
             include: {
                 contact: {
@@ -44,6 +47,13 @@ export async function GET() {
                                 name: true,
                             }
                         }
+                    }
+                },
+                company: {
+                    select: {
+                        id: true,
+                        name: true,
+                        phone: true,
                     }
                 },
                 campaign: {
@@ -64,46 +74,55 @@ export async function GET() {
                     }
                 }
             },
-            orderBy: {
-                createdAt: "desc"
-            }
+            orderBy: [
+                { callbackDate: 'asc' },
+                { createdAt: 'desc' },
+            ]
         });
 
-        // Filter out callbacks that have been handled (i.e. have a newer action)
-        // This is a bit expensive in memory but safer than complex SQL for now
-        // A better approach would be to have a "status" on the callback, or a separate "Task" model.
-        // For now, let's just return them. The "Action" page handles the "Next Action" logic more robustly.
-        // Refinement: check if the contact has any action NEWER than this one.
-
-        // Optimization: We can do this in the query if we really want, but let's do it in JS for speed of impl.
+        // Filter out callbacks that have been handled
         const activeCallbacks = [];
 
         for (const action of callbacks) {
-            const newerAction = await prisma.action.findFirst({
-                where: {
-                    contactId: action.contactId,
-                    createdAt: {
-                        gt: action.createdAt
+            // Only check if contact exists
+            if (action.contactId) {
+                const newerAction = await prisma.action.findFirst({
+                    where: {
+                        contactId: action.contactId,
+                        createdAt: {
+                            gt: action.createdAt
+                        }
                     }
-                }
-            });
-
-            if (!newerAction) {
-                // Transform the response to match frontend expectations
-                // Frontend expects: callback.mission.client.name
-                // API returns: action.campaign.mission.client.name
-                activeCallbacks.push({
-                    id: action.id,
-                    createdAt: action.createdAt,
-                    note: action.note || undefined,
-                    contact: action.contact,
-                    mission: action.campaign?.mission ? {
-                        id: action.campaign.mission.id || action.campaignId,
-                        name: action.campaign.mission.name,
-                        client: action.campaign.mission.client,
-                    } : null,
                 });
+
+                if (newerAction) continue;
+            } else if (action.companyId) {
+                // Check for newer company actions
+                const newerAction = await prisma.action.findFirst({
+                    where: {
+                        companyId: action.companyId,
+                        createdAt: {
+                            gt: action.createdAt
+                        }
+                    }
+                });
+
+                if (newerAction) continue;
             }
+
+            activeCallbacks.push({
+                id: action.id,
+                createdAt: action.createdAt,
+                callbackDate: action.callbackDate,
+                note: action.note || undefined,
+                contact: action.contact,
+                company: action.company,
+                mission: action.campaign?.mission ? {
+                    id: action.campaign.mission.id || action.campaignId,
+                    name: action.campaign.mission.name,
+                    client: action.campaign.mission.client,
+                } : null,
+            });
         }
 
         return NextResponse.json({

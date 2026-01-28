@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 interface Callback {
     id: string;
     createdAt: string;
+    callbackDate?: string | null;  // Parsed callback date from note
     note?: string;
     contact: {
         id: string;
@@ -141,9 +142,21 @@ export default function SDRCallbacksPage() {
                                                     : callback.company?.name || 'Société inconnue'
                                                 }
                                             </h3>
-                                            <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
-                                                {new Date(callback.createdAt).toLocaleDateString()}
-                                            </span>
+                                            {callback.callbackDate ? (
+                                                <span className={`text-xs font-medium px-2 py-0.5 rounded-md border ${new Date(callback.callbackDate) < new Date()
+                                                        ? 'bg-red-50 text-red-700 border-red-200'
+                                                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                                                    }`}>
+                                                    {new Date(callback.callbackDate).toLocaleDateString('fr-FR', {
+                                                        day: 'numeric',
+                                                        month: 'short',
+                                                    })}
+                                                </span>
+                                            ) : (
+                                                <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
+                                                    {new Date(callback.createdAt).toLocaleDateString()}
+                                                </span>
+                                            )}
                                         </div>
 
                                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
@@ -160,7 +173,7 @@ export default function SDRCallbacksPage() {
                                         </div>
 
                                         {/* Context Badge */}
-                                        {(callback.mission || callback.note) && (
+                                        {(callback.mission || callback.note || callback.callbackDate) && (
                                             <div className="flex flex-wrap items-center gap-3 mt-3">
                                                 {callback.mission?.client && (
                                                     <Badge variant="outline" className="bg-indigo-50/50 text-indigo-700 border-indigo-100 hover:bg-indigo-100 transition-colors">
