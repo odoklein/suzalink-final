@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { useSession } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { useCommsRealtime } from "@/hooks/useCommsRealtime";
@@ -27,18 +28,100 @@ import {
 } from "lucide-react";
 import { Button, Input } from "@/components/ui";
 import { ThreadList } from "@/components/comms/ThreadList";
-import { ThreadView } from "@/components/comms/ThreadView";
-import { NewThreadModal } from "@/components/comms/NewThreadModal";
-import { SearchPanel } from "@/components/comms/SearchPanel";
 import type {
     CommsThreadListItem,
     CommsThreadView,
+    CommsMessageView,
     CommsInboxStats,
     CommsInboxFilters,
     CommsChannelType,
     CommsThreadStatus,
     CreateThreadRequest,
 } from "@/lib/comms/types";
+
+function getInitials(name: string): string {
+    return name
+        .trim()
+        .split(/\s+/)
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2) || "?";
+}
+
+function buildOptimisticMessage(
+    tempId: string,
+    content: string,
+    currentUserId: string,
+    currentUserName: string,
+    currentUserRole: string
+): CommsMessageView {
+    return {
+        id: tempId,
+        threadId: "",
+        type: "TEXT",
+        content,
+        author: {
+            id: currentUserId,
+            name: currentUserName,
+            role: currentUserRole,
+            initials: getInitials(currentUserName),
+        },
+        mentions: [],
+        attachments: [],
+        readBy: [],
+        reactions: [],
+        isEdited: false,
+        isDeleted: false,
+        isOwnMessage: true,
+        createdAt: new Date().toISOString(),
+        isOptimistic: true,
+    };
+}
+
+function buildMessageFromPayload(
+    payload: CommsRealtimePayload,
+    threadId: string,
+    currentUserId: string
+): CommsMessageView | null {
+    if (payload.type !== "message_created" || !payload.messageId || !payload.content || !payload.createdAt) return null;
+    const authorId = payload.userId ?? "";
+    const authorName = payload.userName ?? "Utilisateur";
+    return {
+        id: payload.messageId,
+        threadId,
+        type: "TEXT",
+        content: payload.content,
+        author: {
+            id: authorId,
+            name: authorName,
+            role: "",
+            initials: getInitials(authorName),
+        },
+        mentions: [],
+        attachments: [],
+        readBy: [],
+        reactions: [],
+        isEdited: false,
+        isDeleted: false,
+        isOwnMessage: authorId === currentUserId,
+        createdAt: payload.createdAt,
+    };
+}
+
+// Lazy-load heavy panels/modals to improve initial page load
+const ThreadView = dynamic(
+    () => import("@/components/comms/ThreadView").then((m) => m.default),
+    { ssr: false, loading: () => <div className="flex items-center justify-center h-full"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div> }
+);
+const NewThreadModal = dynamic(
+    () => import("@/components/comms/NewThreadModal").then((m) => m.NewThreadModal),
+    { ssr: false }
+);
+const SearchPanel = dynamic(
+    () => import("@/components/comms/SearchPanel").then((m) => m.SearchPanel),
+    { ssr: false }
+);
 
 // ============================================
 // STAT CARD COMPONENT
@@ -218,7 +301,17 @@ export default function ManagerCommsPage() {
         }
     }, [error]);
 
-    // Real-time event handler
+    // Debounced stats refresh for realtime (avoid hammering)
+    const statsRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const debouncedFetchStats = useCallback(() => {
+        if (statsRefreshRef.current) clearTimeout(statsRefreshRef.current);
+        statsRefreshRef.current = setTimeout(() => {
+            statsRefreshRef.current = null;
+            void fetchStats();
+        }, 500);
+    }, [fetchStats]);
+
+    // Real-time event handler: incremental updates only (no full refetch)
     const handleRealtimeEvent = useCallback(
         (payload: CommsRealtimePayload) => {
             const tid = payload.threadId;
@@ -258,20 +351,77 @@ export default function ManagerCommsPage() {
 
             if (!tid) return;
 
-            if (
-                payload.type === "message_created" ||
-                payload.type === "message_updated" ||
-                payload.type === "message_deleted" ||
-                payload.type === "thread_status_updated"
-            ) {
-                if (selectedThreadIdRef.current === tid) {
-                    fetchThreadDetails(tid);
+            const currentUserId = session?.user?.id ?? "";
+
+            switch (payload.type) {
+                case "message_created": {
+                    const msg = buildMessageFromPayload(payload, tid, currentUserId);
+                    if (msg) {
+                        setSelectedThread((prev) => {
+                            if (prev?.id !== tid) return prev;
+                            if (prev.messages.some((m) => m.id === msg.id)) return prev;
+                            return { ...prev, messages: [...prev.messages, msg] };
+                        });
+                        setThreads((prev) =>
+                            prev.map((t) =>
+                                t.id === tid
+                                    ? {
+                                          ...t,
+                                          lastMessage: {
+                                              content: payload.content ?? msg.content,
+                                              authorName: payload.userName ?? msg.author.name,
+                                              createdAt: payload.createdAt ?? msg.createdAt,
+                                          },
+                                      }
+                                    : t
+                            )
+                        );
+                    }
+                    debouncedFetchStats();
+                    return;
                 }
-                fetchStats();
-                fetchThreads(true);
+                case "message_updated":
+                    setSelectedThread((prev) => {
+                        if (!prev || prev.id !== tid || !payload.messageId) return prev;
+                        return {
+                            ...prev,
+                            messages: prev.messages.map((m) =>
+                                m.id === payload.messageId
+                                    ? { ...m, content: payload.content ?? m.content }
+                                    : m
+                            ),
+                        };
+                    });
+                    debouncedFetchStats();
+                    return;
+                case "message_deleted":
+                    setSelectedThread((prev) => {
+                        if (!prev || prev.id !== tid || !payload.messageId) return prev;
+                        return {
+                            ...prev,
+                            messages: prev.messages.filter((m) => m.id !== payload.messageId),
+                        };
+                    });
+                    debouncedFetchStats();
+                    return;
+                case "thread_status_updated":
+                    if (payload.status) {
+                        setSelectedThread((prev) =>
+                            prev?.id === tid ? { ...prev, status: payload.status as CommsThreadStatus } : prev
+                        );
+                        setThreads((prev) =>
+                            prev.map((t) =>
+                                t.id === tid ? { ...t, status: payload.status as CommsThreadStatus } : t
+                            )
+                        );
+                    }
+                    debouncedFetchStats();
+                    return;
+                default:
+                    break;
             }
         },
-        [fetchThreads, fetchStats, fetchThreadDetails]
+        [session?.user?.id, debouncedFetchStats]
     );
 
     useCommsRealtime({
@@ -279,16 +429,38 @@ export default function ManagerCommsPage() {
         onEvent: handleRealtimeEvent,
     });
 
-    // Initial load
+    // Initial load: threads and stats in parallel
     useEffect(() => {
-        fetchThreads();
-        fetchStats();
+        void fetchThreads();
+        void fetchStats();
     }, [fetchThreads, fetchStats]);
 
-    // Handle thread selection
-    const handleSelectThread = (thread: CommsThreadListItem) => {
-        fetchThreadDetails(thread.id);
-    };
+    // Handle thread selection: show header immediately, load messages in background
+    const handleSelectThread = useCallback(
+        (thread: CommsThreadListItem) => {
+            const minimalThread: CommsThreadView = {
+                ...thread,
+                participants: [],
+                messages: [],
+            };
+            setSelectedThread(minimalThread);
+            setIsLoadingThread(true);
+            fetch(`/api/comms/threads/${thread.id}`)
+                .then((res) => {
+                    if (!res.ok) throw new Error("Failed to load");
+                    return res.json();
+                })
+                .then((data: CommsThreadView) => {
+                    setSelectedThread((prev) => (prev?.id === thread.id ? data : prev));
+                })
+                .catch(() => {
+                    error("Erreur", "Impossible de charger la discussion");
+                    setSelectedThread((prev) => (prev?.id === thread.id ? null : prev));
+                })
+                .finally(() => setIsLoadingThread(false));
+        },
+        [error]
+    );
 
     // Handle close thread panel
     const handleCloseThread = () => {
@@ -296,76 +468,134 @@ export default function ManagerCommsPage() {
         fetchThreads(true);
     };
 
-    // Handle status change
-    const handleStatusChange = async (status: CommsThreadStatus) => {
-        if (!selectedThread) return;
+    // Handle status change: optimistic update, no refetch
+    const handleStatusChange = useCallback(
+        async (status: CommsThreadStatus) => {
+            const thread = selectedThread;
+            if (!thread) return;
 
-        try {
-            const res = await fetch(`/api/comms/threads/${selectedThread.id}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ status }),
-            });
+            setSelectedThread((prev) => (prev?.id === thread.id ? { ...prev, status } : prev));
+            setThreads((prev) =>
+                prev.map((t) => (t.id === thread.id ? { ...t, status } : t))
+            );
 
-            if (res.ok) {
-                success("Succès", `Discussion ${status === "RESOLVED" ? "résolue" : "archivée"}`);
-                fetchThreadDetails(selectedThread.id);
-                fetchThreads(true);
-            } else {
+            try {
+                const res = await fetch(`/api/comms/threads/${thread.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ status }),
+                });
+
+                if (res.ok) {
+                    success("Succès", status === "RESOLVED" ? "Discussion résolue" : "Discussion archivée");
+                    void fetchStats();
+                } else {
+                    setSelectedThread((prev) => (prev?.id === thread.id ? { ...prev, status: thread.status } : prev));
+                    setThreads((prev) =>
+                        prev.map((t) => (t.id === thread.id ? { ...t, status: thread.status } : t))
+                    );
+                    error("Erreur", "Impossible de modifier le statut");
+                }
+            } catch (err) {
+                console.error("Error updating status:", err);
+                setSelectedThread((prev) => (prev?.id === thread.id ? { ...prev, status: thread.status } : prev));
+                setThreads((prev) =>
+                    prev.map((t) => (t.id === thread.id ? { ...t, status: thread.status } : t))
+                );
                 error("Erreur", "Impossible de modifier le statut");
             }
-        } catch (error) {
-            console.error("Error updating status:", error);
-            error("Erreur", "Impossible de modifier le statut");
-        }
-    };
+        },
+        [selectedThread, success, error, fetchStats]
+    );
 
-    // Handle send message
-    const handleSendMessage = async (
-        content: string,
-        opts?: { mentionIds?: string[]; files?: File[] }
-    ) => {
-        if (!selectedThread) return;
+    // Handle send message: optimistic UI, then confirm or rollback
+    const handleSendMessage = useCallback(
+        async (
+            content: string,
+            opts?: { mentionIds?: string[]; files?: File[] }
+        ) => {
+            const thread = selectedThread;
+            if (!thread || !session?.user?.id) return;
 
-        try {
-            const hasFiles = !!opts?.files?.length;
-            let res: Response;
+            const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            const optimisticMsg = buildOptimisticMessage(
+                tempId,
+                content,
+                session.user.id,
+                session.user.name ?? "Vous",
+                (session.user as { role?: string }).role ?? ""
+            );
+            optimisticMsg.threadId = thread.id;
 
-            if (hasFiles) {
-                const form = new FormData();
-                form.set("content", content);
-                if (opts.mentionIds?.length) {
-                    form.set("mentionIds", JSON.stringify(opts.mentionIds));
+            setSelectedThread((prev) =>
+                prev?.id === thread.id
+                    ? { ...prev, messages: [...prev.messages, optimisticMsg] }
+                    : prev
+            );
+
+            try {
+                const hasFiles = !!opts?.files?.length;
+                let res: Response;
+
+                if (hasFiles) {
+                    const form = new FormData();
+                    form.set("content", content);
+                    if (opts.mentionIds?.length) {
+                        form.set("mentionIds", JSON.stringify(opts.mentionIds));
+                    }
+                    for (const f of opts.files!) {
+                        form.append("files", f);
+                    }
+                    res = await fetch(`/api/comms/threads/${thread.id}/messages`, {
+                        method: "POST",
+                        body: form,
+                    });
+                } else {
+                    res = await fetch(`/api/comms/threads/${thread.id}/messages`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            content,
+                            mentionIds: opts?.mentionIds ?? [],
+                        }),
+                    });
                 }
-                for (const f of opts.files!) {
-                    form.append("files", f);
-                }
-                res = await fetch(`/api/comms/threads/${selectedThread.id}/messages`, {
-                    method: "POST",
-                    body: form,
-                });
-            } else {
-                res = await fetch(`/api/comms/threads/${selectedThread.id}/messages`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        content,
-                        mentionIds: opts?.mentionIds ?? [],
-                    }),
-                });
-            }
 
-            if (res.ok) {
-                fetchThreadDetails(selectedThread.id);
-                fetchStats();
-            } else {
+                const json = await res.json().catch(() => ({}));
+
+                if (res.ok && json.id) {
+                    const realId = json.id as string;
+                    const createdAt = (json.createdAt as string) ?? new Date().toISOString();
+                    setSelectedThread((prev) => {
+                        if (!prev || prev.id !== thread.id) return prev;
+                        const next = prev.messages.map((m) =>
+                            m.id === tempId
+                                ? { ...m, id: realId, createdAt, isOptimistic: undefined }
+                                : m
+                        );
+                        return { ...prev, messages: next };
+                    });
+                    void fetchStats();
+                } else {
+                    setSelectedThread((prev) =>
+                        prev?.id === thread.id
+                            ? { ...prev, messages: prev.messages.filter((m) => m.id !== tempId) }
+                            : prev
+                    );
+                    error("Erreur", json?.error ?? "Impossible d'envoyer le message");
+                }
+            } catch (err) {
+                console.error("Error sending message:", err);
+                setSelectedThread((prev) =>
+                    prev?.id === thread.id
+                        ? { ...prev, messages: prev.messages.filter((m) => m.id !== tempId) }
+                        : prev
+                );
                 error("Erreur", "Impossible d'envoyer le message");
             }
-        } catch (error) {
-            console.error("Error sending message:", error);
-            error("Erreur", "Impossible d'envoyer le message");
-        }
-    };
+        },
+        [selectedThread?.id, session?.user, error]
+    );
 
     // Handle create thread
     const handleCreateThread = async (request: CreateThreadRequest) => {

@@ -85,6 +85,11 @@ export const MANAGER_NAV: NavSection[] = [
                 permission: "pages.email"
             },
             {
+                href: "/manager/comms",
+                icon: MessageSquare,
+                label: "Communication"
+            },
+            {
                 href: "/manager/planning",
                 icon: Calendar,
                 label: "Planning",
@@ -165,7 +170,7 @@ export const SDR_NAV: NavSection[] = [
             {
                 href: "/sdr/comms",
                 icon: MessageSquare,
-                label: "Messages",
+                label: "Communication",
                 permission: "pages.comms"
             },
             {
@@ -231,7 +236,7 @@ export const BD_NAV: NavSection[] = [
             {
                 href: "/bd/comms",
                 icon: MessageSquare,
-                label: "Messages",
+                label: "Communication",
                 permission: "pages.comms"
             },
             {
@@ -270,6 +275,12 @@ export const DEVELOPER_NAV: NavSection[] = [
                 permission: "pages.projects"
             },
             {
+                href: "/developer/comms",
+                icon: MessageSquare,
+                label: "Communication",
+                permission: "pages.comms"
+            },
+            {
                 href: "/developer/integrations",
                 icon: Settings,
                 label: "Intégrations",
@@ -306,9 +317,9 @@ export const CLIENT_NAV: NavSection[] = [
                 permission: "pages.dashboard"
             },
             {
-                href: "/client/contact",
+                href: "/client/comms",
                 icon: MessageSquare,
-                label: "Contacter",
+                label: "Communication",
                 permission: "pages.dashboard"
             },
         ],

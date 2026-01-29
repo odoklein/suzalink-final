@@ -87,17 +87,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             where: { id: messageId },
             select: { createdAt: true },
         });
+        const createdAtIso = msg?.createdAt.toISOString() ?? new Date().toISOString();
         if (msg) {
             await publishMessageCreated(
                 threadId,
                 messageId,
                 session.user.id,
+                session.user.name ?? "Utilisateur",
                 content,
-                msg.createdAt.toISOString()
+                createdAtIso
             );
         }
 
-        return NextResponse.json({ id: messageId }, { status: 201 });
+        return NextResponse.json({ id: messageId, createdAt: createdAtIso }, { status: 201 });
     } catch (error) {
         console.error("Error adding message:", error);
         return NextResponse.json(

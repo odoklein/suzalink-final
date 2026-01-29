@@ -31,8 +31,8 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
                         ref={ref}
                         id={id}
                         className={cn(
-                            "w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm transition-all duration-200",
-                            "placeholder:text-slate-500",
+                            "w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm transition-all duration-200",
+                            "!text-slate-900 placeholder:!text-slate-500",
                             "focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20",
                             error && "border-red-500 focus:border-red-500 focus:ring-red-500/20",
                             icon && "pl-10",

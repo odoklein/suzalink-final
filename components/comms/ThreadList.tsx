@@ -61,29 +61,15 @@ const STATUS_COLORS: Record<CommsThreadStatus, string> = {
     ARCHIVED: "text-slate-300",
 };
 
-// Helper to extract recipient name from direct message thread
-function getDirectMessageRecipient(thread: CommsThreadListItem, currentUserId?: string): string | null {
-    if (thread.channelType !== "DIRECT") return null;
-
-    // For direct messages, the channelName often contains the participant info
-    // or we can parse from subject which is "Message avec [Name]"
-    if (thread.subject.startsWith("Message avec ")) {
-        return thread.subject.replace("Message avec ", "");
-    }
-
-    // Fallback to channel name if it's not the generic "Direct" label
-    if (thread.channelName && thread.channelName !== "Direct") {
-        return thread.channelName;
-    }
-
-    return null;
-}
-
-// Get display name for a thread
-function getThreadDisplayName(thread: CommsThreadListItem, currentUserId?: string): string {
+// Get display name for a thread (for direct: show the OTHER participant's name, not the current user's)
+function getThreadDisplayName(thread: CommsThreadListItem, _currentUserId?: string): string {
     if (thread.channelType === "DIRECT") {
-        const recipient = getDirectMessageRecipient(thread, currentUserId);
-        if (recipient) return recipient;
+        // Backend sends otherParticipantName = the other person, so each user sees the other's name
+        if (thread.otherParticipantName) return thread.otherParticipantName;
+        // Fallback: parse subject "Message avec [Name]" (legacy; may show wrong person for recipient)
+        if (thread.subject.startsWith("Message avec ")) {
+            return thread.subject.replace("Message avec ", "");
+        }
     }
 
     // For other types, show the channel name (mission name, client name, etc.)

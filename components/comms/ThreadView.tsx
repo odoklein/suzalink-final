@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, memo } from "react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -15,6 +15,7 @@ import {
     ChevronDown,
     Clock,
     Sparkles,
+    Loader2,
 } from "lucide-react";
 import { RichTextEditor } from "./RichTextEditor";
 import { MessageContent } from "./MessageContent";
@@ -33,7 +34,7 @@ interface ThreadViewProps {
         content: string,
         opts?: { mentionIds?: string[]; files?: File[] }
     ) => Promise<void>;
-    onReactionToggle?: () => void;
+    onReactionToggle?: (messageId: string, emoji: string) => Promise<void>;
     currentUserId: string;
     typingUserName?: string;
 }
@@ -130,17 +131,17 @@ export function ThreadView({
         }
     };
 
-    // Helper to get display title for thread
+    // Helper to get display title for thread (for direct: show the OTHER participant's name, not the current user's)
     const getThreadTitle = () => {
         if (thread.channelType === "DIRECT") {
-            // For direct messages, extract recipient name from subject
-            if (thread.subject.startsWith("Message avec ")) {
-                return thread.subject.replace("Message avec ", "");
-            }
-            // Fallback: find the other participant
+            // Prefer the other participant's name so recipient sees sender, not themselves
             const otherParticipant = thread.participants.find(p => p.userId !== currentUserId);
             if (otherParticipant) {
                 return otherParticipant.userName;
+            }
+            // Fallback: parse subject (may show wrong person for recipient)
+            if (thread.subject.startsWith("Message avec ")) {
+                return thread.subject.replace("Message avec ", "");
             }
         }
         return thread.subject;
@@ -432,7 +433,7 @@ function MessageBubble({
     isOwn: boolean;
     showAvatar: boolean;
     currentUserId: string;
-    onReactionToggle?: () => void;
+    onReactionToggle?: (messageId: string, emoji: string) => Promise<void>;
 }) {
     // System messages
     if (message.type === "SYSTEM") {
@@ -483,12 +484,19 @@ function MessageBubble({
                         <span className="text-[11px] text-slate-400 flex items-center gap-1">
                             <Clock className="w-3 h-3" />
                             {format(new Date(message.createdAt), "HH:mm", { locale: fr })}
+                            {(message as { isOptimistic?: boolean }).isOptimistic && (
+                                <span className="flex items-center gap-1 text-indigo-500">
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    Envoi…
+                                </span>
+                            )}
                         </span>
                     </div>
                 )}
                 <div
                     className={cn(
                         "px-4 py-3 rounded-2xl text-sm leading-relaxed shadow-sm",
+                        (message as { isOptimistic?: boolean }).isOptimistic && "opacity-90",
                         isOwn
                             ? "bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-br-md"
                             : "bg-white border border-slate-200 text-slate-800 rounded-bl-md"
@@ -518,20 +526,13 @@ function MessageBubble({
                     </p>
                 )}
 
-                {/* Reactions */}
-                {message.type === "TEXT" && (
+                {/* Reactions - hide for optimistic (sending) messages */}
+                {message.type === "TEXT" && !(message as { isOptimistic?: boolean }).isOptimistic && (
                     <MessageReactions
                         messageId={message.id}
                         reactions={message.reactions ?? []}
                         currentUserId={currentUserId}
-                        onToggle={async (msgId, emoji) => {
-                            await fetch(`/api/comms/messages/${msgId}/reactions`, {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ emoji }),
-                            });
-                            onReactionToggle?.();
-                        }}
+                        onToggle={(msgId, emoji) => onReactionToggle?.(msgId, emoji) ?? Promise.resolve()}
                         isOwn={isOwn}
                     />
                 )}
@@ -563,4 +564,6 @@ function MessageBubble({
     );
 }
 
-export default ThreadView;
+const MemoizedThreadView = memo(ThreadView);
+export default MemoizedThreadView;
+export { ThreadView };

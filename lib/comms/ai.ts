@@ -232,14 +232,18 @@ function generateExtractriveSummary(
 // MESSAGE SUGGESTIONS
 // ============================================
 
+const MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions";
+const MISTRAL_MODEL = "mistral-large-latest";
+
 /**
  * Generate reply suggestions based on thread context.
+ * Sends the last 10 messages to Mistral (or OpenAI) and returns contextual reply suggestions.
  */
 export async function generateMessageSuggestions(
     threadId: string,
     userId: string
 ): Promise<MessageSuggestion[]> {
-    // Fetch recent messages
+    // Fetch last 10 messages (newest first, then reverse for chronological order)
     const messages = await prisma.commsMessage.findMany({
         where: { threadId, isDeleted: false },
         orderBy: { createdAt: "desc" },
@@ -253,6 +257,7 @@ export async function generateMessageSuggestions(
         return [];
     }
 
+    const chronological = [...messages].reverse();
     const lastMessage = messages[0];
 
     // Don't suggest replies to own messages
@@ -260,11 +265,19 @@ export async function generateMessageSuggestions(
         return [];
     }
 
-    const openaiKey = process.env.OPENAI_API_KEY;
+    const mistralKey = process.env.MISTRAL_API_KEY;
+    if (mistralKey) {
+        try {
+            return await generateMistralSuggestions(chronological, mistralKey);
+        } catch (error) {
+            console.error("Mistral suggestions failed, trying fallback:", error);
+        }
+    }
 
+    const openaiKey = process.env.OPENAI_API_KEY;
     if (openaiKey) {
         try {
-            return await generateAISuggestions(messages.reverse(), openaiKey);
+            return await generateAISuggestions(chronological, openaiKey);
         } catch (error) {
             console.error("AI suggestions failed, using fallback:", error);
         }
@@ -275,7 +288,69 @@ export async function generateMessageSuggestions(
 }
 
 /**
- * Generate AI-powered suggestions
+ * Generate reply suggestions using Mistral API with last 10 messages context.
+ */
+async function generateMistralSuggestions(
+    messages: Array<{ content: string; author: { name: string } }>,
+    apiKey: string
+): Promise<MessageSuggestion[]> {
+    const conversation = messages
+        .map((m) => `${m.author.name}: ${m.content}`)
+        .join("\n");
+
+    const prompt = `Voici les 10 derniers messages d'une conversation (du plus ancien au plus récent).
+Génère 3 suggestions de réponses courtes et pertinentes en français, adaptées au contexte.
+
+Conversation:
+${conversation.slice(0, 6000)}
+
+Réponds UNIQUEMENT avec un JSON valide, tableau d'objets avec "content" (texte de la suggestion) et "type" ("quick_reply", "follow_up" ou "clarification"):
+[{"content": "...", "type": "quick_reply"}, ...]`;
+
+    const response = await fetch(MISTRAL_API_URL, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+            model: MISTRAL_MODEL,
+            messages: [
+                {
+                    role: "system",
+                    content: "Tu es un assistant qui propose des réponses courtes et professionnelles pour des messages internes. Réponds uniquement en JSON valide (tableau d'objets).",
+                },
+                { role: "user", content: prompt },
+            ],
+            temperature: 0.6,
+            max_tokens: 400,
+        }),
+    });
+
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err?.message || `Mistral API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content?.trim() || "[]";
+
+    const cleaned = content.replace(/^```json\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+    try {
+        const parsed = JSON.parse(cleaned);
+        const arr = Array.isArray(parsed) ? parsed : [parsed];
+        return arr.slice(0, 5).map((s: { content?: string; type?: string }) => ({
+            content: s.content || "",
+            type: (s.type === "follow_up" || s.type === "clarification" ? s.type : "quick_reply") as MessageSuggestion["type"],
+            confidence: 0.85,
+        }));
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Generate AI-powered suggestions (OpenAI) using last 10 messages context.
  */
 async function generateAISuggestions(
     messages: Array<{
@@ -285,7 +360,7 @@ async function generateAISuggestions(
     apiKey: string
 ): Promise<MessageSuggestion[]> {
     const conversation = messages
-        .slice(-5)
+        .slice(-10)
         .map((m) => `${m.author.name}: ${m.content}`)
         .join("\n");
 

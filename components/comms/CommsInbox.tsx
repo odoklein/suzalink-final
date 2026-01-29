@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useCommsRealtime } from "@/hooks/useCommsRealtime";
 import type { CommsRealtimePayload } from "@/lib/comms/events";
@@ -18,8 +19,9 @@ import {
     MessageCircle,
     Megaphone,
     X,
+    AlertCircle,
 } from "lucide-react";
-import { Button, Input, EmptyState } from "@/components/ui";
+import { Button, Input, EmptyState, Skeleton } from "@/components/ui";
 import { ThreadList } from "./ThreadList";
 import { ThreadView } from "./ThreadView";
 import { NewThreadModal } from "./NewThreadModal";
@@ -32,6 +34,7 @@ import type {
     CommsChannelType,
     CommsThreadStatus,
     CreateThreadRequest,
+    CommsMessageView,
 } from "@/lib/comms/types";
 
 interface CommsInboxProps {
@@ -54,14 +57,16 @@ const FILTER_OPTIONS: {
 
 export function CommsInbox({ className }: CommsInboxProps) {
     const { data: session } = useSession();
+    const searchParams = useSearchParams();
     const [threads, setThreads] = useState<CommsThreadListItem[]>([]);
-    const [selectedThread, setSelectedThread] = useState<CommsThreadView | null>(
-        null
-    );
+    const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+    const [selectedThread, setSelectedThread] = useState<CommsThreadView | null>(null);
+    const [isLoadingThreadDetails, setIsLoadingThreadDetails] = useState(false);
     const [stats, setStats] = useState<CommsInboxStats | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isSyncing, setIsSyncing] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const [showNewThreadModal, setShowNewThreadModal] = useState(false);
     const [showFilters, setShowFilters] = useState(false);
     const [showSearchPanel, setShowSearchPanel] = useState(false);
@@ -70,7 +75,7 @@ export function CommsInbox({ className }: CommsInboxProps) {
     const [filters, setFilters] = useState<CommsInboxFilters>({});
     const [searchQuery, setSearchQuery] = useState("");
     const selectedThreadIdRef = useRef<string | null>(null);
-    selectedThreadIdRef.current = selectedThread?.id ?? null;
+    selectedThreadIdRef.current = selectedThreadId ?? selectedThread?.id ?? null;
 
     // Typing indicators per thread
     const [typingByThread, setTypingByThread] = useState<Record<string, string>>({});
@@ -94,9 +99,14 @@ export function CommsInbox({ className }: CommsInboxProps) {
             if (res.ok) {
                 const data = await res.json();
                 setThreads(data.threads);
+                setError(null);
+            } else {
+                const errorData = await res.json().catch(() => ({ error: "Erreur serveur" }));
+                setError(errorData.error || "Impossible de charger les discussions");
             }
         } catch (error) {
             console.error("Error fetching threads:", error);
+            setError("Erreur de connexion à la base de données");
         } finally {
             setIsLoading(false);
             setIsRefreshing(false);
@@ -113,20 +123,22 @@ export function CommsInbox({ className }: CommsInboxProps) {
             }
         } catch (error) {
             console.error("Error fetching stats:", error);
+            // Don't set error state for stats, it's not critical
         }
     }, []);
 
-    // Fetch thread details
-    const fetchThreadDetails = useCallback(async (threadId: string) => {
+    // Fetch thread details (returns data so caller can apply only if still selected)
+    const fetchThreadDetails = useCallback(async (threadId: string): Promise<CommsThreadView | null> => {
         try {
             const res = await fetch(`/api/comms/threads/${threadId}`);
             if (res.ok) {
                 const data = await res.json();
-                setSelectedThread(data);
+                return data as CommsThreadView;
             }
         } catch (error) {
             console.error("Error fetching thread:", error);
         }
+        return null;
     }, []);
 
     // Real-time: refetch on message/thread events; track typing
@@ -167,7 +179,11 @@ export function CommsInbox({ className }: CommsInboxProps) {
                 fetchThreads(true);
                 fetchStats();
                 if (selectedThreadIdRef.current === tid) {
-                    fetchThreadDetails(tid);
+                    fetchThreadDetails(tid).then((data) => {
+                        if (data && selectedThreadIdRef.current === data.id) {
+                            setSelectedThread(data);
+                        }
+                    });
                 }
             }
         },
@@ -185,68 +201,174 @@ export function CommsInbox({ className }: CommsInboxProps) {
         fetchStats();
     }, [fetchThreads, fetchStats]);
 
-    // Handle thread selection
+    // Open thread from URL (e.g. from notification link ?thread=xxx)
+    const threadIdFromUrl = searchParams.get("thread");
+    useEffect(() => {
+        if (!threadIdFromUrl || !session?.user?.id) return;
+        setSelectedThreadId(threadIdFromUrl);
+        setSelectedThread(null);
+        setIsLoadingThreadDetails(true);
+        fetchThreadDetails(threadIdFromUrl).then((data) => {
+            if (data && selectedThreadIdRef.current === data.id) {
+                setSelectedThread(data);
+            }
+            setIsLoadingThreadDetails(false);
+        });
+    }, [threadIdFromUrl, session?.user?.id, fetchThreadDetails]);
+
+    // Handle thread selection — update list immediately, load details in background
     const handleSelectThread = (thread: CommsThreadListItem) => {
-        fetchThreadDetails(thread.id);
+        selectedThreadIdRef.current = thread.id;
+        setSelectedThreadId(thread.id);
+        setSelectedThread(null);
+        setIsLoadingThreadDetails(true);
+        fetchThreadDetails(thread.id).then((data) => {
+            if (data && selectedThreadIdRef.current === data.id) {
+                setSelectedThread(data);
+            }
+            setIsLoadingThreadDetails(false);
+        });
     };
 
     // Handle close thread panel
     const handleCloseThread = () => {
+        setSelectedThreadId(null);
         setSelectedThread(null);
         fetchThreads(true); // Refresh to update read status
     };
 
-    // Handle status change
+    // Handle status change (optimistic)
     const handleStatusChange = async (status: CommsThreadStatus) => {
         if (!selectedThread) return;
+        const threadId = selectedThread.id;
+        const prevThread = selectedThread;
+        const prevThreads = threads;
 
+        setSelectedThread((t) => (t?.id === threadId ? { ...t, status } : t));
+        setThreads((list) => list.map((t) => (t.id === threadId ? { ...t, status } : t)));
         try {
-            await fetch(`/api/comms/threads/${selectedThread.id}`, {
+            const res = await fetch(`/api/comms/threads/${threadId}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ status }),
             });
-            fetchThreadDetails(selectedThread.id);
+            if (!res.ok) throw new Error("Failed to update status");
             fetchThreads(true);
+            fetchThreadDetails(threadId).then((data) => {
+                if (data && selectedThreadIdRef.current === data.id) setSelectedThread(data);
+            });
         } catch (error) {
             console.error("Error updating status:", error);
+            setSelectedThread(prevThread);
+            setThreads(prevThreads);
         }
     };
 
-    // Handle send message
+    // Handle send message (optimistic: show message immediately, sync in background)
     const handleSendMessage = async (
         content: string,
         opts?: { mentionIds?: string[]; files?: File[] }
     ) => {
-        if (!selectedThread) return;
+        if (!selectedThread || !session?.user?.id) return;
 
-        const hasFiles = !!opts?.files?.length;
-        if (hasFiles) {
-            const form = new FormData();
-            form.set("content", content);
-            if (opts.mentionIds?.length) {
-                form.set("mentionIds", JSON.stringify(opts.mentionIds));
-            }
-            for (const f of opts.files!) {
-                form.append("files", f);
-            }
-            await fetch(`/api/comms/threads/${selectedThread.id}/messages`, {
-                method: "POST",
-                body: form,
-            });
-        } else {
-            await fetch(`/api/comms/threads/${selectedThread.id}/messages`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    content,
-                    mentionIds: opts?.mentionIds ?? [],
-                }),
-            });
-        }
+        const threadId = selectedThread.id;
+        const optimisticId = `opt-${Date.now()}`;
+        const userName = (session.user as { name?: string; email?: string })?.name
+            ?? (session.user as { email?: string })?.email
+            ?? "Vous";
+        const initials = userName
+            .split(/\s+/)
+            .map((s) => s.charAt(0))
+            .join("")
+            .toUpperCase()
+            .slice(0, 2) || "?";
+        const optimisticMsg: CommsMessageView = {
+            id: optimisticId,
+            threadId,
+            type: "TEXT",
+            content: content.trim() || "[Pièces jointes]",
+            author: {
+                id: session.user.id,
+                name: userName,
+                role: (session.user as { role?: string })?.role ?? "",
+                initials,
+            },
+            mentions: [],
+            attachments: [],
+            reactions: [],
+            isEdited: false,
+            isDeleted: false,
+            isOwnMessage: true,
+            createdAt: new Date().toISOString(),
+        };
 
-        fetchThreadDetails(selectedThread.id);
-        fetchStats();
+        setSelectedThread((t) =>
+            t?.id === threadId ? { ...t, messages: [...t.messages, optimisticMsg] } : t
+        );
+
+        // Also update thread in list optimistically (move to top, update lastMessage preview)
+        const prevThreads = threads;
+        const prevThreadInList = prevThreads.find((t) => t.id === threadId);
+        setThreads((list) => {
+            const thread = list.find((t) => t.id === threadId);
+            if (!thread) return list;
+            const updatedThread: CommsThreadListItem = {
+                ...thread,
+                messageCount: thread.messageCount + 1,
+                lastMessage: {
+                    content: optimisticMsg.content,
+                    authorName: optimisticMsg.author.name,
+                    createdAt: optimisticMsg.createdAt,
+                },
+                updatedAt: optimisticMsg.createdAt,
+            };
+            return [updatedThread, ...list.filter((t) => t.id !== threadId)];
+        });
+
+        const doSend = async () => {
+            try {
+                const hasFiles = !!opts?.files?.length;
+                if (hasFiles) {
+                    const form = new FormData();
+                    form.set("content", content);
+                    if (opts.mentionIds?.length) {
+                        form.set("mentionIds", JSON.stringify(opts.mentionIds));
+                    }
+                    for (const f of opts.files!) {
+                        form.append("files", f);
+                    }
+                    await fetch(`/api/comms/threads/${threadId}/messages`, {
+                        method: "POST",
+                        body: form,
+                    });
+                } else {
+                    await fetch(`/api/comms/threads/${threadId}/messages`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            content,
+                            mentionIds: opts?.mentionIds ?? [],
+                        }),
+                    });
+                }
+                fetchThreadDetails(threadId).then((data) => {
+                    if (data && selectedThreadIdRef.current === data.id) setSelectedThread(data);
+                });
+                fetchStats();
+            } catch (err) {
+                console.error("Error sending message:", err);
+                setSelectedThread((t) =>
+                    t?.id === threadId
+                        ? { ...t, messages: t.messages.filter((m) => m.id !== optimisticId) }
+                        : t
+                );
+                // Revert thread list update
+                if (prevThreadInList) {
+                    setThreads(prevThreads);
+                }
+            }
+        };
+        void doSend();
     };
 
     // Handle create thread
@@ -261,7 +383,16 @@ export function CommsInbox({ className }: CommsInboxProps) {
             const { id } = await res.json();
             fetchThreads(true);
             fetchStats();
-            fetchThreadDetails(id);
+            selectedThreadIdRef.current = id;
+            setSelectedThreadId(id);
+            setSelectedThread(null);
+            setIsLoadingThreadDetails(true);
+            fetchThreadDetails(id).then((data) => {
+                if (data && selectedThreadIdRef.current === data.id) {
+                    setSelectedThread(data);
+                }
+                setIsLoadingThreadDetails(false);
+            });
         }
     };
 
@@ -272,6 +403,63 @@ export function CommsInbox({ className }: CommsInboxProps) {
             type: type === "all" ? undefined : type,
         }));
     };
+
+    // Handle reaction toggle (optimistic)
+    const handleReactionToggle = useCallback(
+        async (messageId: string, emoji: string) => {
+            if (!selectedThread || !session?.user?.id) return;
+            const currentUserId = session.user.id;
+            const prevThread = selectedThread;
+
+            const nextMessages = prevThread.messages.map((m) => {
+                if (m.id !== messageId) return m;
+                const reactions = [...(m.reactions ?? [])];
+                const r = reactions.find((x) => x.emoji === emoji);
+                const hadUser = r?.userIds.includes(currentUserId);
+                let nextReactions: typeof reactions;
+                if (r) {
+                    if (hadUser) {
+                        const newUserIds = r.userIds.filter((id) => id !== currentUserId);
+                        const newCount = Math.max(0, r.count - 1);
+                        nextReactions =
+                            newCount === 0
+                                ? reactions.filter((x) => x.emoji !== emoji)
+                                : reactions.map((x) =>
+                                    x.emoji === emoji
+                                        ? { ...x, count: newCount, userIds: newUserIds }
+                                        : x
+                                );
+                    } else {
+                        nextReactions = reactions.map((x) =>
+                            x.emoji === emoji
+                                ? { ...x, count: x.count + 1, userIds: [...x.userIds, currentUserId] }
+                                : x
+                        );
+                    }
+                } else {
+                    nextReactions = [...reactions, { emoji, count: 1, userIds: [currentUserId] }];
+                }
+                return { ...m, reactions: nextReactions };
+            });
+
+            setSelectedThread({ ...prevThread, messages: nextMessages });
+
+            try {
+                const res = await fetch(`/api/comms/messages/${messageId}/reactions`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ emoji }),
+                });
+                if (!res.ok) throw new Error("Failed to toggle reaction");
+            } catch (err) {
+                console.error("Error toggling reaction:", err);
+                fetchThreadDetails(prevThread.id).then((data) => {
+                    if (data && selectedThreadIdRef.current === data.id) setSelectedThread(data);
+                });
+            }
+        },
+        [selectedThread, session?.user?.id, fetchThreadDetails]
+    );
 
     return (
         <div className={cn("flex h-full bg-white rounded-2xl border border-slate-200 overflow-hidden", className)}>
@@ -372,6 +560,29 @@ export function CommsInbox({ className }: CommsInboxProps) {
 
                 {/* Thread list */}
                 <div className="flex-1 overflow-y-auto">
+                    {error && (
+                        <div className="m-4 p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3">
+                            <AlertCircle className="w-5 h-5 text-rose-500 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-rose-900">{error}</p>
+                                <button
+                                    onClick={() => {
+                                        setError(null);
+                                        fetchThreads(true);
+                                    }}
+                                    className="text-xs text-rose-600 hover:text-rose-700 mt-1 underline"
+                                >
+                                    Réessayer
+                                </button>
+                            </div>
+                            <button
+                                onClick={() => setError(null)}
+                                className="text-rose-400 hover:text-rose-600"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                    )}
                     {isLoading ? (
                         <div className="space-y-2 p-4">
                             {[1, 2, 3, 4, 5].map((i) => (
@@ -381,7 +592,7 @@ export function CommsInbox({ className }: CommsInboxProps) {
                                 />
                             ))}
                         </div>
-                    ) : threads.length === 0 ? (
+                    ) : threads.length === 0 && !error ? (
                         <EmptyState
                             icon={MessageSquare}
                             title="Aucune discussion"
@@ -391,7 +602,7 @@ export function CommsInbox({ className }: CommsInboxProps) {
                     ) : (
                         <ThreadList
                             threads={threads}
-                            selectedId={selectedThread?.id}
+                            selectedId={selectedThreadId ?? selectedThread?.id}
                             onSelect={handleSelectThread}
                         />
                     )}
@@ -400,17 +611,7 @@ export function CommsInbox({ className }: CommsInboxProps) {
 
             {/* Right panel: Thread view */}
             <div className="flex-1 flex flex-col">
-                {selectedThread ? (
-                    <ThreadView
-                        thread={selectedThread}
-                        onClose={handleCloseThread}
-                        onStatusChange={handleStatusChange}
-                        onSendMessage={handleSendMessage}
-                        onReactionToggle={() => selectedThread && fetchThreadDetails(selectedThread.id)}
-                        currentUserId={session?.user?.id || ""}
-                        typingUserName={typingByThread[selectedThread.id]}
-                    />
-                ) : (
+                {!selectedThreadId ? (
                     <div className="flex-1 flex items-center justify-center">
                         <div className="text-center">
                             <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
@@ -422,6 +623,37 @@ export function CommsInbox({ className }: CommsInboxProps) {
                             <p className="text-sm text-slate-500 max-w-sm">
                                 Choisissez une discussion dans la liste ou créez-en une nouvelle
                             </p>
+                        </div>
+                    </div>
+                ) : selectedThread && selectedThread.id === selectedThreadId && !isLoadingThreadDetails ? (
+                    <ThreadView
+                        thread={selectedThread}
+                        onClose={handleCloseThread}
+                        onStatusChange={handleStatusChange}
+                        onSendMessage={handleSendMessage}
+                        onReactionToggle={handleReactionToggle}
+                        currentUserId={session?.user?.id || ""}
+                        typingUserName={typingByThread[selectedThread.id]}
+                    />
+                ) : (
+                    <div className="flex-1 flex flex-col p-4 gap-4">
+                        <div className="flex items-center gap-3 pb-3 border-b border-slate-200">
+                            <Skeleton className="w-12 h-12 rounded-xl flex-shrink-0" />
+                            <div className="flex-1 space-y-2">
+                                <Skeleton className="h-4 w-48" />
+                                <Skeleton className="h-3 w-32" />
+                            </div>
+                        </div>
+                        <div className="flex-1 space-y-4">
+                            {[1, 2, 3, 4, 5].map((i) => (
+                                <div key={i} className={cn("flex gap-3", i % 2 === 0 ? "flex-row-reverse" : "")}>
+                                    <Skeleton className="w-8 h-8 rounded-full flex-shrink-0" />
+                                    <Skeleton className={i % 2 === 0 ? "h-16 w-3/4 ml-auto" : "h-16 w-2/3"} />
+                                </div>
+                            ))}
+                        </div>
+                        <div className="pt-3 border-t border-slate-200">
+                            <Skeleton className="h-24 w-full rounded-xl" />
                         </div>
                     </div>
                 )}
@@ -439,9 +671,18 @@ export function CommsInbox({ className }: CommsInboxProps) {
             <SearchPanel
                 isOpen={showSearchPanel}
                 onClose={() => setShowSearchPanel(false)}
-                onResultClick={(threadId, messageId) => {
-                    fetchThreadDetails(threadId);
+                onResultClick={(threadId, _messageId) => {
                     setShowSearchPanel(false);
+                    selectedThreadIdRef.current = threadId;
+                    setSelectedThreadId(threadId);
+                    setSelectedThread(null);
+                    setIsLoadingThreadDetails(true);
+                    fetchThreadDetails(threadId).then((data) => {
+                        if (data && selectedThreadIdRef.current === data.id) {
+                            setSelectedThread(data);
+                        }
+                        setIsLoadingThreadDetails(false);
+                    });
                 }}
             />
         </div >

@@ -121,6 +121,8 @@ export interface CommsThreadListItem {
         id: string;
         name: string;
     };
+    /** For DIRECT threads: name of the other participant (so each user sees the other person, not themselves) */
+    otherParticipantName?: string;
     participantCount: number;
     messageCount: number;
     unreadCount: number;
@@ -182,6 +184,8 @@ export interface CommsMessageView {
     isDeleted: boolean;
     isOwnMessage: boolean;
     createdAt: string;
+    /** Present for optimistic (sending) messages; cleared when server confirms */
+    isOptimistic?: boolean;
 }
 
 export interface CommsMentionView {

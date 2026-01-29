@@ -7,6 +7,18 @@ import { prisma } from "@/lib/prisma";
 import { createNotification } from "@/lib/notifications";
 import { storageService } from "@/lib/storage/storage-service";
 import type { UserRole, Prisma } from "@prisma/client";
+
+/** Comms inbox path per role so notification links work when user clicks */
+function getCommsLinkForRole(role: UserRole): string {
+    switch (role) {
+        case "MANAGER": return "/manager/comms";
+        case "SDR": return "/sdr/comms";
+        case "BUSINESS_DEVELOPER": return "/bd/comms";
+        case "CLIENT": return "/client/comms";
+        case "DEVELOPER": return "/developer/comms";
+        default: return "/sdr/comms";
+    }
+}
 import type {
     CommsChannelType,
     CommsThreadStatus,
@@ -345,15 +357,41 @@ export async function createThread(
         return newThread;
     });
 
-    // Send notifications to participants (except creator)
-    const otherParticipants = participantIds.filter((id) => id !== creatorId);
-    for (const userId of otherParticipants) {
+    // Send notifications to participants (except creator) — use sender name, not subject
+    const creator = await prisma.user.findUnique({
+        where: { id: creatorId },
+        select: { name: true },
+    });
+    const creatorName = creator?.name ?? "Quelqu'un";
+
+    const otherParticipantIds = participantIds.filter((id) => id !== creatorId);
+    const otherParticipantsWithRole = otherParticipantIds.length
+        ? await prisma.user.findMany({
+              where: { id: { in: otherParticipantIds } },
+              select: { id: true, role: true },
+          })
+        : [];
+
+    const isDirect = request.channelType === "DIRECT" || request.subject.startsWith("Message avec ");
+    const preview = request.initialMessage
+        ? truncateContent(request.initialMessage, 40)
+        : "";
+
+    for (const u of otherParticipantsWithRole) {
+        const messageText = request.isBroadcast
+            ? request.subject
+            : isDirect
+              ? preview
+                ? `${creatorName} vous a envoyé un message : ${preview}`
+                : `${creatorName} vous a envoyé un message`
+              : `${creatorName} : ${request.subject}`;
+
         await createNotification({
-            userId,
-            title: request.isBroadcast ? "Nouvelle annonce" : "Nouvelle discussion",
-            message: `${request.subject}`,
+            userId: u.id,
+            title: request.isBroadcast ? "Nouvelle annonce" : "Nouveau message",
+            message: messageText,
             type: "info",
-            link: `/comms/threads/${thread.id}`,
+            link: `${getCommsLinkForRole(u.role)}?thread=${thread.id}`,
         });
     }
 
@@ -416,8 +454,7 @@ export async function getInboxThreads(
                 },
                 createdBy: { select: { id: true, name: true } },
                 participants: {
-                    where: { userId },
-                    select: { unreadCount: true },
+                    select: { userId: true, unreadCount: true, user: { select: { id: true, name: true } } },
                 },
                 messages: {
                     orderBy: { createdAt: "desc" },
@@ -436,31 +473,37 @@ export async function getInboxThreads(
     ]);
 
     return {
-        threads: await Promise.all(threads.map(async (thread) => ({
-            id: thread.id,
-            channelId: thread.channelId,
-            channelType: thread.channel.type as CommsChannelType,
-            channelName: await getChannelName(thread.channel),
-            subject: thread.subject,
-            status: thread.status as CommsThreadStatus,
-            isBroadcast: thread.isBroadcast,
-            createdBy: {
-                id: thread.createdBy.id,
-                name: thread.createdBy.name,
-            },
-            participantCount: thread._count.participants,
-            messageCount: thread.messageCount,
-            unreadCount: thread.participants[0]?.unreadCount || 0,
-            lastMessage: thread.messages[0]
-                ? {
-                    content: truncateContent(thread.messages[0].content, 100),
-                    authorName: thread.messages[0].author.name,
-                    createdAt: thread.messages[0].createdAt.toISOString(),
-                }
-                : undefined,
-            createdAt: thread.createdAt.toISOString(),
-            updatedAt: thread.updatedAt.toISOString(),
-        }))),
+        threads: await Promise.all(threads.map(async (thread) => {
+            const currentParticipant = thread.participants.find((p) => p.userId === userId);
+            const otherParticipant = thread.participants.find((p) => p.userId !== userId);
+            const isDirect = thread.channel.type === "DIRECT";
+            return {
+                id: thread.id,
+                channelId: thread.channelId,
+                channelType: thread.channel.type as CommsChannelType,
+                channelName: await getChannelName(thread.channel),
+                subject: thread.subject,
+                status: thread.status as CommsThreadStatus,
+                isBroadcast: thread.isBroadcast,
+                createdBy: {
+                    id: thread.createdBy.id,
+                    name: thread.createdBy.name,
+                },
+                ...(isDirect && otherParticipant?.user?.name != null && { otherParticipantName: otherParticipant.user.name }),
+                participantCount: thread._count.participants,
+                messageCount: thread.messageCount,
+                unreadCount: currentParticipant?.unreadCount ?? 0,
+                lastMessage: thread.messages[0]
+                    ? {
+                        content: truncateContent(thread.messages[0].content, 100),
+                        authorName: thread.messages[0].author.name,
+                        createdAt: thread.messages[0].createdAt.toISOString(),
+                    }
+                    : undefined,
+                createdAt: thread.createdAt.toISOString(),
+                updatedAt: thread.updatedAt.toISOString(),
+            };
+        })),
         total,
     };
 }
@@ -711,38 +754,54 @@ export async function addMessage(
         return newMessage;
     });
 
-    // Send notifications
+    // Send notifications to other participants (and fix link per role)
     const thread = await prisma.commsThread.findUnique({
         where: { id: request.threadId },
         include: {
+            createdBy: { select: { name: true } },
+            channel: { select: { type: true } },
             participants: {
                 where: { userId: { not: authorId }, isMuted: false },
-                include: { user: true },
+                include: { user: { select: { id: true, role: true } } },
             },
         },
     });
 
+    const senderName = thread?.createdBy?.name ?? "Quelqu'un";
+    const isDirect = thread?.channel?.type === "DIRECT";
+    const preview = truncateContent(request.content, 50);
+    const notificationTitle = isDirect ? "Nouveau message direct" : "Nouveau message";
+    const notificationMessage = isDirect
+        ? `${senderName}: ${preview}`
+        : `${senderName} dans « ${thread?.subject ?? "Discussion" } » : ${preview}`;
+
     if (thread) {
         for (const p of thread.participants) {
+            const link = `${getCommsLinkForRole(p.user.role)}?thread=${request.threadId}`;
             await createNotification({
                 userId: p.userId,
-                title: "Nouveau message",
-                message: `${thread.subject}: ${truncateContent(request.content, 50)}`,
+                title: notificationTitle,
+                message: notificationMessage,
                 type: "info",
-                link: `/comms/threads/${request.threadId}`,
+                link,
             });
         }
     }
 
-    // Notify mentioned users
-    if (request.mentionIds) {
-        for (const mentionedUserId of request.mentionIds) {
+    // Notify mentioned users (with role-based link)
+    if (request.mentionIds && thread) {
+        const mentionedUsers = await prisma.user.findMany({
+            where: { id: { in: request.mentionIds } },
+            select: { id: true, role: true },
+        });
+        for (const u of mentionedUsers) {
+            const link = `${getCommsLinkForRole(u.role)}?thread=${request.threadId}`;
             await createNotification({
-                userId: mentionedUserId,
+                userId: u.id,
                 title: "Vous avez été mentionné",
-                message: `Dans: ${thread?.subject}`,
+                message: `${senderName} dans « ${thread.subject } »`,
                 type: "info",
-                link: `/comms/threads/${request.threadId}`,
+                link,
             });
         }
     }

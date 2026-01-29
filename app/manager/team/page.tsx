@@ -824,17 +824,23 @@ export default function TeamDashboardPage() {
                 setRecentActivities(activitiesJson.data || []);
             }
 
-            // Fetch SDR activity status (chrono online/offline) for each SDR/BD
+            // Fetch SDR activity status in one batch call (avoids N+1)
             const sdrAndBd = teamMembers.filter(m => ["SDR", "BUSINESS_DEVELOPER"].includes(m.role));
-            const activityResults = await Promise.all(
-                sdrAndBd.map((m) =>
-                    fetch(`/api/sdr/activity?userId=${m.id}`)
-                        .then((r) => r.json())
-                        .then((j) => ({ userId: m.id, isActive: !!j?.data?.isActive }))
-                        .catch(() => ({ userId: m.id, isActive: false }))
-                )
-            );
-            const activityByUserId = new Map(activityResults.map((a) => [a.userId, a.isActive]));
+            const activityByUserId = new Map<string, boolean>();
+            if (sdrAndBd.length > 0) {
+                try {
+                    const ids = sdrAndBd.map((m) => m.id).join(",");
+                    const activityRes = await fetch(`/api/sdr/activity/batch?userIds=${encodeURIComponent(ids)}`);
+                    const activityJson = await activityRes.json();
+                    if (activityJson.success && activityJson.data) {
+                        for (const [uid, v] of Object.entries(activityJson.data as Record<string, { isActive: boolean }>)) {
+                            activityByUserId.set(uid, v?.isActive ?? false);
+                        }
+                    }
+                } catch {
+                    // Fallback: all offline
+                }
+            }
 
             // Compute metrics for each member
             const membersWithMetrics = teamMembers.map((member, index) => {
