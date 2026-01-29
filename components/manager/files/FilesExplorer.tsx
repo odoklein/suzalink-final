@@ -566,6 +566,33 @@ export default function FilesExplorer() {
   const { getRootProps, getInputProps, isDragActive, open: openFilePicker } = useDropzone({
     onDrop: async (accepted) => {
       if (!accepted.length) return;
+
+      // Upload to Google Drive if active
+      if (activeTab === "drive") {
+        if (!driveConnected) {
+          showError("Erreur", "Google Drive n'est pas connecté.");
+          return;
+        }
+
+        try {
+          for (const file of accepted) {
+            const form = new FormData();
+            form.append("file", file);
+            if (driveFolderId) form.append("folderId", driveFolderId);
+
+            const res = await fetch("/api/integrations/google-drive/upload", { method: "POST", body: form });
+            const json = await res.json();
+            if (!json.success) throw new Error("upload failed");
+          }
+          success("Google Drive", `${accepted.length} fichier(s) envoyé(s) sur Drive.`);
+          fetchDrive();
+        } catch {
+          showError("Erreur", "Échec du téléchargement vers Drive.");
+        }
+        return;
+      }
+
+      // Default: Upload to CRM
       try {
         for (const file of accepted) {
           const form = new FormData();
@@ -575,7 +602,7 @@ export default function FilesExplorer() {
           const json = await res.json();
           if (!json.success) throw new Error("upload failed");
         }
-        success("Téléchargement", `${accepted.length} fichier(s) ajouté(s).`);
+        success("CRM", `${accepted.length} fichier(s) ajouté(s) au CRM.`);
         fetchData();
       } catch {
         showError("Erreur", "Échec du téléchargement.");
@@ -1249,8 +1276,8 @@ export default function FilesExplorer() {
                         setDetailsOpen(true);
                       }}
                       onShare={() => onOpenShare("file", file)}
-                      onRename={() => {}}
-                      onMove={() => {}}
+                      onRename={() => { }}
+                      onMove={() => { }}
                       onDelete={() => {
                         // Drive: no delete from CRM here; keep safe
                         showError("Info", "Suppression Drive non disponible ici.");
@@ -1279,66 +1306,66 @@ export default function FilesExplorer() {
                       const ti = typeIcon(file.mimeType);
                       return (
                         <>
-                    <button
-                      className={classNames(
-                        "w-5 h-5 rounded-md border flex items-center justify-center",
-                        selectedFiles.has(file.id) ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white border-slate-200 text-transparent group-hover:text-slate-500"
-                      )}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleSelectFile(file.id);
-                      }}
-                      title="Sélectionner"
-                    >
-                      <Check className="w-3 h-3" />
-                    </button>
+                          <button
+                            className={classNames(
+                              "w-5 h-5 rounded-md border flex items-center justify-center",
+                              selectedFiles.has(file.id) ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white border-slate-200 text-transparent group-hover:text-slate-500"
+                            )}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSelectFile(file.id);
+                            }}
+                            title="Sélectionner"
+                          >
+                            <Check className="w-3 h-3" />
+                          </button>
 
-                    <div className={classNames("w-10 h-10 rounded-xl ring-1 flex items-center justify-center flex-shrink-0", ti.bg, ti.ring)}>
-                      <ti.Icon className={classNames("w-5 h-5", ti.fg)} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-900 truncate">{file.name}</p>
-                      <p className="text-xs text-slate-500 truncate">
-                        {file.formattedSize} • {typeLabel(file.mimeType)} • {file.uploadedBy?.name ?? "—"}
-                      </p>
-                      {Array.isArray(file.tags) && file.tags.length > 0 && (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {file.tags.slice(0, 3).map((t) => (
-                            <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                              {t}
-                            </span>
-                          ))}
-                          {file.tags.length > 3 && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">+{file.tags.length - 3}</span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <div className="text-xs text-slate-500 hidden md:block w-28 text-right">{formatDateShort(file.createdAt)}</div>
-                    <div className="hidden lg:block w-20 text-right text-xs text-slate-500">{file.formattedSize}</div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"
-                        title="Télécharger"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDownload(file);
-                        }}
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
-                      <ItemMenu
-                        accent={menuAccentForMime(file.mimeType)}
-                        onDetails={() => {
-                          setDetails({ kind: "file", item: file });
-                          setDetailsOpen(true);
-                        }}
-                        onShare={() => onOpenShare("file", file)}
-                        onRename={() => onOpenRename("file", file)}
-                        onMove={() => onOpenMove("file", file)}
-                        onDelete={() => onDeleteFile(file)}
-                      />
-                    </div>
+                          <div className={classNames("w-10 h-10 rounded-xl ring-1 flex items-center justify-center flex-shrink-0", ti.bg, ti.ring)}>
+                            <ti.Icon className={classNames("w-5 h-5", ti.fg)} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-slate-900 truncate">{file.name}</p>
+                            <p className="text-xs text-slate-500 truncate">
+                              {file.formattedSize} • {typeLabel(file.mimeType)} • {file.uploadedBy?.name ?? "—"}
+                            </p>
+                            {Array.isArray(file.tags) && file.tags.length > 0 && (
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {file.tags.slice(0, 3).map((t) => (
+                                  <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                                    {t}
+                                  </span>
+                                ))}
+                                {file.tags.length > 3 && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">+{file.tags.length - 3}</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-500 hidden md:block w-28 text-right">{formatDateShort(file.createdAt)}</div>
+                          <div className="hidden lg:block w-20 text-right text-xs text-slate-500">{file.formattedSize}</div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"
+                              title="Télécharger"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDownload(file);
+                              }}
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                            <ItemMenu
+                              accent={menuAccentForMime(file.mimeType)}
+                              onDetails={() => {
+                                setDetails({ kind: "file", item: file });
+                                setDetailsOpen(true);
+                              }}
+                              onShare={() => onOpenShare("file", file)}
+                              onRename={() => onOpenRename("file", file)}
+                              onMove={() => onOpenMove("file", file)}
+                              onDelete={() => onDeleteFile(file)}
+                            />
+                          </div>
                         </>
                       );
                     })()}
