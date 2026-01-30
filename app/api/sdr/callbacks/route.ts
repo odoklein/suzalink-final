@@ -5,10 +5,13 @@ import { prisma } from "@/lib/prisma";
 
 // ============================================
 // GET /api/sdr/callbacks
-// Fetch pending callbacks for the current SDR
+// Fetch pending callbacks for the current SDR or BD.
+// BD sees callbacks by mission (campaign.missionId), not by SDR assignment:
+// if an SDR is reassigned/removed, their past callbacks remain visible to BD
+// because they are tied to the mission.
 // ============================================
 
-export async function GET() {
+export async function GET(request: Request) {
     try {
         const session = await getServerSession(authOptions);
 
@@ -19,10 +22,14 @@ export async function GET() {
             );
         }
 
+        const { searchParams } = new URL(request.url);
+        const limit = Math.min(Math.max(1, parseInt(searchParams.get("limit") || "100", 10)), 200);
+        const skip = Math.max(0, parseInt(searchParams.get("skip") || "0", 10));
+
         const userRole = (session.user as { role?: string }).role;
         const isBusinessDeveloper = userRole === "BUSINESS_DEVELOPER";
 
-        // BUSINESS_DEVELOPER: scope by assigned missions (all SDRs' callbacks on those missions)
+        // BD: scope by missions they are assigned to (callbacks are mission-scoped)
         let missionIds: string[] = [];
         if (isBusinessDeveloper) {
             const assignments = await prisma.sDRAssignment.findMany({
@@ -56,6 +63,8 @@ export async function GET() {
 
         const callbacks = await prisma.action.findMany({
             where: whereClause,
+            skip,
+            take: limit,
             include: {
                 sdr: isBusinessDeveloper
                     ? { select: { id: true, name: true } }
@@ -106,41 +115,47 @@ export async function GET() {
             ]
         });
 
-        // Filter out callbacks that have been handled
-        const activeCallbacks = [];
+        // Pending = CALLBACK_REQUESTED and (callbackDate null or <= now) and no newer action
+        // for same contact/company. Any newer action supersedes (INTERESTED, MEETING_BOOKED,
+        // DISQUALIFIED, or another CALLBACK_REQUESTED) to avoid stale callbacks.
+        type CallbackItem = {
+            id: string;
+            createdAt: Date;
+            callbackDate: Date | null;
+            note: string | null;
+            contact: typeof callbacks[0]["contact"];
+            company: typeof callbacks[0]["company"];
+            mission: { id: string; name: string; client: { name: string } } | null;
+            sdr?: { id: string; name: string | null };
+        };
+        const activeCallbacks: CallbackItem[] = [];
 
         for (const action of callbacks) {
-            // Only check if contact exists
+            let newerAction: { id: string } | null = null;
             if (action.contactId) {
-                const newerAction = await prisma.action.findFirst({
+                newerAction = await prisma.action.findFirst({
                     where: {
                         contactId: action.contactId,
-                        createdAt: {
-                            gt: action.createdAt
-                        }
-                    }
+                        createdAt: { gt: action.createdAt },
+                    },
+                    select: { id: true },
                 });
-
-                if (newerAction) continue;
             } else if (action.companyId) {
-                // Check for newer company actions
-                const newerAction = await prisma.action.findFirst({
+                newerAction = await prisma.action.findFirst({
                     where: {
                         companyId: action.companyId,
-                        createdAt: {
-                            gt: action.createdAt
-                        }
-                    }
+                        createdAt: { gt: action.createdAt },
+                    },
+                    select: { id: true },
                 });
-
-                if (newerAction) continue;
             }
+            if (newerAction) continue;
 
-            activeCallbacks.push({
+            const item: CallbackItem = {
                 id: action.id,
                 createdAt: action.createdAt,
                 callbackDate: action.callbackDate,
-                note: action.note || undefined,
+                note: action.note,
                 contact: action.contact,
                 company: action.company,
                 mission: action.campaign?.mission ? {
@@ -148,15 +163,17 @@ export async function GET() {
                     name: action.campaign.mission.name,
                     client: action.campaign.mission.client,
                 } : null,
-                ...(isBusinessDeveloper && "sdr" in action && action.sdr
-                    ? { sdr: { id: action.sdr.id, name: action.sdr.name } }
-                    : {}),
-            });
+            };
+            if (isBusinessDeveloper && action.sdr) {
+                item.sdr = { id: action.sdr.id, name: action.sdr.name };
+            }
+            activeCallbacks.push(item);
         }
 
         return NextResponse.json({
             success: true,
             data: activeCallbacks,
+            pagination: { limit, skip, hasMore: callbacks.length === limit },
         });
 
     } catch (error) {

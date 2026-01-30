@@ -22,7 +22,7 @@ const assignSchema = z.object({
 });
 
 export const PATCH = withErrorHandler(async (request: NextRequest, { params }: RouteParams) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER']);
     const { id } = await params;
     const data = await validateRequest(request, assignSchema);
 
@@ -81,7 +81,7 @@ export const PATCH = withErrorHandler(async (request: NextRequest, { params }: R
 // ============================================
 
 export const DELETE = withErrorHandler(async (request: NextRequest, { params }: RouteParams) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER']);
     const { id } = await params;
     const { searchParams } = new URL(request.url);
     const sdrId = searchParams.get('sdrId');

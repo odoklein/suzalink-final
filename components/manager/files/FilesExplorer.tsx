@@ -465,6 +465,8 @@ export default function FilesExplorer() {
   const [driveLoading, setDriveLoading] = useState(false);
   const [driveFolderId, setDriveFolderId] = useState<string | null>(null);
   const [drivePath, setDrivePath] = useState<Array<{ id: string | null; name: string }>>([{ id: null, name: "Mon Drive" }]);
+  const [importingFromDrive, setImportingFromDrive] = useState(false);
+  const [importingFileName, setImportingFileName] = useState<string | null>(null);
 
   const storageUsed = useMemo(() => files.reduce((acc, f) => acc + (Number.isFinite(f.size) ? f.size : 0), 0), [files]);
   const currentLocationLabel = useMemo(() => {
@@ -785,6 +787,8 @@ export default function FilesExplorer() {
   };
 
   const onImportFromDrive = async (file: FileItem) => {
+    setImportingFromDrive(true);
+    setImportingFileName(file.name);
     try {
       const res = await fetch("/api/integrations/google-drive/import", {
         method: "POST",
@@ -793,9 +797,13 @@ export default function FilesExplorer() {
       });
       const json = await res.json();
       if (!json.success) throw new Error("failed");
+      setImportingFromDrive(false);
+      setImportingFileName(null);
       success("Importé", `"${file.name}" importé dans le CRM.`);
       fetchData();
     } catch {
+      setImportingFromDrive(false);
+      setImportingFileName(null);
       showError("Erreur", "Import impossible.");
     }
   };
@@ -1585,6 +1593,23 @@ export default function FilesExplorer() {
             Enregistrer
           </Button>
         </ModalFooter>
+      </Modal>
+
+      {/* Import from Google Drive - loading dialog */}
+      <Modal
+        isOpen={importingFromDrive}
+        onClose={() => {}}
+        title="Import en cours"
+        description={importingFileName ? `Déplacement de « ${importingFileName} » vers le CRM…` : "Déplacement du fichier vers le CRM…"}
+        size="sm"
+        showCloseButton={false}
+        closeOnOverlay={false}
+        closeOnEscape={false}
+      >
+        <div className="flex items-center justify-center gap-3 py-4">
+          <Loader2 className="w-8 h-8 text-indigo-500 animate-spin shrink-0" />
+          <p className="text-sm text-slate-600">Veuillez patienter…</p>
+        </div>
       </Modal>
 
       {/* Move */}

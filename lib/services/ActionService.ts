@@ -17,6 +17,8 @@ export interface CreateActionInput {
     channel: 'CALL' | 'EMAIL' | 'LINKEDIN';
     result: 'NO_RESPONSE' | 'BAD_CONTACT' | 'INTERESTED' | 'CALLBACK_REQUESTED' | 'MEETING_BOOKED' | 'DISQUALIFIED';
     note?: string;
+    /** When result is CALLBACK_REQUESTED: set from calendar UI; if not provided, parsed from note. */
+    callbackDate?: Date;
     duration?: number;
 }
 
@@ -47,10 +49,46 @@ export class ActionService {
                 throw new Error('Either contactId or companyId must be provided');
             }
 
-            // Parse callback date from note if result is CALLBACK_REQUESTED
+            // Callback date: from calendar (callbackDate) or parsed from note
             let callbackDate: Date | null = null;
-            if (input.result === 'CALLBACK_REQUESTED' && input.note) {
-                callbackDate = parseDateFromNote(input.note);
+            let noteToStore = input.note;
+            if (input.result === 'CALLBACK_REQUESTED') {
+                if (input.callbackDate) {
+                    callbackDate = input.callbackDate;
+                    // Keep note in sync with calendar so note and callbackDate don't diverge
+                    const scheduledText = `Rappel programmé: ${callbackDate.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`;
+                    noteToStore = (input.note?.trim() ? `${input.note.trim()} (${scheduledText})` : scheduledText).slice(0, 500);
+                } else if (input.note) {
+                    callbackDate = parseDateFromNote(input.note);
+                }
+            }
+
+            // Duplicate prevention: one pending CALLBACK_REQUESTED per contact/company per campaign.
+            // "Pending" = callbackDate null or <= now; we only block when such an action exists.
+            if (input.result === 'CALLBACK_REQUESTED') {
+                const existingPending = await tx.action.findFirst({
+                    where: {
+                        campaignId: input.campaignId,
+                        result: 'CALLBACK_REQUESTED',
+                        ...(input.contactId ? { contactId: input.contactId } : { companyId: input.companyId! }),
+                        OR: [{ callbackDate: null }, { callbackDate: { lte: new Date() } }],
+                    },
+                    orderBy: { createdAt: 'desc' },
+                    select: { id: true, createdAt: true },
+                });
+                if (existingPending) {
+                    // Only block if no newer action supersedes it (same contact/company, later createdAt)
+                    const newerAction = await tx.action.findFirst({
+                        where: {
+                            ...(input.contactId ? { contactId: input.contactId } : { companyId: input.companyId! }),
+                            createdAt: { gt: existingPending.createdAt },
+                        },
+                        select: { id: true },
+                    });
+                    if (!newerAction) {
+                        throw new Error('DUPLICATE_CALLBACK');
+                    }
+                }
             }
 
             // 1. Create the action
@@ -62,7 +100,7 @@ export class ActionService {
                     campaignId: input.campaignId,
                     channel: input.channel,
                     result: input.result,
-                    note: input.note,
+                    note: noteToStore,
                     callbackDate: callbackDate,
                     duration: input.duration,
                 },

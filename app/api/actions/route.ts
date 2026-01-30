@@ -29,6 +29,7 @@ const createActionSchema = z.object({
         'DISQUALIFIED',
     ]),
     note: z.string().max(500, 'Note trop longue (max 500 caractères)').optional(),
+    callbackDate: z.union([z.string(), z.date()]).optional().transform((s) => (s ? (typeof s === 'string' ? new Date(s) : s) : undefined)),
     duration: z.number().positive().max(7200, 'Durée invalide').optional(),
 }).refine(data => data.contactId || data.companyId, {
     message: 'Contact ou Company requis',
@@ -85,16 +86,23 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     }
 
     // Use service layer with transaction
-    const action = await actionService.createAction({
-        contactId: data.contactId,
-        companyId: data.companyId,
-        sdrId: session.user.id,
-        campaignId: data.campaignId,
-        channel: data.channel,
-        result: data.result,
-        note: data.note,
-        duration: data.duration,
-    });
-
-    return successResponse(action, 201);
+    try {
+        const action = await actionService.createAction({
+            contactId: data.contactId,
+            companyId: data.companyId,
+            sdrId: session.user.id,
+            campaignId: data.campaignId,
+            channel: data.channel,
+            result: data.result,
+            note: data.note,
+            callbackDate: data.callbackDate,
+            duration: data.duration,
+        });
+        return successResponse(action, 201);
+    } catch (err) {
+        if (err instanceof Error && err.message === 'DUPLICATE_CALLBACK') {
+            return errorResponse('Un rappel est déjà en attente pour ce contact/campagne. Traitez-le ou reprogrammez-le avant d\'en créer un nouveau.', 409);
+        }
+        throw err;
+    }
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card, Badge, Button } from "@/components/ui";
+import { Card, Badge, Button, Modal, ModalFooter } from "@/components/ui";
 import {
     Calendar,
     Clock,
@@ -10,10 +10,12 @@ import {
     Building2,
     ArrowRight,
     Loader2,
-    CheckCircle2
+    CheckCircle2,
+    CalendarClock,
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { formatCallbackDateTime } from "@/lib/utils/parseDateFromNote";
 
 // ============================================
 // TYPES
@@ -58,6 +60,41 @@ interface Callback {
 export default function SDRCallbacksPage() {
     const [callbacks, setCallbacks] = useState<Callback[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [rescheduleCallback, setRescheduleCallback] = useState<Callback | null>(null);
+    const [rescheduleDateValue, setRescheduleDateValue] = useState("");
+    const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false);
+
+    const openReschedule = (cb: Callback) => {
+        setRescheduleCallback(cb);
+        setRescheduleDateValue(cb.callbackDate ? new Date(cb.callbackDate).toISOString().slice(0, 16) : "");
+    };
+
+    const submitReschedule = async () => {
+        if (!rescheduleCallback || !rescheduleDateValue) return;
+        setRescheduleSubmitting(true);
+        try {
+            const res = await fetch(`/api/actions/${rescheduleCallback.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ callbackDate: new Date(rescheduleDateValue).toISOString() }),
+            });
+            const json = await res.json();
+            if (json.success) {
+                setCallbacks((prev) =>
+                    prev.map((c) =>
+                        c.id === rescheduleCallback.id
+                            ? { ...c, callbackDate: rescheduleDateValue }
+                            : c
+                    )
+                );
+                setRescheduleCallback(null);
+            }
+        } catch (err) {
+            console.error("Reschedule failed:", err);
+        } finally {
+            setRescheduleSubmitting(false);
+        }
+    };
 
     useEffect(() => {
         const fetchCallbacks = async () => {
@@ -148,11 +185,8 @@ export default function SDRCallbacksPage() {
                                                 <span className={`text-xs font-medium px-2 py-0.5 rounded-md border ${new Date(callback.callbackDate) < new Date()
                                                         ? 'bg-red-50 text-red-700 border-red-200'
                                                         : 'bg-amber-50 text-amber-700 border-amber-200'
-                                                    }`}>
-                                                    {new Date(callback.callbackDate).toLocaleDateString('fr-FR', {
-                                                        day: 'numeric',
-                                                        month: 'short',
-                                                    })}
+                                                    }`} title="Heure en fuseau local">
+                                                    {formatCallbackDateTime(callback.callbackDate)}
                                                 </span>
                                             ) : (
                                                 <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200">
@@ -205,24 +239,78 @@ export default function SDRCallbacksPage() {
                                         </div>
                                     )}
 
-                                    <Link href="/sdr/action" className="w-full md:w-auto">
+                                    <div className="flex flex-wrap items-center gap-2">
                                         <Button
-                                            onClick={() => {
-                                                // Ideally pass context
-                                            }}
-                                            className="w-full md:w-auto bg-slate-900 hover:bg-indigo-600 text-white shadow-md hover:shadow-indigo-200 transition-all duration-300 gap-2"
+                                            variant="secondary"
+                                            className="gap-2 border-amber-200 text-amber-700 hover:bg-amber-50"
+                                            onClick={() => openReschedule(callback)}
                                         >
-                                            <Phone className="w-4 h-4" />
-                                            <span>Rappeler</span>
-                                            <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 -ml-2 group-hover:ml-0 transition-all" />
+                                            <CalendarClock className="w-4 h-4" />
+                                            Reprogrammer
                                         </Button>
-                                    </Link>
+                                        <Link href="/sdr/action" className="w-full md:w-auto">
+                                            <Button
+                                                className="w-full md:w-auto bg-slate-900 hover:bg-indigo-600 text-white shadow-md hover:shadow-indigo-200 transition-all duration-300 gap-2"
+                                            >
+                                                <Phone className="w-4 h-4" />
+                                                <span>Rappeler</span>
+                                                <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 -ml-2 group-hover:ml-0 transition-all" />
+                                            </Button>
+                                        </Link>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     ))}
                 </div>
             )}
+
+            {/* Reschedule modal */}
+            <Modal
+                isOpen={!!rescheduleCallback}
+                onClose={() => setRescheduleCallback(null)}
+                title="Reprogrammer le rappel"
+                description={rescheduleCallback ? (rescheduleCallback.mission?.name ? `Mission: ${rescheduleCallback.mission.name}` : "Choisissez une nouvelle date") : ""}
+                size="sm"
+            >
+                {rescheduleCallback && (
+                    <div className="space-y-4">
+                        {rescheduleCallback.sdr && (
+                            <p className="text-sm text-slate-600">
+                                <span className="font-medium">SDR:</span> {rescheduleCallback.sdr.name}
+                            </p>
+                        )}
+                        {rescheduleCallback.note && (
+                            <p className="text-sm text-slate-500 italic border-l-2 border-slate-200 pl-2">
+                                &quot;{rescheduleCallback.note}&quot;
+                            </p>
+                        )}
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">Nouvelle date et heure</label>
+                            <input
+                                type="datetime-local"
+                                value={rescheduleDateValue}
+                                onChange={(e) => setRescheduleDateValue(e.target.value)}
+                                min={new Date().toISOString().slice(0, 16)}
+                                className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                        </div>
+                        <ModalFooter>
+                            <Button variant="ghost" onClick={() => setRescheduleCallback(null)}>
+                                Annuler
+                            </Button>
+                            <Button
+                                variant="primary"
+                                onClick={submitReschedule}
+                                disabled={!rescheduleDateValue || rescheduleSubmitting}
+                                isLoading={rescheduleSubmitting}
+                            >
+                                Enregistrer
+                            </Button>
+                        </ModalFooter>
+                    </div>
+                )}
+            </Modal>
         </div>
     );
 }

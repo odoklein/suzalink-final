@@ -20,6 +20,8 @@ import {
     ListIcon,
     ChevronRight,
     Sparkles,
+    Briefcase,
+    UserMinus,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -45,6 +47,7 @@ interface Mission {
             id: string;
             name: string;
             email: string;
+            role: string;
         };
     }>;
     campaigns: Array<{
@@ -65,10 +68,11 @@ interface Mission {
     };
 }
 
-interface SDR {
+interface AssignableUser {
     id: string;
     name: string;
     email: string;
+    role: string;
 }
 
 // ============================================
@@ -97,10 +101,14 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
 
     // Modals
     const [showDeleteModal, setShowDeleteModal] = useState(false);
-    const [showAssignModal, setShowAssignModal] = useState(false);
-    const [availableSDRs, setAvailableSDRs] = useState<SDR[]>([]);
+    const [showAssignSDRModal, setShowAssignSDRModal] = useState(false);
+    const [showAssignBDModal, setShowAssignBDModal] = useState(false);
+    const [availableSDRs, setAvailableSDRs] = useState<AssignableUser[]>([]);
+    const [availableBDs, setAvailableBDs] = useState<AssignableUser[]>([]);
     const [selectedSDRId, setSelectedSDRId] = useState<string>("");
+    const [selectedBDId, setSelectedBDId] = useState<string>("");
     const [isAssigning, setIsAssigning] = useState(false);
+    const [unassigningId, setUnassigningId] = useState<string | null>(null);
 
     // ============================================
     // FETCH MISSION
@@ -131,20 +139,37 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
     }, [resolvedParams.id]);
 
     // ============================================
-    // FETCH AVAILABLE SDRS
+    // FETCH AVAILABLE SDRS / BDS
     // ============================================
+
+    const assignedSDRs = mission?.sdrAssignments.filter(a => a.sdr.role === "SDR") || [];
+    const assignedBDs = mission?.sdrAssignments.filter(a => a.sdr.role === "BUSINESS_DEVELOPER") || [];
 
     const fetchAvailableSDRs = async () => {
         try {
-            const res = await fetch("/api/users?role=SDR&status=active");
+            const res = await fetch("/api/users?role=SDR&status=active&excludeSelf=false");
             const json = await res.json();
             if (json.success && json.data?.users) {
-                const assignedIds = mission?.sdrAssignments.map(a => a.sdr.id) || [];
-                const available = json.data.users.filter((sdr: SDR) => !assignedIds.includes(sdr.id));
+                const ids = mission?.sdrAssignments.map(a => a.sdr.id) || [];
+                const available = json.data.users.filter((u: AssignableUser) => !ids.includes(u.id));
                 setAvailableSDRs(available);
             }
         } catch (err) {
             console.error("Failed to fetch SDRs:", err);
+        }
+    };
+
+    const fetchAvailableBDs = async () => {
+        try {
+            const res = await fetch("/api/users?role=BUSINESS_DEVELOPER&status=active&excludeSelf=false");
+            const json = await res.json();
+            if (json.success && json.data?.users) {
+                const ids = mission?.sdrAssignments.map(a => a.sdr.id) || [];
+                const available = json.data.users.filter((u: AssignableUser) => !ids.includes(u.id));
+                setAvailableBDs(available);
+            }
+        } catch (err) {
+            console.error("Failed to fetch BDs:", err);
         }
     };
 
@@ -214,9 +239,8 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
     // ASSIGN SDR
     // ============================================
 
-    const handleAssign = async () => {
+    const handleAssignSDR = async () => {
         if (!mission || !selectedSDRId) return;
-
         setIsAssigning(true);
         try {
             const res = await fetch(`/api/missions/${mission.id}/assign`, {
@@ -224,12 +248,10 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ sdrId: selectedSDRId }),
             });
-
             const json = await res.json();
-
             if (json.success) {
                 success("SDR assigné", "Le SDR a été assigné à la mission");
-                setShowAssignModal(false);
+                setShowAssignSDRModal(false);
                 setSelectedSDRId("");
                 fetchMission();
             } else {
@@ -239,6 +261,50 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
             showError("Erreur", "Impossible d'assigner le SDR");
         } finally {
             setIsAssigning(false);
+        }
+    };
+
+    const handleAssignBD = async () => {
+        if (!mission || !selectedBDId) return;
+        setIsAssigning(true);
+        try {
+            const res = await fetch(`/api/missions/${mission.id}/assign`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sdrId: selectedBDId }),
+            });
+            const json = await res.json();
+            if (json.success) {
+                success("BD assigné", "Le Business Developer a été assigné à la mission");
+                setShowAssignBDModal(false);
+                setSelectedBDId("");
+                fetchMission();
+            } else {
+                showError("Erreur", json.error);
+            }
+        } catch (err) {
+            showError("Erreur", "Impossible d'assigner le BD");
+        } finally {
+            setIsAssigning(false);
+        }
+    };
+
+    const handleUnassign = async (sdrId: string) => {
+        if (!mission) return;
+        setUnassigningId(sdrId);
+        try {
+            const res = await fetch(`/api/missions/${mission.id}/assign?sdrId=${sdrId}`, { method: "DELETE" });
+            const json = await res.json();
+            if (json.success) {
+                success("Retiré", "L'utilisateur a été retiré de la mission");
+                fetchMission();
+            } else {
+                showError("Erreur", json.error);
+            }
+        } catch (err) {
+            showError("Erreur", "Impossible de retirer l'assignation");
+        } finally {
+            setUnassigningId(null);
         }
     };
 
@@ -331,15 +397,26 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
             </div>
 
             {/* Premium Stats */}
-            <div className="grid grid-cols-4 gap-5">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-5">
                 <div className="mgr-stat-card">
                     <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center">
                             <Users className="w-6 h-6 text-indigo-600" />
                         </div>
                         <div>
-                            <p className="text-2xl font-bold text-slate-900">{mission._count.sdrAssignments}</p>
+                            <p className="text-2xl font-bold text-slate-900">{assignedSDRs.length}</p>
                             <p className="text-sm text-slate-500">SDRs assignés</p>
+                        </div>
+                    </div>
+                </div>
+                <div className="mgr-stat-card">
+                    <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-xl bg-violet-100 flex items-center justify-center">
+                            <Briefcase className="w-6 h-6 text-violet-600" />
+                        </div>
+                        <div>
+                            <p className="text-2xl font-bold text-slate-900">{assignedBDs.length}</p>
+                            <p className="text-sm text-slate-500">BDs assignés</p>
                         </div>
                     </div>
                 </div>
@@ -382,51 +459,121 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
                 </div>
             </div>
 
-            {/* SDRs Section */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
-                            <Users className="w-5 h-5 text-indigo-600" />
+            {/* SDRs & BDs two-column layout */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Left: SDRs */}
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm border-l-4 border-l-indigo-500">
+                    <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
+                                <Users className="w-5 h-5 text-indigo-600" />
+                            </div>
+                            <h2 className="text-lg font-semibold text-slate-900">SDRs</h2>
                         </div>
-                        <h2 className="text-lg font-semibold text-slate-900">SDRs assignés</h2>
+                        <button
+                            onClick={() => {
+                                fetchAvailableSDRs();
+                                setShowAssignSDRModal(true);
+                            }}
+                            className="flex items-center gap-2 h-9 px-4 text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
+                        >
+                            <UserPlus className="w-4 h-4" />
+                            Assigner
+                        </button>
                     </div>
-                    <button
-                        onClick={() => {
-                            fetchAvailableSDRs();
-                            setShowAssignModal(true);
-                        }}
-                        className="flex items-center gap-2 h-9 px-4 text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
-                    >
-                        <UserPlus className="w-4 h-4" />
-                        Assigner
-                    </button>
+                    {assignedSDRs.length === 0 ? (
+                        <div className="text-center py-10">
+                            <Users className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                            <p className="text-sm text-slate-500">Aucun SDR assigné</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-2 max-h-64 overflow-y-auto pr-1 custom-scrollbar" aria-label="Liste des SDRs assignés">
+                            {assignedSDRs.map((assignment) => (
+                                <div
+                                    key={assignment.id}
+                                    className="mgr-mission-card flex items-center gap-4 p-4"
+                                >
+                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center text-xs font-bold text-indigo-600 shrink-0">
+                                        {assignment.sdr.name.split(" ").map(n => n[0]).join("")}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-medium text-slate-900 truncate">{assignment.sdr.name}</p>
+                                        <p className="text-sm text-slate-500 truncate">{assignment.sdr.email}</p>
+                                    </div>
+                                    <button
+                                        onClick={() => handleUnassign(assignment.sdr.id)}
+                                        disabled={unassigningId === assignment.sdr.id}
+                                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 shrink-0"
+                                        title="Retirer de la mission"
+                                    >
+                                        {unassigningId === assignment.sdr.id ? (
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                            <UserMinus className="w-4 h-4" />
+                                        )}
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
 
-                {mission.sdrAssignments.length === 0 ? (
-                    <div className="text-center py-12">
-                        <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                        <p className="text-sm text-slate-500">Aucun SDR assigné</p>
-                    </div>
-                ) : (
-                    <div className="space-y-2">
-                        {mission.sdrAssignments.map((assignment) => (
-                            <div
-                                key={assignment.id}
-                                className="mgr-mission-card flex items-center gap-4 p-4"
-                            >
-                                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center text-sm font-bold text-indigo-600">
-                                    {assignment.sdr.name.split(" ").map(n => n[0]).join("")}
-                                </div>
-                                <div className="flex-1">
-                                    <p className="font-medium text-slate-900">{assignment.sdr.name}</p>
-                                    <p className="text-sm text-slate-500">{assignment.sdr.email}</p>
-                                </div>
-                                <span className="mgr-badge-active">Actif</span>
+                {/* Right: BDs */}
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm border-l-4 border-l-violet-500">
+                    <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center">
+                                <Briefcase className="w-5 h-5 text-violet-600" />
                             </div>
-                        ))}
+                            <h2 className="text-lg font-semibold text-slate-900">BDs</h2>
+                        </div>
+                        <button
+                            onClick={() => {
+                                fetchAvailableBDs();
+                                setShowAssignBDModal(true);
+                            }}
+                            className="flex items-center gap-2 h-9 px-4 text-sm font-medium text-violet-600 bg-violet-50 hover:bg-violet-100 rounded-lg transition-colors"
+                        >
+                            <UserPlus className="w-4 h-4" />
+                            Assigner
+                        </button>
                     </div>
-                )}
+                    {assignedBDs.length === 0 ? (
+                        <div className="text-center py-10">
+                            <Briefcase className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                            <p className="text-sm text-slate-500">Aucun BD assigné</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-2 max-h-64 overflow-y-auto pr-1 custom-scrollbar" aria-label="Liste des BDs assignés">
+                            {assignedBDs.map((assignment) => (
+                                <div
+                                    key={assignment.id}
+                                    className="mgr-mission-card flex items-center gap-4 p-4"
+                                >
+                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-100 to-violet-200 flex items-center justify-center text-xs font-bold text-violet-600 shrink-0">
+                                        {assignment.sdr.name.split(" ").map(n => n[0]).join("")}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-medium text-slate-900 truncate">{assignment.sdr.name}</p>
+                                        <p className="text-sm text-slate-500 truncate">{assignment.sdr.email}</p>
+                                    </div>
+                                    <button
+                                        onClick={() => handleUnassign(assignment.sdr.id)}
+                                        disabled={unassigningId === assignment.sdr.id}
+                                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 shrink-0"
+                                        title="Retirer de la mission"
+                                    >
+                                        {unassigningId === assignment.sdr.id ? (
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                            <UserMinus className="w-4 h-4" />
+                                        )}
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* Campaigns Section */}
@@ -537,59 +684,67 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
             />
 
             {/* Assign SDR Modal */}
-            {showAssignModal && (
+            {showAssignSDRModal && (
                 <div className="fixed inset-0 dev-modal-overlay z-50 flex items-center justify-center p-4">
                     <div className="dev-modal w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-3 mb-6">
                             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center">
-                                <Sparkles className="w-5 h-5 text-white" />
+                                <Users className="w-5 h-5 text-white" />
                             </div>
                             <div>
                                 <h2 className="text-lg font-semibold text-slate-900">Assigner un SDR</h2>
                                 <p className="text-sm text-slate-500">Sélectionnez un SDR à assigner</p>
                             </div>
                         </div>
-
                         <Select
                             label="SDR"
                             placeholder="Sélectionner un SDR..."
-                            options={availableSDRs.map(sdr => ({
-                                value: sdr.id,
-                                label: `${sdr.name} (${sdr.email})`,
-                            }))}
+                            options={availableSDRs.map(u => ({ value: u.id, label: `${u.name} (${u.email})` }))}
                             value={selectedSDRId}
                             onChange={setSelectedSDRId}
                             searchable
                         />
                         {availableSDRs.length === 0 && (
-                            <p className="text-sm text-slate-500 mt-2">
-                                Tous les SDRs sont déjà assignés à cette mission
-                            </p>
+                            <p className="text-sm text-slate-500 mt-2">Tous les SDRs sont déjà assignés à cette mission</p>
                         )}
-
                         <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-200">
-                            <button
-                                onClick={() => setShowAssignModal(false)}
-                                className="h-10 px-5 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-                            >
-                                Annuler
+                            <button onClick={() => setShowAssignSDRModal(false)} className="h-10 px-5 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Annuler</button>
+                            <button onClick={handleAssignSDR} disabled={!selectedSDRId || isAssigning} className="mgr-btn-primary h-10 px-5 text-sm font-medium disabled:opacity-50 flex items-center gap-2">
+                                {isAssigning ? <><Loader2 className="w-4 h-4 animate-spin" /> Assignation...</> : <><UserPlus className="w-4 h-4" /> Assigner</>}
                             </button>
-                            <button
-                                onClick={handleAssign}
-                                disabled={!selectedSDRId || isAssigning}
-                                className="mgr-btn-primary h-10 px-5 text-sm font-medium disabled:opacity-50 flex items-center gap-2"
-                            >
-                                {isAssigning ? (
-                                    <>
-                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                        Assignation...
-                                    </>
-                                ) : (
-                                    <>
-                                        <UserPlus className="w-4 h-4" />
-                                        Assigner
-                                    </>
-                                )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Assign BD Modal */}
+            {showAssignBDModal && (
+                <div className="fixed inset-0 dev-modal-overlay z-50 flex items-center justify-center p-4">
+                    <div className="dev-modal w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center">
+                                <Briefcase className="w-5 h-5 text-white" />
+                            </div>
+                            <div>
+                                <h2 className="text-lg font-semibold text-slate-900">Assigner un BD</h2>
+                                <p className="text-sm text-slate-500">Sélectionnez un Business Developer à assigner</p>
+                            </div>
+                        </div>
+                        <Select
+                            label="BD"
+                            placeholder="Sélectionner un BD..."
+                            options={availableBDs.map(u => ({ value: u.id, label: `${u.name} (${u.email})` }))}
+                            value={selectedBDId}
+                            onChange={setSelectedBDId}
+                            searchable
+                        />
+                        {availableBDs.length === 0 && (
+                            <p className="text-sm text-slate-500 mt-2">Tous les BDs sont déjà assignés à cette mission</p>
+                        )}
+                        <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-200">
+                            <button onClick={() => setShowAssignBDModal(false)} className="h-10 px-5 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Annuler</button>
+                            <button onClick={handleAssignBD} disabled={!selectedBDId || isAssigning} className="h-10 px-5 text-sm font-medium text-violet-600 bg-violet-100 hover:bg-violet-200 rounded-lg disabled:opacity-50 flex items-center gap-2">
+                                {isAssigning ? <><Loader2 className="w-4 h-4 animate-spin" /> Assignation...</> : <><UserPlus className="w-4 h-4" /> Assigner</>}
                             </button>
                         </div>
                     </div>

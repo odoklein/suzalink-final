@@ -109,7 +109,7 @@ export function parseDateFromNote(note: string | null | undefined): Date | null 
 }
 
 /**
- * Format callback date for display
+ * Format callback date for display (date only)
  */
 export function formatCallbackDate(date: Date | string): string {
     const d = typeof date === 'string' ? new Date(date) : date;
@@ -134,4 +134,17 @@ export function formatCallbackDate(date: Date | string): string {
             month: 'long',
         });
     }
+}
+
+/**
+ * Format callback date and time for display.
+ * callbackDate is stored in UTC; this converts to user's local timezone.
+ */
+export function formatCallbackDateTime(date: Date | string): string {
+    const d = typeof date === 'string' ? new Date(date) : date;
+    return d.toLocaleString('fr-FR', {
+        dateStyle: 'short',
+        timeStyle: 'short',
+        hour12: false,
+    });
 }

@@ -107,6 +107,8 @@ export default function SDRActionPage() {
     const [currentAction, setCurrentAction] = useState<NextActionData | null>(null);
     const [selectedResult, setSelectedResult] = useState<ActionResult | null>(null);
     const [note, setNote] = useState("");
+    /** For CALLBACK_REQUESTED: date/time from calendar (YYYY-MM-DDTHH:mm for datetime-local). */
+    const [callbackDateValue, setCallbackDateValue] = useState("");
     const [isLoading, setIsLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showSuccess, setShowSuccess] = useState(false);
@@ -163,6 +165,7 @@ export default function SDRActionPage() {
         setError(null);
         setSelectedResult(null);
         setNote("");
+        setCallbackDateValue("");
         setShowSuccess(false);
         setElapsedTime(0);
         setActiveTab("intro");
@@ -223,6 +226,7 @@ export default function SDRActionPage() {
                     channel: currentAction.channel,
                     result: selectedResult,
                     note: note || undefined,
+                    callbackDate: selectedResult === "CALLBACK_REQUESTED" && callbackDateValue ? new Date(callbackDateValue).toISOString() : undefined,
                     duration: elapsedTime,
                 }),
             });
@@ -668,6 +672,32 @@ export default function SDRActionPage() {
                 />
                 <p className="text-xs text-slate-400 mt-2 text-right">{note.length}/500</p>
             </Card>
+
+            {/* Callback date (Rappel) - calendar when "Rappel demandé" */}
+            {selectedResult === "CALLBACK_REQUESTED" && (
+                <Card className="border-amber-200 bg-amber-50/50">
+                    <div className="flex items-center gap-2 mb-3">
+                        <Clock className="w-5 h-5 text-amber-600" />
+                        <label className="block text-sm font-semibold text-slate-900">Date de rappel</label>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-2">
+                        {currentAction?.missionName && (
+                            <span className="font-medium text-slate-700">Mission: {currentAction.missionName}</span>
+                        )}
+                        {!currentAction?.missionName && "Choisissez une date et heure pour le rappel."}
+                    </p>
+                    <input
+                        type="datetime-local"
+                        value={callbackDateValue}
+                        onChange={(e) => setCallbackDateValue(e.target.value)}
+                        min={new Date().toISOString().slice(0, 16)}
+                        className="w-full px-4 py-3 text-sm border border-amber-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-300"
+                    />
+                    <p className="text-xs text-slate-500 mt-2">
+                        Optionnel. Vous pouvez aussi indiquer la date dans la note (ex: &quot;rappeler demain 14h&quot;).
+                    </p>
+                </Card>
+            )}
 
             {/* Submit */}
             <div className="flex justify-end">
