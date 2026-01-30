@@ -2,7 +2,7 @@
 
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
-import { Modal, ModalFooter, Select, ConfirmModal, useToast } from "@/components/ui";
+import { Modal, ModalFooter, Select, ConfirmModal, ContextMenu, useContextMenu, useToast } from "@/components/ui";
 import {
     ArrowLeft,
     Target,
@@ -101,6 +101,9 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
 
     // Modals
     const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [showDeleteListModal, setShowDeleteListModal] = useState(false);
+    const [listToDelete, setListToDelete] = useState<Mission["lists"][0] | null>(null);
+    const [isDeletingList, setIsDeletingList] = useState(false);
     const [showAssignSDRModal, setShowAssignSDRModal] = useState(false);
     const [showAssignBDModal, setShowAssignBDModal] = useState(false);
     const [availableSDRs, setAvailableSDRs] = useState<AssignableUser[]>([]);
@@ -109,6 +112,7 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
     const [selectedBDId, setSelectedBDId] = useState<string>("");
     const [isAssigning, setIsAssigning] = useState(false);
     const [unassigningId, setUnassigningId] = useState<string | null>(null);
+    const { position: listMenuPosition, contextData: listMenuData, handleContextMenu: handleListContextMenu, close: closeListMenu } = useContextMenu();
 
     // ============================================
     // FETCH MISSION
@@ -234,6 +238,43 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
             setShowDeleteModal(false);
         }
     };
+
+    const handleDeleteList = async () => {
+        if (!listToDelete) return;
+
+        setIsDeletingList(true);
+        try {
+            const res = await fetch(`/api/lists/${listToDelete.id}`, { method: "DELETE" });
+            const json = await res.json();
+
+            if (json.success) {
+                success("Liste supprimée", `${listToDelete.name} a été supprimée`);
+                setShowDeleteListModal(false);
+                setListToDelete(null);
+                fetchMission();
+            } else {
+                showError("Erreur", json.error || "Impossible de supprimer la liste");
+            }
+        } catch (err) {
+            showError("Erreur", "Impossible de supprimer la liste");
+        } finally {
+            setIsDeletingList(false);
+        }
+    };
+
+    const listContextMenuItems = listMenuData
+        ? [
+              {
+                  label: "Supprimer",
+                  icon: <Trash2 className="w-4 h-4" />,
+                  onClick: () => {
+                      setListToDelete(listMenuData);
+                      setShowDeleteListModal(true);
+                  },
+                  variant: "danger" as const,
+              },
+          ]
+        : [];
 
     // ============================================
     // ASSIGN SDR
@@ -649,23 +690,31 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
                 ) : (
                     <div className="space-y-2">
                         {mission.lists.map((list) => (
-                            <Link
+                            <div
                                 key={list.id}
-                                href={`/manager/lists/${list.id}`}
-                                className="mgr-mission-card group flex items-center gap-4 p-4 block"
+                                className="relative"
+                                onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    handleListContextMenu(e, list);
+                                }}
                             >
-                                <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-                                    <ListIcon className="w-5 h-5 text-amber-600" />
-                                </div>
-                                <div className="flex-1">
-                                    <p className="font-medium text-slate-900 group-hover:text-indigo-600 transition-colors">{list.name}</p>
-                                    <p className="text-sm text-slate-500">
-                                        {list._count?.companies || 0} sociétés · {list._count?.contacts || 0} contacts
-                                    </p>
-                                </div>
-                                <span className="text-xs font-medium text-slate-500 px-2 py-1 bg-slate-100 rounded">{list.type}</span>
-                                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-1 transition-all" />
-                            </Link>
+                                <Link
+                                    href={`/manager/lists/${list.id}`}
+                                    className="mgr-mission-card group flex items-center gap-4 p-4 block"
+                                >
+                                    <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                                        <ListIcon className="w-5 h-5 text-amber-600" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <p className="font-medium text-slate-900 group-hover:text-indigo-600 transition-colors">{list.name}</p>
+                                        <p className="text-sm text-slate-500">
+                                            {list._count?.companies || 0} sociétés · {list._count?.contacts || 0} contacts
+                                        </p>
+                                    </div>
+                                    <span className="text-xs font-medium text-slate-500 px-2 py-1 bg-slate-100 rounded">{list.type}</span>
+                                    <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-1 transition-all" />
+                                </Link>
+                            </div>
                         ))}
                     </div>
                 )}
@@ -681,6 +730,29 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
                 confirmText="Supprimer"
                 variant="danger"
                 isLoading={isDeleting}
+            />
+
+            {/* List right-click context menu (delete) */}
+            <ContextMenu
+                items={listContextMenuItems}
+                position={listMenuPosition}
+                onClose={closeListMenu}
+            />
+
+            {/* Delete list confirmation */}
+            <ConfirmModal
+                isOpen={showDeleteListModal}
+                onClose={() => {
+                    setShowDeleteListModal(false);
+                    setListToDelete(null);
+                    closeListMenu();
+                }}
+                onConfirm={handleDeleteList}
+                title="Supprimer la liste ?"
+                message={listToDelete ? `Êtes-vous sûr de vouloir supprimer "${listToDelete.name}" ? Les sociétés et contacts associés seront également supprimés.` : ""}
+                confirmText="Supprimer"
+                variant="danger"
+                isLoading={isDeletingList}
             />
 
             {/* Assign SDR Modal */}

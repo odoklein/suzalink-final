@@ -39,17 +39,14 @@ export async function GET(request: Request) {
             missionIds = assignments.map((a) => a.missionId);
         }
 
+        // SDR: show all their rappels (any callbackDate) so they see what they just created.
+        // BD: same — show all callbacks for their missions.
         const whereClause: {
             sdrId?: string;
             result: "CALLBACK_REQUESTED";
-            OR: Array<{ callbackDate: null } | { callbackDate: { lte: Date } }>;
             campaign?: { missionId: { in: string[] } };
         } = {
             result: "CALLBACK_REQUESTED",
-            OR: [
-                { callbackDate: null },
-                { callbackDate: { lte: new Date() } },
-            ],
         };
 
         if (isBusinessDeveloper) {

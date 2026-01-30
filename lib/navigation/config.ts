@@ -32,7 +32,8 @@ export interface NavItem {
     label: string;
     permission?: string;        // Permission code required to view this item
     roles?: UserRole[];         // Restrict to specific roles (if no permission set)
-    badge?: string;             // Optional badge text
+    badge?: string;             // Optional badge text (e.g. count)
+    badgeDetail?: string;       // Optional secondary badge (e.g. "Proch. 31 janv.")
     children?: NavItem[];       // Sub-items for nested navigation
 }
 
@@ -159,7 +160,7 @@ export const SDR_NAV: NavSection[] = [
                 href: "/sdr/callbacks",
                 icon: Calendar,
                 label: "Rappels",
-                permission: "pages.action"
+                // No permission: always visible for SDR so they always see their callbacks
             },
             {
                 href: "/sdr/meetings",
@@ -219,7 +220,7 @@ export const BD_NAV: NavSection[] = [
                 href: "/sdr/callbacks",
                 icon: Calendar,
                 label: "Rappels",
-                permission: "pages.action"
+                // No permission: always visible for SDR/BD
             },
             {
                 href: "/sdr/opportunities",

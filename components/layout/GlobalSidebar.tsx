@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
@@ -17,6 +17,7 @@ import { useSidebar } from "./SidebarProvider";
 import { usePermissions } from "@/lib/permissions/PermissionProvider";
 import { NavSection, NavItem, ROLE_CONFIG } from "@/lib/navigation/config";
 import { UserRole } from "@prisma/client";
+import { formatCallbackDate } from "@/lib/utils/parseDateFromNote";
 
 // ============================================
 // TYPES
@@ -72,22 +73,41 @@ function SidebarNavItem({
             )} />
             
             {/* Label with collapse animation */}
-            <span className={cn(
-                "flex-1 whitespace-nowrap transition-all duration-300",
+            <div className={cn(
+                "flex-1 min-w-0 transition-all duration-300",
                 isCollapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100"
             )}>
-                {item.label}
-            </span>
+                <span className="block truncate">{item.label}</span>
+                {item.badgeDetail && !isCollapsed && (
+                    <span className="block text-[11px] text-slate-500 truncate" title={item.badgeDetail}>
+                        {item.badgeDetail}
+                    </span>
+                )}
+            </div>
+
+            {/* Badge (e.g. rappels count) */}
+            {item.badge != null && item.badge !== "" && !isCollapsed && (
+                <span className="flex-shrink-0 min-w-[1.25rem] h-5 px-1.5 flex items-center justify-center rounded-md text-[11px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                    {item.badge}
+                </span>
+            )}
+            {item.badge != null && item.badge !== "" && isCollapsed && (
+                <span className="absolute right-1 top-1/2 -translate-y-1/2 min-w-[1.25rem] h-5 px-1 flex items-center justify-center rounded-md text-[11px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                    {item.badge}
+                </span>
+            )}
             
             {/* Active chevron */}
             {isActive && !isCollapsed && (
-                <ChevronRight className="w-4 h-4 text-indigo-500/50" />
+                <ChevronRight className="w-4 h-4 text-indigo-500/50 flex-shrink-0" />
             )}
 
             {/* Tooltip for collapsed state */}
             {isCollapsed && (
                 <div className="absolute left-full ml-2 px-2 py-1 bg-slate-800 text-white text-xs rounded-md opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50 shadow-lg">
                     {item.label}
+                    {item.badge != null && item.badge !== "" && ` (${item.badge})`}
+                    {item.badgeDetail && ` · ${item.badgeDetail}`}
                 </div>
             )}
         </Link>
@@ -145,12 +165,60 @@ function SidebarSection({
 // MAIN GLOBAL SIDEBAR
 // ============================================
 
+const RAPPELS_HREF = "/sdr/callbacks";
+
 export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
     const { data: session } = useSession();
     const { isCollapsed, isMobileOpen, toggleCollapsed, closeMobile } = useSidebar();
-    
+    const [callbacksCount, setCallbacksCount] = useState<number | null>(null);
+    const [nextCallbackDate, setNextCallbackDate] = useState<string | null>(null);
+
     const userRole = session?.user?.role as UserRole | undefined;
     const roleConfig = userRole ? ROLE_CONFIG[userRole] : null;
+
+    // Fetch rappels count and next date for SDR/BD sidebar badge
+    useEffect(() => {
+        if (userRole !== "SDR" && userRole !== "BUSINESS_DEVELOPER") return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch("/api/sdr/callbacks?limit=200");
+                const json = await res.json();
+                if (cancelled || !json.success) return;
+                const list = json.data as Array<{ callbackDate?: string | null }>;
+                setCallbacksCount(list.length);
+                const now = new Date();
+                const futureWithDate = list
+                    .filter((c) => c.callbackDate && new Date(c.callbackDate) >= now)
+                    .map((c) => new Date(c.callbackDate!))
+                    .sort((a, b) => a.getTime() - b.getTime());
+                const next = futureWithDate[0] ?? null;
+                setNextCallbackDate(next ? `Proch. ${formatCallbackDate(next)}` : null);
+            } catch {
+                if (!cancelled) {
+                    setCallbacksCount(0);
+                    setNextCallbackDate(null);
+                }
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [userRole]);
+
+    // Inject rappels count and next date into the Rappels nav item
+    const effectiveNavigation = useMemo(() => {
+        if (callbacksCount === null && !nextCallbackDate) return navigation;
+        return navigation.map((section) => ({
+            ...section,
+            items: section.items.map((item) => {
+                if (item.href !== RAPPELS_HREF) return item;
+                return {
+                    ...item,
+                    badge: callbacksCount != null ? String(callbacksCount) : undefined,
+                    badgeDetail: nextCallbackDate ?? undefined,
+                };
+            }),
+        }));
+    }, [navigation, callbacksCount, nextCallbackDate]);
 
     return (
         <>
@@ -223,7 +291,7 @@ export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
 
                 {/* Navigation */}
                 <nav className="flex-1 px-2.5 py-2 space-y-0.5 overflow-y-auto dev-scrollbar">
-                    {navigation.map((section, idx) => (
+                    {effectiveNavigation.map((section, idx) => (
                         <SidebarSection
                             key={idx}
                             section={section}
