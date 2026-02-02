@@ -96,18 +96,45 @@ export function ContactDrawer({
     const [actionsLoading, setActionsLoading] = useState(false);
     const lastContactIdRef = useRef<string | null>(null);
     const [campaigns, setCampaigns] = useState<Array<{ id: string; name: string; mission?: { channel: string } }>>([]);
+    const [campaignsLoading, setCampaignsLoading] = useState(false);
+    const [resolvedMissionId, setResolvedMissionId] = useState<string | null>(null);
+    const [missionIdLoading, setMissionIdLoading] = useState(false);
     const [newActionResult, setNewActionResult] = useState<string>("");
     const [newActionNote, setNewActionNote] = useState("");
     const [newActionCampaignId, setNewActionCampaignId] = useState("");
     const [newActionSaving, setNewActionSaving] = useState(false);
 
-    // Fetch campaigns when we have contact with missionId (for "add action" form)
+    const effectiveMissionId = contact?.missionId ?? resolvedMissionId ?? undefined;
+
+    // Resolve missionId when contact has no missionId (e.g. opened from list)
     useEffect(() => {
-        if (!contact?.missionId || isCreating) {
-            setCampaigns([]);
+        if (!contact?.id || isCreating || contact.missionId) {
+            setResolvedMissionId(null);
             return;
         }
-        fetch(`/api/campaigns?missionId=${contact.missionId}&isActive=true`)
+        setMissionIdLoading(true);
+        fetch(`/api/contacts/${contact.id}/mission`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data?.missionId) {
+                    setResolvedMissionId(json.data.missionId);
+                } else {
+                    setResolvedMissionId(null);
+                }
+            })
+            .catch(() => setResolvedMissionId(null))
+            .finally(() => setMissionIdLoading(false));
+    }, [contact?.id, contact?.missionId, isCreating]);
+
+    // Fetch campaigns when we have missionId (for "add action" form)
+    useEffect(() => {
+        if (!effectiveMissionId || isCreating) {
+            setCampaigns([]);
+            setCampaignsLoading(false);
+            return;
+        }
+        setCampaignsLoading(true);
+        fetch(`/api/campaigns?missionId=${effectiveMissionId}&isActive=true&limit=50`)
             .then((res) => res.json())
             .then((json) => {
                 if (json.success && Array.isArray(json.data)) {
@@ -116,8 +143,9 @@ export function ContactDrawer({
                     setCampaigns([]);
                 }
             })
-            .catch(() => setCampaigns([]));
-    }, [contact?.missionId, isCreating]);
+            .catch(() => setCampaigns([]))
+            .finally(() => setCampaignsLoading(false));
+    }, [effectiveMissionId, isCreating]);
 
     // Fetch actions history when drawer opens with a contact
     useEffect(() => {
@@ -582,53 +610,69 @@ export function ContactDrawer({
                     ) : null}
                 </DrawerSection>
 
-                {/* Ajouter une action / note */}
-                {!isEditing && !isCreating && contact?.missionId && campaigns.length > 0 && (
+                {/* Ajouter une action / note — always show when in view mode so user can leave a note */}
+                {!isEditing && !isCreating && contact && (
                     <DrawerSection title="Ajouter une action / note">
-                        <div className="space-y-4">
-                            <Select
-                                label="Campagne"
-                                placeholder="Sélectionner une campagne..."
-                                options={campaigns.map((c) => ({ value: c.id, label: c.name }))}
-                                value={newActionCampaignId || campaigns[0]?.id}
-                                onChange={setNewActionCampaignId}
-                            />
-                            <Select
-                                label="Résultat"
-                                placeholder="Sélectionner un résultat..."
-                                options={[
-                                    { value: "NO_RESPONSE", label: "Pas de réponse" },
-                                    { value: "BAD_CONTACT", label: "Mauvais contact" },
-                                    { value: "INTERESTED", label: "Intéressé" },
-                                    { value: "CALLBACK_REQUESTED", label: "Rappel demandé" },
-                                    { value: "MEETING_BOOKED", label: "RDV pris" },
-                                    { value: "DISQUALIFIED", label: "Disqualifié" },
-                                ]}
-                                value={newActionResult}
-                                onChange={setNewActionResult}
-                            />
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Note</label>
-                                <textarea
-                                    value={newActionNote}
-                                    onChange={(e) => setNewActionNote(e.target.value)}
-                                    placeholder="Ajouter une note (requise pour Intéressé / Rappel demandé)..."
-                                    rows={3}
-                                    maxLength={500}
-                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-                                />
-                                <p className="text-xs text-slate-400 mt-1 text-right">{newActionNote.length}/500</p>
+                        {missionIdLoading ? (
+                            <div className="flex items-center gap-2 py-4 text-slate-500 text-sm">
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Chargement...
                             </div>
-                            <Button
-                                type="button"
-                                variant="primary"
-                                onClick={handleAddAction}
-                                disabled={newActionSaving || !newActionResult}
-                                isLoading={newActionSaving}
-                            >
-                                Enregistrer l'action
-                            </Button>
-                        </div>
+                        ) : campaignsLoading ? (
+                            <div className="flex items-center gap-2 py-4 text-slate-500 text-sm">
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Chargement des campagnes...
+                            </div>
+                        ) : !effectiveMissionId ? (
+                            <p className="text-sm text-slate-500 py-4">Impossible de charger la mission pour ce contact.</p>
+                        ) : campaigns.length === 0 ? (
+                            <p className="text-sm text-slate-500 py-4">Aucune campagne disponible pour cette mission.</p>
+                        ) : (
+                            <div className="space-y-4">
+                                <Select
+                                    label="Campagne"
+                                    placeholder="Sélectionner une campagne..."
+                                    options={campaigns.map((c) => ({ value: c.id, label: c.name }))}
+                                    value={newActionCampaignId || campaigns[0]?.id}
+                                    onChange={setNewActionCampaignId}
+                                />
+                                <Select
+                                    label="Résultat"
+                                    placeholder="Sélectionner un résultat..."
+                                    options={[
+                                        { value: "NO_RESPONSE", label: "Pas de réponse" },
+                                        { value: "BAD_CONTACT", label: "Mauvais contact" },
+                                        { value: "INTERESTED", label: "Intéressé" },
+                                        { value: "CALLBACK_REQUESTED", label: "Rappel demandé" },
+                                        { value: "MEETING_BOOKED", label: "RDV pris" },
+                                        { value: "DISQUALIFIED", label: "Disqualifié" },
+                                    ]}
+                                    value={newActionResult}
+                                    onChange={setNewActionResult}
+                                />
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Note</label>
+                                    <textarea
+                                        value={newActionNote}
+                                        onChange={(e) => setNewActionNote(e.target.value)}
+                                        placeholder="Ajouter une note (requise pour Intéressé / Rappel demandé)..."
+                                        rows={3}
+                                        maxLength={500}
+                                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                                    />
+                                    <p className="text-xs text-slate-400 mt-1 text-right">{newActionNote.length}/500</p>
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant="primary"
+                                    onClick={handleAddAction}
+                                    disabled={newActionSaving || !newActionResult}
+                                    isLoading={newActionSaving}
+                                >
+                                    Enregistrer l'action
+                                </Button>
+                            </div>
+                        )}
                     </DrawerSection>
                 )}
 
