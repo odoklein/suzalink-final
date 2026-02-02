@@ -28,6 +28,7 @@ import {
   Tag,
   Trash2,
   Upload,
+  UserPlus,
   Video,
   Archive,
   X,
@@ -159,7 +160,8 @@ function typeIcon(mimeType: string) {
 }
 
 function ItemMenu({
-  onShare,
+  onShareLink,
+  onShareDirect,
   onRename,
   onMove,
   onDelete,
@@ -169,7 +171,8 @@ function ItemMenu({
   onImport,
   accent = "slate",
 }: {
-  onShare: () => void;
+  onShareLink: () => void;
+  onShareDirect: () => void;
   onRename: () => void;
   onMove: () => void;
   onDelete: () => void;
@@ -324,11 +327,24 @@ function ItemMenu({
                 )}
                 onClick={() => {
                   setOpen(false);
-                  onShare();
+                  onShareLink();
                 }}
               >
                 <Link2 className="w-4 h-4 text-slate-500" />
-                Partager / Copier le lien
+                Partager par lien
+              </button>
+              <button
+                className={classNames(
+                  "w-full px-3 py-2.5 text-sm text-left flex items-center gap-2 text-slate-700",
+                  menuHoverTint(accent)
+                )}
+                onClick={() => {
+                  setOpen(false);
+                  onShareDirect();
+                }}
+              >
+                <UserPlus className="w-4 h-4 text-slate-500" />
+                Partager directement
               </button>
 
               {!isDriveItem && (
@@ -446,6 +462,15 @@ export default function FilesExplorer() {
 
   const [shareOpen, setShareOpen] = useState(false);
   const [shareTarget, setShareTarget] = useState<{ kind: ItemKind; item: FileItem | FolderItem } | null>(null);
+  const [shareMode, setShareMode] = useState<"link" | "direct">("link");
+
+  // Right-click context menu
+  const [ctxMenuPos, setCtxMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [ctxMenuTarget, setCtxMenuTarget] = useState<{ kind: ItemKind; item: FileItem | FolderItem; isDriveItem?: boolean } | null>(null);
+  const [shareDirectUserIds, setShareDirectUserIds] = useState<string[]>([]);
+  const [shareDirectUsers, setShareDirectUsers] = useState<Array<{ id: string; name: string | null; email: string | null }>>([]);
+  const [shareDirectLoading, setShareDirectLoading] = useState(false);
+  const [shareDirectSubmitting, setShareDirectSubmitting] = useState(false);
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<{ kind: ItemKind; item: FileItem | FolderItem } | null>(null);
@@ -646,10 +671,40 @@ export default function FilesExplorer() {
     }
   };
 
-  const onOpenShare = (kind: ItemKind, item: FileItem | FolderItem) => {
+  const onOpenShare = (kind: ItemKind, item: FileItem | FolderItem, mode: "link" | "direct" = "link") => {
     setShareTarget({ kind, item });
+    setShareMode(mode);
     setShareOpen(true);
+    setCtxMenuPos(null);
+    setCtxMenuTarget(null);
+    if (mode === "direct") {
+      setShareDirectUserIds([]);
+      setShareDirectLoading(true);
+      fetch("/api/users?limit=100")
+        .then((r) => r.json())
+        .then((j) => {
+          const list = j?.data?.users ?? j?.users;
+          if (j.success && Array.isArray(list)) setShareDirectUsers(list);
+        })
+        .finally(() => setShareDirectLoading(false));
+    }
   };
+
+  const ctxMenuRef = useRef<HTMLDivElement | null>(null);
+  const closeCtxMenu = useCallback(() => {
+    setCtxMenuPos(null);
+    setCtxMenuTarget(null);
+  }, []);
+
+  useEffect(() => {
+    if (!ctxMenuPos) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ctxMenuRef.current?.contains(e.target as Node)) return;
+      closeCtxMenu();
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [ctxMenuPos, closeCtxMenu]);
 
   const onCopyShare = async () => {
     if (!shareTarget) return;
@@ -662,6 +717,30 @@ export default function FilesExplorer() {
       setShareOpen(false);
     } catch {
       showError("Erreur", "Impossible de copier le lien.");
+    }
+  };
+
+  const onShareDirectSubmit = async () => {
+    if (!shareTarget || shareDirectUserIds.length === 0) return;
+    setShareDirectSubmitting(true);
+    try {
+      const url = shareTarget.kind === "file"
+        ? `/api/files/${(shareTarget.item as FileItem).id}/share`
+        : `/api/folders/${(shareTarget.item as FolderItem).id}/share`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userIds: shareDirectUserIds }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error ?? "Erreur");
+      success("Partagé", `Partagé avec ${shareDirectUserIds.length} utilisateur(s).`);
+      setShareOpen(false);
+      setShareDirectUserIds([]);
+    } catch (e) {
+      showError("Erreur", e instanceof Error ? e.message : "Impossible de partager.");
+    } finally {
+      setShareDirectSubmitting(false);
     }
   };
 
@@ -1094,6 +1173,11 @@ export default function FilesExplorer() {
                       selectedFolders.has(folder.id) && "bg-indigo-50 border-indigo-100 shadow-sm"
                     )}
                     onClick={() => navigateToFolder(folder.id, folder.name)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setCtxMenuPos({ x: e.clientX, y: e.clientY });
+                      setCtxMenuTarget({ kind: "folder", item: folder, isDriveItem: false });
+                    }}
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <button
@@ -1130,7 +1214,8 @@ export default function FilesExplorer() {
                         setDetailsOpen(true);
                       }}
                       accent="amber"
-                      onShare={() => onOpenShare("folder", folder)}
+                      onShareLink={() => onOpenShare("folder", folder, "link")}
+                      onShareDirect={() => onOpenShare("folder", folder, "direct")}
                       onRename={() => onOpenRename("folder", folder)}
                       onMove={() => onOpenMove("folder", folder)}
                       onDelete={() => onDeleteFolder(folder)}
@@ -1172,6 +1257,12 @@ export default function FilesExplorer() {
                     key={f.id}
                     className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-slate-50 text-left"
                     onClick={() => navigateDriveFolder(f.id, f.name)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setCtxMenuPos({ x: e.clientX, y: e.clientY });
+                      setCtxMenuTarget({ kind: "folder", item: { id: f.id, name: f.name, _count: { files: 0, children: 0 } }, isDriveItem: true });
+                    }}
                   >
                     <Folder className="w-4 h-4 text-blue-500" />
                     <span className="text-sm font-medium text-slate-900 truncate">{f.name}</span>
@@ -1260,6 +1351,11 @@ export default function FilesExplorer() {
                       setDetails({ kind: "file", item: file });
                       setDetailsOpen(true);
                     }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setCtxMenuPos({ x: e.clientX, y: e.clientY });
+                      setCtxMenuTarget({ kind: "file", item: file, isDriveItem: true });
+                    }}
                   >
                     <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-50 to-cyan-50 ring-1 ring-blue-200/60 flex items-center justify-center flex-shrink-0">
                       <Cloud className="w-5 h-5 text-blue-600" />
@@ -1283,11 +1379,11 @@ export default function FilesExplorer() {
                         setDetails({ kind: "file", item: file });
                         setDetailsOpen(true);
                       }}
-                      onShare={() => onOpenShare("file", file)}
+                      onShareLink={() => onOpenShare("file", file, "link")}
+                      onShareDirect={() => onOpenShare("file", file, "direct")}
                       onRename={() => { }}
                       onMove={() => { }}
                       onDelete={() => {
-                        // Drive: no delete from CRM here; keep safe
                         showError("Info", "Suppression Drive non disponible ici.");
                       }}
                       onOpenExternal={() => file.webViewLink && window.open(file.webViewLink, "_blank")}
@@ -1308,6 +1404,11 @@ export default function FilesExplorer() {
                     onClick={() => {
                       setDetails({ kind: "file", item: file });
                       setDetailsOpen(true);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setCtxMenuPos({ x: e.clientX, y: e.clientY });
+                      setCtxMenuTarget({ kind: "file", item: file, isDriveItem: false });
                     }}
                   >
                     {(() => {
@@ -1368,7 +1469,8 @@ export default function FilesExplorer() {
                                 setDetails({ kind: "file", item: file });
                                 setDetailsOpen(true);
                               }}
-                              onShare={() => onOpenShare("file", file)}
+                              onShareLink={() => onOpenShare("file", file, "link")}
+                              onShareDirect={() => onOpenShare("file", file, "direct")}
                               onRename={() => onOpenRename("file", file)}
                               onMove={() => onOpenMove("file", file)}
                               onDelete={() => onDeleteFile(file)}
@@ -1510,6 +1612,78 @@ export default function FilesExplorer() {
         )}
       </div>
 
+      {/* Right-click context menu */}
+      {ctxMenuPos && ctxMenuTarget && typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={ctxMenuRef}
+            className="fixed z-[9999] w-56 rounded-xl border border-slate-200/80 bg-white/95 backdrop-blur-xl shadow-xl py-1 animate-scale-in"
+            style={{ left: Math.min(ctxMenuPos.x, window.innerWidth - 224), top: Math.min(ctxMenuPos.y, window.innerHeight - 320) }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="h-1.5 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-t-xl" />
+            <button
+              className="w-full px-3 py-2.5 text-sm text-left flex items-center gap-2 text-slate-700 hover:bg-slate-50"
+              onClick={() => onOpenShare(ctxMenuTarget.kind, ctxMenuTarget.item, "link")}
+            >
+              <Link2 className="w-4 h-4 text-slate-500" />
+              Partager par lien
+            </button>
+            {!ctxMenuTarget.isDriveItem && (
+              <button
+                className="w-full px-3 py-2.5 text-sm text-left flex items-center gap-2 text-slate-700 hover:bg-slate-50"
+                onClick={() => onOpenShare(ctxMenuTarget.kind, ctxMenuTarget.item, "direct")}
+              >
+                <UserPlus className="w-4 h-4 text-slate-500" />
+                Partager directement
+              </button>
+            )}
+            <div className="h-px bg-slate-200 my-1" />
+            <button
+              className="w-full px-3 py-2.5 text-sm text-left flex items-center gap-2 text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                setDetails({ kind: ctxMenuTarget.kind, item: ctxMenuTarget.item });
+                setDetailsOpen(true);
+                closeCtxMenu();
+              }}
+            >
+              <Info className="w-4 h-4 text-slate-500" />
+              Détails
+            </button>
+            {!ctxMenuTarget.isDriveItem && (
+              <>
+                <button
+                  className="w-full px-3 py-2.5 text-sm text-left flex items-center gap-2 text-slate-700 hover:bg-slate-50"
+                  onClick={() => { onOpenRename(ctxMenuTarget.kind, ctxMenuTarget.item); closeCtxMenu(); }}
+                >
+                  <Pencil className="w-4 h-4 text-slate-500" />
+                  Renommer
+                </button>
+                <button
+                  className="w-full px-3 py-2.5 text-sm text-left flex items-center gap-2 text-slate-700 hover:bg-slate-50"
+                  onClick={() => { onOpenMove(ctxMenuTarget.kind, ctxMenuTarget.item); closeCtxMenu(); }}
+                >
+                  <Move className="w-4 h-4 text-slate-500" />
+                  Déplacer
+                </button>
+              </>
+            )}
+            <div className="h-px bg-slate-200 my-1" />
+            <button
+              className="w-full px-3 py-2.5 text-sm text-left flex items-center gap-2 text-red-600 hover:bg-red-50"
+              onClick={() => {
+                if (ctxMenuTarget.kind === "file") onDeleteFile(ctxMenuTarget.item as FileItem);
+                else onDeleteFolder(ctxMenuTarget.item as FolderItem);
+                closeCtxMenu();
+              }}
+            >
+              <Trash2 className="w-4 h-4" />
+              Supprimer
+            </button>
+          </div>,
+          document.body
+        )}
+
       {/* Create folder */}
       <Modal
         isOpen={createFolderOpen}
@@ -1531,48 +1705,98 @@ export default function FilesExplorer() {
       {/* Share */}
       <Modal
         isOpen={shareOpen}
-        onClose={() => setShareOpen(false)}
+        onClose={() => { setShareOpen(false); setShareMode("link"); }}
         title="Partager"
-        description="Copiez un lien interne (accès selon permissions)."
+        description={shareMode === "link" ? "Copiez un lien interne (accès selon permissions)." : "Partager avec des utilisateurs."}
       >
         <div className="space-y-3">
-          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-            <p className="text-sm font-medium text-slate-900">{shareTarget?.item.name}</p>
-            <p className="text-xs text-slate-500 mt-1">Lien:</p>
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                readOnly
-                value={
-                  shareTarget?.kind === "file" && shareTarget?.item
-                    ? downloadUrl((shareTarget.item as FileItem).id)
-                    : window.location.href
-                }
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm text-slate-700"
-              />
-              <Button variant="secondary" onClick={onCopyShare} className="gap-2">
-                <Link2 className="w-4 h-4" />
-                Copier
-              </Button>
-            </div>
-          </div>
-          {shareTarget?.kind === "file" && (
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                className="gap-2"
-                onClick={() => {
-                  const link = downloadUrl((shareTarget.item as FileItem).id);
-                  window.open(link, "_blank");
-                }}
-              >
-                <ExternalLink className="w-4 h-4" />
-                Ouvrir
-              </Button>
-              <Button variant="secondary" className="gap-2" onClick={() => setRenameOpen(true)} disabled>
-                <Tag className="w-4 h-4" />
-                Partage avancé (bientôt)
-              </Button>
-            </div>
+          {shareMode === "link" && (
+            <>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <p className="text-sm font-medium text-slate-900">{shareTarget?.item.name}</p>
+                <p className="text-xs text-slate-500 mt-1">Lien:</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    readOnly
+                    value={
+                      shareTarget?.kind === "file" && shareTarget?.item
+                        ? downloadUrl((shareTarget.item as FileItem).id)
+                        : window.location.href
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm text-slate-700"
+                  />
+                  <Button variant="secondary" onClick={onCopyShare} className="gap-2">
+                    <Link2 className="w-4 h-4" />
+                    Copier
+                  </Button>
+                </div>
+              </div>
+              {shareTarget?.kind === "file" && (
+                <div className="flex gap-2">
+                  <Button
+                    variant="secondary"
+                    className="gap-2"
+                    onClick={() => {
+                      const link = downloadUrl((shareTarget.item as FileItem).id);
+                      window.open(link, "_blank");
+                    }}
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Ouvrir
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+          {shareMode === "direct" && shareTarget && (
+            <>
+              <p className="text-sm font-medium text-slate-900">{shareTarget.item.name}</p>
+              <p className="text-xs text-slate-500">Sélectionnez les utilisateurs avec qui partager.</p>
+              {shareDirectLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+                </div>
+              ) : (
+                <div className="max-h-64 overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100">
+                  {shareDirectUsers.map((u) => (
+                    <label
+                      key={u.id}
+                      className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={shareDirectUserIds.includes(u.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) setShareDirectUserIds((ids) => [...ids, u.id]);
+                          else setShareDirectUserIds((ids) => ids.filter((id) => id !== u.id));
+                        }}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-sm font-medium text-slate-900 truncate">{u.name ?? u.email ?? u.id}</span>
+                      {u.email && u.name && <span className="text-xs text-slate-500 truncate">{u.email}</span>}
+                    </label>
+                  ))}
+                  {shareDirectUsers.length === 0 && !shareDirectLoading && (
+                    <p className="px-3 py-4 text-sm text-slate-500">Aucun utilisateur trouvé.</p>
+                  )}
+                </div>
+              )}
+              <ModalFooter>
+                <Button variant="ghost" onClick={() => setShareOpen(false)}>
+                  Annuler
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={onShareDirectSubmit}
+                  isLoading={shareDirectSubmitting}
+                  disabled={shareDirectUserIds.length === 0 || shareDirectSubmitting}
+                  className="gap-2"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  Partager avec {shareDirectUserIds.length} utilisateur(s)
+                </Button>
+              </ModalFooter>
+            </>
           )}
         </div>
       </Modal>

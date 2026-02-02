@@ -60,11 +60,15 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     const result = searchParams.get('result');
     const from = searchParams.get('from');
     const to = searchParams.get('to');
+    const contactId = searchParams.get('contactId');
+    const companyId = searchParams.get('companyId');
 
     if (missionId) filters.missionId = missionId;
     if (result) filters.result = result;
     if (from) filters.from = new Date(from);
     if (to) filters.to = new Date(to);
+    if (contactId) filters.contactId = contactId;
+    if (companyId) filters.companyId = companyId;
 
     // Use service layer
     const { actions, total } = await actionService.getActions(filters);

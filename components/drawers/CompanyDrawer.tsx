@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Drawer, DrawerSection, DrawerField, Button, Input, Badge, useToast } from "@/components/ui";
+import { useState, useEffect, useRef } from "react";
+import { Drawer, DrawerSection, DrawerField, Button, Input, Badge, Select, useToast } from "@/components/ui";
+import { ACTION_RESULT_LABELS, type ActionResult } from "@/lib/types";
 import {
     Building2,
     Globe,
@@ -21,6 +22,7 @@ import {
     Mail,
     Phone,
     Linkedin,
+    Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -52,6 +54,7 @@ interface Company {
     _count: {
         contacts: number;
     };
+    missionId?: string;
 }
 
 interface CompanyDrawerProps {
@@ -101,10 +104,67 @@ export function CompanyDrawer({
         website: "",
         size: "",
     });
+    const [actions, setActions] = useState<Array<{ id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string } }>>([]);
+    const [actionsLoading, setActionsLoading] = useState(false);
+    const lastCompanyIdRef = useRef<string | null>(null);
+    const [campaigns, setCampaigns] = useState<Array<{ id: string; name: string; mission?: { channel: string } }>>([]);
+    const [newActionResult, setNewActionResult] = useState<string>("");
+    const [newActionNote, setNewActionNote] = useState("");
+    const [newActionCampaignId, setNewActionCampaignId] = useState("");
+    const [newActionSaving, setNewActionSaving] = useState(false);
 
-    // Reset form when company changes or when creating
+    // Fetch campaigns when we have company with missionId (for "add action" form)
+    useEffect(() => {
+        if (!company?.missionId || isCreating) {
+            setCampaigns([]);
+            return;
+        }
+        fetch(`/api/campaigns?missionId=${company.missionId}&isActive=true`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && Array.isArray(json.data)) {
+                    setCampaigns(json.data);
+                } else {
+                    setCampaigns([]);
+                }
+            })
+            .catch(() => setCampaigns([]));
+    }, [company?.missionId, isCreating]);
+
+    // Fetch actions history when drawer opens with a company
+    useEffect(() => {
+        if (!isOpen || isCreating || !company?.id) {
+            setActions([]);
+            return;
+        }
+        setActionsLoading(true);
+        fetch(`/api/actions?companyId=${company.id}&limit=20`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && Array.isArray(json.data)) {
+                    setActions(
+                        (json.data as Array<{ id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string } }>).map(
+                            (a: { id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string } }) => ({
+                                id: a.id,
+                                result: a.result,
+                                note: a.note ?? null,
+                                createdAt: a.createdAt,
+                                campaign: a.campaign,
+                            })
+                        )
+                    );
+                } else {
+                    setActions([]);
+                }
+            })
+            .catch(() => setActions([]))
+            .finally(() => setActionsLoading(false));
+    }, [isOpen, isCreating, company?.id]);
+
+    // Reset form only when company *id* changes (not on every parent re-render with new object ref)
     useEffect(() => {
         if (isCreating) {
+            lastCompanyIdRef.current = null;
             setFormData({
                 name: "",
                 industry: "",
@@ -114,16 +174,22 @@ export function CompanyDrawer({
             });
             setIsEditing(true);
         } else if (company) {
-            setFormData({
-                name: company.name || "",
-                industry: company.industry || "",
-                country: company.country || "",
-                website: company.website || "",
-                size: company.size || "",
-            });
-            setIsEditing(false);
+            const isNewCompany = lastCompanyIdRef.current !== company.id;
+            lastCompanyIdRef.current = company.id;
+            if (isNewCompany) {
+                setFormData({
+                    name: company.name || "",
+                    industry: company.industry || "",
+                    country: company.country || "",
+                    website: company.website || "",
+                    size: company.size || "",
+                });
+                setIsEditing(false);
+            }
+        } else {
+            lastCompanyIdRef.current = null;
         }
-    }, [company, isCreating]);
+    }, [company?.id, isCreating]);
 
     // ============================================
     // SAVE HANDLER
@@ -168,8 +234,8 @@ export function CompanyDrawer({
                 setIsSaving(false);
             }
         } else {
-            // Update existing company
-            if (!company || !listId) return;
+            // Update existing company (listId only required for create)
+            if (!company) return;
 
             setIsSaving(true);
             try {
@@ -207,6 +273,54 @@ export function CompanyDrawer({
         success("Copié", `${label} copié dans le presse-papier`);
     };
 
+    const handleAddAction = async () => {
+        if (!company || !newActionCampaignId || !newActionResult) {
+            showError("Erreur", "Sélectionnez une campagne et un résultat");
+            return;
+        }
+        if ((newActionResult === "INTERESTED" || newActionResult === "CALLBACK_REQUESTED") && !newActionNote.trim()) {
+            showError("Erreur", "Une note est requise pour ce résultat");
+            return;
+        }
+        setNewActionSaving(true);
+        try {
+            const selectedCampaign = campaigns.find((c) => c.id === newActionCampaignId);
+            const channel = (selectedCampaign?.mission?.channel ?? "CALL") as "CALL" | "EMAIL" | "LINKEDIN";
+            const res = await fetch("/api/actions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    companyId: company.id,
+                    campaignId: newActionCampaignId,
+                    channel,
+                    result: newActionResult,
+                    note: newActionNote.trim() || undefined,
+                }),
+            });
+            const json = await res.json();
+            if (json.success) {
+                success("Action enregistrée", "L'action a été ajoutée à l'historique");
+                setNewActionNote("");
+                setActions((prev) => [
+                    {
+                        id: json.data.id,
+                        result: json.data.result,
+                        note: json.data.note ?? null,
+                        createdAt: json.data.createdAt,
+                        campaign: json.data.campaign,
+                    },
+                    ...prev,
+                ]);
+            } else {
+                showError("Erreur", json.error || "Impossible d'enregistrer l'action");
+            }
+        } catch {
+            showError("Erreur", "Impossible d'enregistrer l'action");
+        } finally {
+            setNewActionSaving(false);
+        }
+    };
+
     if (!isCreating && !company) return null;
 
     const statusConfig = isCreating ? null : STATUS_CONFIG[company!.status];
@@ -225,6 +339,7 @@ export function CompanyDrawer({
                         {isEditing || isCreating ? (
                             <>
                                 <Button
+                                    type="button"
                                     variant="ghost"
                                     onClick={() => {
                                         setIsEditing(false);
@@ -236,6 +351,7 @@ export function CompanyDrawer({
                                     Annuler
                                 </Button>
                                 <Button
+                                    type="button"
                                     variant="primary"
                                     onClick={handleSave}
                                     disabled={isSaving || !formData.name.trim()}
@@ -246,6 +362,7 @@ export function CompanyDrawer({
                             </>
                         ) : (
                             <Button
+                                type="button"
                                 variant="secondary"
                                 onClick={() => setIsEditing(true)}
                             >
@@ -430,6 +547,99 @@ export function CompanyDrawer({
                                         </button>
                                     );
                                 })}
+                            </div>
+                        )}
+                    </DrawerSection>
+                )}
+
+                {/* Ajouter une action / note */}
+                {!isEditing && !isCreating && company?.missionId && campaigns.length > 0 && (
+                    <DrawerSection title="Ajouter une action / note">
+                        <div className="space-y-4">
+                            <Select
+                                label="Campagne"
+                                placeholder="Sélectionner une campagne..."
+                                options={campaigns.map((c) => ({ value: c.id, label: c.name }))}
+                                value={newActionCampaignId || campaigns[0]?.id}
+                                onChange={setNewActionCampaignId}
+                            />
+                            <Select
+                                label="Résultat"
+                                placeholder="Sélectionner un résultat..."
+                                options={[
+                                    { value: "NO_RESPONSE", label: "Pas de réponse" },
+                                    { value: "BAD_CONTACT", label: "Mauvais contact" },
+                                    { value: "INTERESTED", label: "Intéressé" },
+                                    { value: "CALLBACK_REQUESTED", label: "Rappel demandé" },
+                                    { value: "MEETING_BOOKED", label: "RDV pris" },
+                                    { value: "DISQUALIFIED", label: "Disqualifié" },
+                                ]}
+                                value={newActionResult}
+                                onChange={setNewActionResult}
+                            />
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Note</label>
+                                <textarea
+                                    value={newActionNote}
+                                    onChange={(e) => setNewActionNote(e.target.value)}
+                                    placeholder="Ajouter une note (requise pour Intéressé / Rappel demandé)..."
+                                    rows={3}
+                                    maxLength={500}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                                />
+                                <p className="text-xs text-slate-400 mt-1 text-right">{newActionNote.length}/500</p>
+                            </div>
+                            <Button
+                                type="button"
+                                variant="primary"
+                                onClick={handleAddAction}
+                                disabled={newActionSaving || !newActionResult}
+                                isLoading={newActionSaving}
+                            >
+                                Enregistrer l'action
+                            </Button>
+                        </div>
+                    </DrawerSection>
+                )}
+
+                {/* Historique des actions (result + note) */}
+                {!isEditing && !isCreating && company && (
+                    <DrawerSection title="Historique des actions">
+                        {actionsLoading ? (
+                            <div className="flex items-center justify-center py-6">
+                                <Loader2 className="w-6 h-6 text-slate-400 animate-spin" />
+                            </div>
+                        ) : actions.length === 0 ? (
+                            <p className="text-sm text-slate-500 py-4">Aucune action enregistrée</p>
+                        ) : (
+                            <div className="space-y-3 max-h-[280px] overflow-y-auto">
+                                {actions.map((a) => (
+                                    <div
+                                        key={a.id}
+                                        className="p-3 rounded-lg border border-slate-100 bg-slate-50/50 text-sm"
+                                    >
+                                        <div className="flex items-center justify-between gap-2 mb-1">
+                                            <span className="font-medium text-slate-700">
+                                                {ACTION_RESULT_LABELS[a.result as keyof typeof ACTION_RESULT_LABELS] ?? a.result}
+                                            </span>
+                                            <span className="text-xs text-slate-400">
+                                                {new Date(a.createdAt).toLocaleDateString("fr-FR", {
+                                                    day: "2-digit",
+                                                    month: "short",
+                                                    year: "numeric",
+                                                    hour: "2-digit",
+                                                    minute: "2-digit",
+                                                })}
+                                            </span>
+                                        </div>
+                                        {a.campaign?.name && (
+                                            <p className="text-xs text-slate-500 mb-1">{a.campaign.name}</p>
+                                        )}
+                                        {a.note && (
+                                            <p className="text-slate-600 mt-1 whitespace-pre-wrap">{a.note}</p>
+                                        )}
+                                    </div>
+                                ))}
                             </div>
                         )}
                     </DrawerSection>

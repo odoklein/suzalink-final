@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Drawer, DrawerSection, DrawerField, Button, Input, Select, useToast } from "@/components/ui";
+import { ACTION_RESULT_LABELS, type ActionResult } from "@/lib/types";
 import {
     User,
     Mail,
@@ -19,6 +20,7 @@ import {
     CheckCircle,
     Send,
     PhoneCall,
+    Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +39,7 @@ interface Contact {
     status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
     companyId: string;
     companyName?: string;
+    missionId?: string;
 }
 
 interface ContactDrawerProps {
@@ -89,10 +92,67 @@ export function ContactDrawer({
     });
 
     const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
+    const [actions, setActions] = useState<Array<{ id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string } }>>([]);
+    const [actionsLoading, setActionsLoading] = useState(false);
+    const lastContactIdRef = useRef<string | null>(null);
+    const [campaigns, setCampaigns] = useState<Array<{ id: string; name: string; mission?: { channel: string } }>>([]);
+    const [newActionResult, setNewActionResult] = useState<string>("");
+    const [newActionNote, setNewActionNote] = useState("");
+    const [newActionCampaignId, setNewActionCampaignId] = useState("");
+    const [newActionSaving, setNewActionSaving] = useState(false);
 
-    // Reset form when contact changes or when creating
+    // Fetch campaigns when we have contact with missionId (for "add action" form)
+    useEffect(() => {
+        if (!contact?.missionId || isCreating) {
+            setCampaigns([]);
+            return;
+        }
+        fetch(`/api/campaigns?missionId=${contact.missionId}&isActive=true`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && Array.isArray(json.data)) {
+                    setCampaigns(json.data);
+                } else {
+                    setCampaigns([]);
+                }
+            })
+            .catch(() => setCampaigns([]));
+    }, [contact?.missionId, isCreating]);
+
+    // Fetch actions history when drawer opens with a contact
+    useEffect(() => {
+        if (!isOpen || isCreating || !contact?.id) {
+            setActions([]);
+            return;
+        }
+        setActionsLoading(true);
+        fetch(`/api/actions?contactId=${contact.id}&limit=20`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && Array.isArray(json.data)) {
+                    setActions(
+                        (json.data as Array<{ id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string } }>).map(
+                            (a: { id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string } }) => ({
+                                id: a.id,
+                                result: a.result,
+                                note: a.note ?? null,
+                                createdAt: a.createdAt,
+                                campaign: a.campaign,
+                            })
+                        )
+                    );
+                } else {
+                    setActions([]);
+                }
+            })
+            .catch(() => setActions([]))
+            .finally(() => setActionsLoading(false));
+    }, [isOpen, isCreating, contact?.id]);
+
+    // Reset form only when contact *id* changes (not on every parent re-render with new object ref)
     useEffect(() => {
         if (isCreating) {
+            lastContactIdRef.current = null;
             setFormData({
                 firstName: "",
                 lastName: "",
@@ -104,18 +164,24 @@ export function ContactDrawer({
             setSelectedCompanyId(companies.length > 0 ? companies[0].id : "");
             setIsEditing(true);
         } else if (contact) {
-            setFormData({
-                firstName: contact.firstName || "",
-                lastName: contact.lastName || "",
-                email: contact.email || "",
-                phone: contact.phone || "",
-                title: contact.title || "",
-                linkedin: contact.linkedin || "",
-            });
-            setSelectedCompanyId(contact.companyId);
-            setIsEditing(false);
+            const isNewContact = lastContactIdRef.current !== contact.id;
+            lastContactIdRef.current = contact.id;
+            if (isNewContact) {
+                setFormData({
+                    firstName: contact.firstName || "",
+                    lastName: contact.lastName || "",
+                    email: contact.email || "",
+                    phone: contact.phone || "",
+                    title: contact.title || "",
+                    linkedin: contact.linkedin || "",
+                });
+                setSelectedCompanyId(contact.companyId);
+                setIsEditing(false);
+            }
+        } else {
+            lastContactIdRef.current = null;
         }
-    }, [contact, isCreating, companies]);
+    }, [contact?.id, isCreating, companies.length]);
 
     // ============================================
     // SAVE HANDLER
@@ -207,6 +273,54 @@ export function ContactDrawer({
         success("Copié", `${label} copié dans le presse-papier`);
     };
 
+    const handleAddAction = async () => {
+        if (!contact || !newActionCampaignId || !newActionResult) {
+            showError("Erreur", "Sélectionnez une campagne et un résultat");
+            return;
+        }
+        if ((newActionResult === "INTERESTED" || newActionResult === "CALLBACK_REQUESTED") && !newActionNote.trim()) {
+            showError("Erreur", "Une note est requise pour ce résultat");
+            return;
+        }
+        setNewActionSaving(true);
+        try {
+            const selectedCampaign = campaigns.find((c) => c.id === newActionCampaignId);
+            const channel = (selectedCampaign?.mission?.channel ?? "CALL") as "CALL" | "EMAIL" | "LINKEDIN";
+            const res = await fetch("/api/actions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contactId: contact.id,
+                    campaignId: newActionCampaignId,
+                    channel,
+                    result: newActionResult,
+                    note: newActionNote.trim() || undefined,
+                }),
+            });
+            const json = await res.json();
+            if (json.success) {
+                success("Action enregistrée", "L'action a été ajoutée à l'historique");
+                setNewActionNote("");
+                setActions((prev) => [
+                    {
+                        id: json.data.id,
+                        result: json.data.result,
+                        note: json.data.note ?? null,
+                        createdAt: json.data.createdAt,
+                        campaign: json.data.campaign,
+                    },
+                    ...prev,
+                ]);
+            } else {
+                showError("Erreur", json.error || "Impossible d'enregistrer l'action");
+            }
+        } catch {
+            showError("Erreur", "Impossible d'enregistrer l'action");
+        } finally {
+            setNewActionSaving(false);
+        }
+    };
+
     if (!isCreating && !contact) return null;
 
     const statusConfig = isCreating ? null : STATUS_CONFIG[contact!.status];
@@ -226,6 +340,7 @@ export function ContactDrawer({
                         {(isEditing || isCreating) ? (
                             <>
                                 <Button
+                                    type="button"
                                     variant="ghost"
                                     onClick={() => {
                                         setIsEditing(false);
@@ -237,6 +352,7 @@ export function ContactDrawer({
                                     Annuler
                                 </Button>
                                 <Button
+                                    type="button"
                                     variant="primary"
                                     onClick={handleSave}
                                     disabled={isSaving || (isCreating && !selectedCompanyId)}
@@ -247,6 +363,7 @@ export function ContactDrawer({
                             </>
                         ) : (
                             <Button
+                                type="button"
                                 variant="secondary"
                                 onClick={() => setIsEditing(true)}
                             >
@@ -464,6 +581,99 @@ export function ContactDrawer({
                         </div>
                     ) : null}
                 </DrawerSection>
+
+                {/* Ajouter une action / note */}
+                {!isEditing && !isCreating && contact?.missionId && campaigns.length > 0 && (
+                    <DrawerSection title="Ajouter une action / note">
+                        <div className="space-y-4">
+                            <Select
+                                label="Campagne"
+                                placeholder="Sélectionner une campagne..."
+                                options={campaigns.map((c) => ({ value: c.id, label: c.name }))}
+                                value={newActionCampaignId || campaigns[0]?.id}
+                                onChange={setNewActionCampaignId}
+                            />
+                            <Select
+                                label="Résultat"
+                                placeholder="Sélectionner un résultat..."
+                                options={[
+                                    { value: "NO_RESPONSE", label: "Pas de réponse" },
+                                    { value: "BAD_CONTACT", label: "Mauvais contact" },
+                                    { value: "INTERESTED", label: "Intéressé" },
+                                    { value: "CALLBACK_REQUESTED", label: "Rappel demandé" },
+                                    { value: "MEETING_BOOKED", label: "RDV pris" },
+                                    { value: "DISQUALIFIED", label: "Disqualifié" },
+                                ]}
+                                value={newActionResult}
+                                onChange={setNewActionResult}
+                            />
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Note</label>
+                                <textarea
+                                    value={newActionNote}
+                                    onChange={(e) => setNewActionNote(e.target.value)}
+                                    placeholder="Ajouter une note (requise pour Intéressé / Rappel demandé)..."
+                                    rows={3}
+                                    maxLength={500}
+                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                                />
+                                <p className="text-xs text-slate-400 mt-1 text-right">{newActionNote.length}/500</p>
+                            </div>
+                            <Button
+                                type="button"
+                                variant="primary"
+                                onClick={handleAddAction}
+                                disabled={newActionSaving || !newActionResult}
+                                isLoading={newActionSaving}
+                            >
+                                Enregistrer l'action
+                            </Button>
+                        </div>
+                    </DrawerSection>
+                )}
+
+                {/* Historique des actions (result + note) */}
+                {!isEditing && !isCreating && contact && (
+                    <DrawerSection title="Historique des actions">
+                        {actionsLoading ? (
+                            <div className="flex items-center justify-center py-6">
+                                <Loader2 className="w-6 h-6 text-slate-400 animate-spin" />
+                            </div>
+                        ) : actions.length === 0 ? (
+                            <p className="text-sm text-slate-500 py-4">Aucune action enregistrée</p>
+                        ) : (
+                            <div className="space-y-3 max-h-[280px] overflow-y-auto">
+                                {actions.map((a) => (
+                                    <div
+                                        key={a.id}
+                                        className="p-3 rounded-lg border border-slate-100 bg-slate-50/50 text-sm"
+                                    >
+                                        <div className="flex items-center justify-between gap-2 mb-1">
+                                            <span className="font-medium text-slate-700">
+                                                {ACTION_RESULT_LABELS[a.result as keyof typeof ACTION_RESULT_LABELS] ?? a.result}
+                                            </span>
+                                            <span className="text-xs text-slate-400">
+                                                {new Date(a.createdAt).toLocaleDateString("fr-FR", {
+                                                    day: "2-digit",
+                                                    month: "short",
+                                                    year: "numeric",
+                                                    hour: "2-digit",
+                                                    minute: "2-digit",
+                                                })}
+                                            </span>
+                                        </div>
+                                        {a.campaign?.name && (
+                                            <p className="text-xs text-slate-500 mb-1">{a.campaign.name}</p>
+                                        )}
+                                        {a.note && (
+                                            <p className="text-slate-600 mt-1 whitespace-pre-wrap">{a.note}</p>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </DrawerSection>
+                )}
             </div>
         </Drawer>
     );

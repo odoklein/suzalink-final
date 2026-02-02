@@ -719,67 +719,71 @@ export default function ManagerCommsPage() {
                 />
             </div>
 
-            {/* Main Content */}
-            <div className="grid grid-cols-12 gap-6">
-                {/* Thread List Panel */}
+            {/* Main Content - Sales Inbox style: 400px list, flex-1 conversation */}
+            <div className="flex gap-0 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-white dark:bg-[#151c2a] shadow-sm">
+                {/* Thread List Panel - fixed 400px like inspo */}
                 <div className={cn(
-                    "transition-all duration-300",
-                    isListCollapsed ? "col-span-1" : "col-span-4"
+                    "flex flex-col shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-[#151c2a] transition-all duration-300",
+                    isListCollapsed ? "w-14" : "w-[400px]"
                 )}>
-                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden h-[80vh] flex flex-col">
-                        {/* List Header */}
+                    <div className="flex flex-col h-[calc(100vh-12rem)] overflow-hidden">
+                        {/* List Header - inspo: Inbox title, filter btn, search */}
                         <div className={cn(
-                            "border-b border-slate-200 p-4",
-                            isListCollapsed && "p-2 flex items-center justify-center"
+                            "border-b border-slate-100 dark:border-slate-800 p-4 shrink-0",
+                            isListCollapsed && "p-2 flex flex-col items-center"
                         )}>
                             {!isListCollapsed ? (
                                 <>
-                                    <div className="flex items-center justify-between mb-3">
-                                        <div className="flex items-center gap-2">
-                                            <h2 className="font-semibold text-slate-900">Messages</h2>
-                                            {totalUnread > 0 && (
-                                                <span className="px-2 py-0.5 text-xs font-medium text-white bg-indigo-500 rounded-full">
-                                                    {totalUnread}
-                                                </span>
-                                            )}
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Inbox</h2>
+                                        <div className="flex items-center gap-1">
+                                            <button
+                                                onClick={() => setIsListCollapsed(true)}
+                                                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-500 transition-colors"
+                                                title="Réduire"
+                                            >
+                                                <PanelLeftClose className="w-4 h-4" />
+                                            </button>
                                         </div>
-                                        <button
-                                            onClick={() => setIsListCollapsed(true)}
-                                            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                                            title="Réduire le panneau"
-                                        >
-                                            <PanelLeftClose className="w-4 h-4" />
-                                        </button>
                                     </div>
 
-                                    {/* Search */}
-                                    <div className="relative mb-3">
-                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                    <div className="relative">
+                                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400 pointer-events-none" />
                                         <Input
                                             value={searchQuery}
                                             onChange={(e) => setSearchQuery(e.target.value)}
-                                            placeholder="Rechercher..."
-                                            className="pl-9 h-9 text-sm bg-slate-50 border-slate-200 focus:bg-white"
+                                            placeholder="Rechercher des messages..."
+                                            className="w-full pl-10 pr-4 py-2.5 text-sm bg-slate-50 dark:bg-slate-900 border-0 rounded-lg focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-white placeholder-slate-400"
                                         />
                                     </div>
 
-                                    {/* Filter Pills */}
-                                    <div className="flex flex-wrap gap-1.5">
+                                    {/* Smart filter chips - inspo style */}
+                                    <div className="flex gap-2 overflow-x-auto py-3 border-b border-slate-100 dark:border-slate-800 -mx-4 px-4 no-scrollbar">
+                                        <button
+                                            onClick={() => setFilters((p) => ({ ...p, unreadOnly: !p.unreadOnly }))}
+                                            className={cn(
+                                                "flex h-7 items-center justify-center px-3 rounded-full text-xs font-semibold whitespace-nowrap transition-colors border",
+                                                filters.unreadOnly
+                                                    ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20"
+                                                    : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 text-slate-600 dark:text-slate-300"
+                                            )}
+                                        >
+                                            Non lus {totalUnread > 0 && `(${totalUnread})`}
+                                        </button>
                                         {FILTER_OPTIONS.map((opt) => (
                                             <button
                                                 key={opt.type}
                                                 onClick={() => handleFilterChange(opt.type)}
                                                 className={cn(
-                                                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all",
+                                                    "flex h-7 items-center justify-center gap-1 px-3 rounded-full text-xs font-medium whitespace-nowrap transition-colors border",
                                                     (filters.type === opt.type || (opt.type === "all" && !filters.type))
-                                                        ? "bg-indigo-100 text-indigo-700 shadow-sm"
-                                                        : "text-slate-600 hover:bg-slate-100"
+                                                        ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20"
+                                                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 text-slate-600 dark:text-slate-300"
                                                 )}
                                             >
-                                                <opt.icon className="w-3.5 h-3.5" />
                                                 {opt.label}
                                                 {stats && opt.type !== "all" && stats.unreadByType[opt.type as CommsChannelType] > 0 && (
-                                                    <span className="px-1.5 py-0.5 text-[10px] bg-indigo-500 text-white rounded-full">
+                                                    <span className="ml-0.5 text-[10px] bg-indigo-500 text-white rounded-full px-1.5 py-0.5">
                                                         {stats.unreadByType[opt.type as CommsChannelType]}
                                                     </span>
                                                 )}
@@ -787,8 +791,7 @@ export default function ManagerCommsPage() {
                                         ))}
                                     </div>
 
-                                    {/* Active filter indicator */}
-                                    {(filters.type || debouncedSearchQuery) && (
+                                    {(filters.type || debouncedSearchQuery || filters.unreadOnly) && (
                                         <div className="mt-3 flex items-center justify-between">
                                             <span className="text-xs text-slate-500">
                                                 {threads.length} résultat{threads.length !== 1 ? "s" : ""}
@@ -798,9 +801,9 @@ export default function ManagerCommsPage() {
                                                     setFilters({});
                                                     setSearchQuery("");
                                                 }}
-                                                className="text-xs text-indigo-600 hover:text-indigo-700"
+                                                className="text-xs text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
                                             >
-                                                Effacer les filtres
+                                                Effacer
                                             </button>
                                         </div>
                                     )}
@@ -809,8 +812,8 @@ export default function ManagerCommsPage() {
                                 <div className="flex flex-col items-center gap-2">
                                     <button
                                         onClick={() => setIsListCollapsed(false)}
-                                        className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                                        title="Développer le panneau"
+                                        className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                                        title="Développer"
                                     >
                                         <PanelLeft className="w-5 h-5" />
                                     </button>
@@ -864,12 +867,8 @@ export default function ManagerCommsPage() {
                     </div>
                 </div>
 
-                {/* Thread View Panel */}
-                <div className={cn(
-                    "transition-all duration-300",
-                    isListCollapsed ? "col-span-11" : "col-span-8"
-                )}>
-                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden h-[80vh]">
+                {/* Thread View Panel - flex-1 like inspo */}
+                <div className="flex-1 flex flex-col min-w-0 h-[calc(100vh-12rem)]">
                         {isLoadingThread ? (
                             <div className="flex items-center justify-center h-full">
                                 <div className="flex flex-col items-center gap-3">
@@ -888,12 +887,12 @@ export default function ManagerCommsPage() {
                                 typingUserName={getTypingText(selectedThread.id)}
                             />
                         ) : (
-                            <div className="flex-1 flex flex-col items-center justify-center h-full">
+                            <div className="flex-1 flex flex-col items-center justify-center h-full bg-white dark:bg-[#151c2a]">
                                 <div className="text-center">
-                                    <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center mx-auto mb-5">
-                                        <Mail className="w-10 h-10 text-indigo-500" />
+                                    <div className="w-20 h-20 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto mb-5">
+                                        <MessageSquare className="w-10 h-10 text-slate-400" />
                                     </div>
-                                    <h3 className="text-xl font-semibold text-slate-900 mb-2">
+                                    <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
                                         Sélectionnez une discussion
                                     </h3>
                                     <p className="text-sm text-slate-500 max-w-sm">
@@ -902,7 +901,6 @@ export default function ManagerCommsPage() {
                                 </div>
                             </div>
                         )}
-                    </div>
                 </div>
             </div>
 

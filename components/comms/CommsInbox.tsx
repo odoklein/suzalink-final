@@ -462,15 +462,15 @@ export function CommsInbox({ className }: CommsInboxProps) {
     );
 
     return (
-        <div className={cn("flex h-full bg-white rounded-2xl border border-slate-200 overflow-hidden", className)}>
-            {/* Left panel: Thread list */}
-            <div className="w-96 flex flex-col border-r border-slate-200">
+        <div className={cn("flex h-full bg-white dark:bg-[#151c2a] rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden", className)}>
+            {/* Left panel: Thread list - 400px like Sales Inbox inspo */}
+            <div className="w-[400px] flex flex-col border-r border-slate-200 dark:border-slate-800 shrink-0">
                 {/* Header */}
-                <div className="p-4 border-b border-slate-200">
+                <div className="p-4 border-b border-slate-100 dark:border-slate-800">
                     <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-2">
-                            <h2 className="text-lg font-semibold text-slate-900">
-                                Messages
+                            <h2 className="text-xl font-semibold text-slate-900 dark:text-white">
+                                Inbox
                             </h2>
                             {stats && stats.totalUnread > 0 && (
                                 <span className="px-2 py-0.5 text-xs font-medium text-white bg-indigo-500 rounded-full">
@@ -524,32 +524,31 @@ export function CommsInbox({ className }: CommsInboxProps) {
 
                     {/* Search */}
                     <div className="relative mb-3">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400 pointer-events-none" />
                         <Input
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Rechercher..."
-                            className="pl-9 h-9 text-sm"
+                            placeholder="Rechercher des messages..."
+                            className="pl-10 pr-4 py-2.5 text-sm bg-slate-50 dark:bg-slate-900 border-0 rounded-lg focus:ring-2 focus:ring-indigo-500/20"
                         />
                     </div>
 
-                    {/* Filter pills */}
-                    <div className="flex items-center gap-1 overflow-x-auto pb-1">
+                    {/* Filter chips - inspo style */}
+                    <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
                         {FILTER_OPTIONS.map((opt) => (
                             <button
                                 key={opt.type}
                                 onClick={() => handleFilterChange(opt.type)}
                                 className={cn(
-                                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors",
+                                    "flex h-7 items-center justify-center gap-1 px-3 rounded-full text-xs font-medium whitespace-nowrap transition-colors border",
                                     (filters.type === opt.type || (opt.type === "all" && !filters.type))
-                                        ? "bg-indigo-100 text-indigo-700"
-                                        : "text-slate-600 hover:bg-slate-100"
+                                        ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20"
+                                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 text-slate-600 dark:text-slate-300"
                                 )}
                             >
-                                <opt.icon className="w-3.5 h-3.5" />
                                 {opt.label}
                                 {stats && opt.type !== "all" && stats.unreadByType[opt.type as CommsChannelType] > 0 && (
-                                    <span className="px-1.5 py-0.5 text-[10px] bg-indigo-500 text-white rounded-full">
+                                    <span className="ml-0.5 text-[10px] bg-indigo-500 text-white rounded-full px-1.5 py-0.5">
                                         {stats.unreadByType[opt.type as CommsChannelType]}
                                     </span>
                                 )}

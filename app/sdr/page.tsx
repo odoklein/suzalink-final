@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
-import { Card, Badge, Button } from "@/components/ui";
+import { Card, Badge, Button, Drawer } from "@/components/ui";
 import Link from "next/link";
+import { CompanyDrawer, ContactDrawer } from "@/components/drawers";
 import {
     Phone,
     Calendar,
@@ -18,6 +19,9 @@ import {
     Linkedin,
     Play,
     Loader2,
+    Activity,
+    User,
+    Building2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +50,58 @@ interface Mission {
     };
 }
 
+interface SDRActionItem {
+    id: string;
+    contactId: string | null;
+    companyId: string | null;
+    result: string;
+    resultLabel: string;
+    channel: string;
+    campaignName?: string;
+    contactName?: string;
+    companyName?: string;
+    note?: string;
+    createdAt: string;
+}
+
+// Shape expected by ContactDrawer / CompanyDrawer
+interface DrawerContact {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    email: string | null;
+    phone: string | null;
+    title: string | null;
+    linkedin: string | null;
+    status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
+    companyId: string;
+    companyName?: string;
+    missionId?: string;
+}
+
+interface DrawerCompany {
+    id: string;
+    name: string;
+    industry: string | null;
+    country: string | null;
+    website: string | null;
+    size: string | null;
+    status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
+    missionId?: string;
+    contacts: Array<{
+        id: string;
+        firstName: string | null;
+        lastName: string | null;
+        email: string | null;
+        phone: string | null;
+        title: string | null;
+        linkedin: string | null;
+        status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
+        companyId: string;
+    }>;
+    _count: { contacts: number };
+}
+
 // ============================================
 // CHANNEL ICONS
 // ============================================
@@ -72,6 +128,15 @@ export default function SDRDashboardPage() {
     const [missions, setMissions] = useState<Mission[]>([]);
     const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [actionsPeriod, setActionsPeriod] = useState<"today" | "all">("today");
+    const [myActions, setMyActions] = useState<SDRActionItem[]>([]);
+    const [actionsLoading, setActionsLoading] = useState(false);
+    // Drawer: open contact or company fiche with edit
+    const [drawerContactId, setDrawerContactId] = useState<string | null>(null);
+    const [drawerCompanyId, setDrawerCompanyId] = useState<string | null>(null);
+    const [drawerContact, setDrawerContact] = useState<DrawerContact | null>(null);
+    const [drawerCompany, setDrawerCompany] = useState<DrawerCompany | null>(null);
+    const [drawerLoading, setDrawerLoading] = useState(false);
 
     // ============================================
     // FETCH DATA
@@ -121,6 +186,126 @@ export default function SDRDashboardPage() {
             window.removeEventListener("sdr_mission_changed", handleMissionChange as EventListener);
         };
     }, []);
+
+    // Fetch my actions (calls and actions) for Today / All time
+    useEffect(() => {
+        const fetchMyActions = async () => {
+            setActionsLoading(true);
+            try {
+                const res = await fetch(`/api/sdr/actions?period=${actionsPeriod}&limit=50`);
+                const json = await res.json();
+                if (json.success) {
+                    setMyActions(json.data);
+                }
+            } catch (err) {
+                console.error("Failed to fetch my actions:", err);
+            } finally {
+                setActionsLoading(false);
+            }
+        };
+        fetchMyActions();
+    }, [actionsPeriod]);
+
+    // Fetch contact when opening contact drawer
+    useEffect(() => {
+        if (!drawerContactId) {
+            setDrawerContact(null);
+            return;
+        }
+        setDrawerLoading(true);
+        fetch(`/api/contacts/${drawerContactId}`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data) {
+                    const c = json.data;
+                    setDrawerContact({
+                        id: c.id,
+                        firstName: c.firstName,
+                        lastName: c.lastName,
+                        email: c.email,
+                        phone: c.phone,
+                        title: c.title,
+                        linkedin: c.linkedin,
+                        status: c.status ?? "PARTIAL",
+                        companyId: c.company?.id ?? "",
+                        companyName: c.company?.name ?? undefined,
+                        missionId: (c.company as { list?: { mission?: { id: string } } })?.list?.mission?.id,
+                    });
+                } else {
+                    setDrawerContact(null);
+                }
+            })
+            .catch(() => setDrawerContact(null))
+            .finally(() => setDrawerLoading(false));
+    }, [drawerContactId]);
+
+    // Fetch company when opening company drawer
+    useEffect(() => {
+        if (!drawerCompanyId) {
+            setDrawerCompany(null);
+            return;
+        }
+        setDrawerLoading(true);
+        fetch(`/api/companies/${drawerCompanyId}`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data) {
+                    const co = json.data;
+                    setDrawerCompany({
+                        id: co.id,
+                        name: co.name,
+                        industry: co.industry,
+                        country: co.country,
+                        website: co.website,
+                        size: co.size,
+                        status: co.status ?? "PARTIAL",
+                        missionId: (co.list as { mission?: { id: string } })?.mission?.id,
+                        contacts: (co.contacts ?? []).map((ct: { id: string; firstName: string | null; lastName: string | null; email: string | null; phone: string | null; title: string | null; linkedin: string | null; status: string; companyId: string }) => ({
+                            id: ct.id,
+                            firstName: ct.firstName,
+                            lastName: ct.lastName,
+                            email: ct.email,
+                            phone: ct.phone,
+                            title: ct.title,
+                            linkedin: ct.linkedin,
+                            status: (ct.status ?? "PARTIAL") as "INCOMPLETE" | "PARTIAL" | "ACTIONABLE",
+                            companyId: ct.companyId,
+                        })),
+                        _count: { contacts: co._count?.contacts ?? co.contacts?.length ?? 0 },
+                    });
+                } else {
+                    setDrawerCompany(null);
+                }
+            })
+            .catch(() => setDrawerCompany(null))
+            .finally(() => setDrawerLoading(false));
+    }, [drawerCompanyId]);
+
+    const openFicheForAction = (item: SDRActionItem) => {
+        if (item.contactId) {
+            setDrawerCompanyId(null);
+            setDrawerContactId(item.contactId);
+        } else if (item.companyId) {
+            setDrawerContactId(null);
+            setDrawerCompanyId(item.companyId);
+        }
+    };
+
+    const closeContactDrawer = () => {
+        setDrawerContactId(null);
+        setDrawerContact(null);
+    };
+
+    const closeCompanyDrawer = () => {
+        setDrawerCompanyId(null);
+        setDrawerCompany(null);
+    };
+
+    const handleContactFromCompany = (contact: { id: string }) => {
+        setDrawerCompanyId(null);
+        setDrawerCompany(null);
+        setDrawerContactId(contact.id);
+    };
 
     const activeMission = missions.find(m => m.id === selectedMissionId);
     const ChannelIcon = activeMission ? CHANNEL_ICONS[activeMission.channel] : Phone;
@@ -328,6 +513,93 @@ export default function SDRDashboardPage() {
                 </div>
             )}
 
+            {/* My calls and actions — click opens contact or company fiche */}
+            <Card className="!p-4">
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="font-semibold text-slate-900 flex items-center gap-2">
+                        <Activity className="w-5 h-5 text-indigo-500" />
+                        Mes appels et actions
+                    </h2>
+                    <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+                        <button
+                            type="button"
+                            onClick={() => setActionsPeriod("today")}
+                            className={cn(
+                                "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                                actionsPeriod === "today"
+                                    ? "bg-white text-indigo-600 shadow-sm"
+                                    : "text-slate-600 hover:text-slate-900"
+                            )}
+                        >
+                            Aujourd'hui
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActionsPeriod("all")}
+                            className={cn(
+                                "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                                actionsPeriod === "all"
+                                    ? "bg-white text-indigo-600 shadow-sm"
+                                    : "text-slate-600 hover:text-slate-900"
+                            )}
+                        >
+                            Tout
+                        </button>
+                    </div>
+                </div>
+                {actionsLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                        <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
+                    </div>
+                ) : myActions.length === 0 ? (
+                    <p className="text-sm text-slate-500 py-6 text-center">
+                        {actionsPeriod === "today" ? "Aucune action aujourd'hui." : "Aucune action enregistrée."}
+                    </p>
+                ) : (
+                    <ul className="space-y-1 max-h-[280px] overflow-y-auto">
+                        {myActions.map((item) => {
+                            const name = item.contactName || item.companyName || "—";
+                            const hasFiche = !!(item.contactId || item.companyId);
+                            return (
+                                <li key={item.id}>
+                                    <button
+                                        type="button"
+                                        onClick={() => hasFiche && openFicheForAction(item)}
+                                        className={cn(
+                                            "w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors",
+                                            hasFiche
+                                                ? "hover:bg-indigo-50 cursor-pointer"
+                                                : "cursor-default"
+                                        )}
+                                    >
+                                        <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
+                                            {item.contactId ? (
+                                                <User className="w-4 h-4 text-slate-500" />
+                                            ) : (
+                                                <Building2 className="w-4 h-4 text-slate-500" />
+                                            )}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="font-medium text-slate-900 truncate">{name}</p>
+                                            <p className="text-xs text-slate-500">
+                                                {item.resultLabel}
+                                                {item.campaignName ? ` · ${item.campaignName}` : ""}
+                                            </p>
+                                        </div>
+                                        <span className="text-xs text-slate-400 flex-shrink-0">
+                                            {new Date(item.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                                        </span>
+                                        {hasFiche && (
+                                            <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                                        )}
+                                    </button>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                )}
+            </Card>
+
             {/* Quick Tips */}
             <Card className="!p-4 bg-gradient-to-br from-amber-50 to-orange-50 border-amber-100">
                 <div className="flex items-start gap-3">
@@ -368,6 +640,46 @@ export default function SDRDashboardPage() {
                                 : "Continue comme ça !"}
                     </p>
                 </Card>
+            )}
+
+            {/* Loading drawer when fetching contact/company */}
+            {(drawerContactId || drawerCompanyId) && drawerLoading && (
+                <Drawer
+                    isOpen
+                    onClose={() => {
+                        setDrawerContactId(null);
+                        setDrawerCompanyId(null);
+                    }}
+                    title="Chargement..."
+                >
+                    <div className="flex items-center justify-center py-12">
+                        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+                    </div>
+                </Drawer>
+            )}
+
+            {/* Contact fiche drawer — view and edit */}
+            {drawerContactId && drawerContact && (
+                <ContactDrawer
+                    isOpen={!!drawerContactId}
+                    onClose={closeContactDrawer}
+                    contact={drawerContact}
+                    onUpdate={(updated) => setDrawerContact(updated)}
+                    isManager={true}
+                    companies={[]}
+                />
+            )}
+
+            {/* Company fiche drawer — view and edit */}
+            {drawerCompanyId && drawerCompany && (
+                <CompanyDrawer
+                    isOpen={!!drawerCompanyId}
+                    onClose={closeCompanyDrawer}
+                    company={drawerCompany}
+                    onUpdate={(updated) => setDrawerCompany(updated)}
+                    onContactClick={handleContactFromCompany}
+                    isManager={true}
+                />
             )}
         </div>
     );

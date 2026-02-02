@@ -85,17 +85,26 @@ function SidebarNavItem({
                 )}
             </div>
 
-            {/* Badge (e.g. rappels count) */}
-            {item.badge != null && item.badge !== "" && !isCollapsed && (
-                <span className="flex-shrink-0 min-w-[1.25rem] h-5 px-1.5 flex items-center justify-center rounded-md text-[11px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                    {item.badge}
-                </span>
-            )}
-            {item.badge != null && item.badge !== "" && isCollapsed && (
-                <span className="absolute right-1 top-1/2 -translate-y-1/2 min-w-[1.25rem] h-5 px-1 flex items-center justify-center rounded-md text-[11px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                    {item.badge}
-                </span>
-            )}
+            {/* Badge (e.g. rappels count, unread messages) */}
+            {(() => {
+                const variant = (item as NavItem & { badgeVariant?: "rappels" | "comms" }).badgeVariant ?? "rappels";
+                const badgeClasses = variant === "comms"
+                    ? "min-w-[1.25rem] h-5 px-1.5 flex items-center justify-center rounded-full text-[10px] font-semibold bg-indigo-500/25 text-indigo-300 border border-indigo-400/30"
+                    : "min-w-[1.25rem] h-5 px-1.5 flex items-center justify-center rounded-md text-[11px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30";
+                const collapsedClasses = variant === "comms"
+                    ? "min-w-[1.25rem] h-5 px-1 flex items-center justify-center rounded-full text-[10px] font-semibold bg-indigo-500/25 text-indigo-300 border border-indigo-400/30"
+                    : "min-w-[1.25rem] h-5 px-1 flex items-center justify-center rounded-md text-[11px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30";
+                if (item.badge == null || item.badge === "") return null;
+                return isCollapsed ? (
+                    <span className={cn("absolute right-1 top-1/2 -translate-y-1/2 flex-shrink-0", collapsedClasses)}>
+                        {Number(item.badge) > 99 ? "99+" : item.badge}
+                    </span>
+                ) : (
+                    <span className={cn("flex-shrink-0", badgeClasses)}>
+                        {Number(item.badge) > 99 ? "99+" : item.badge}
+                    </span>
+                );
+            })()}
             
             {/* Active chevron */}
             {isActive && !isCollapsed && (
@@ -166,15 +175,34 @@ function SidebarSection({
 // ============================================
 
 const RAPPELS_HREF = "/sdr/callbacks";
+const COMMS_HREFS = ["/manager/comms", "/sdr/comms", "/bd/comms", "/developer/comms", "/client/comms"];
 
 export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
     const { data: session } = useSession();
     const { isCollapsed, isMobileOpen, toggleCollapsed, closeMobile } = useSidebar();
     const [callbacksCount, setCallbacksCount] = useState<number | null>(null);
     const [nextCallbackDate, setNextCallbackDate] = useState<string | null>(null);
+    const [commsUnreadCount, setCommsUnreadCount] = useState<number>(0);
 
     const userRole = session?.user?.role as UserRole | undefined;
     const roleConfig = userRole ? ROLE_CONFIG[userRole] : null;
+
+    // Fetch unread messages count for Communication sidebar badge
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch("/api/comms/inbox/stats");
+                const json = await res.json();
+                if (cancelled) return;
+                const total = (json?.totalUnread ?? 0) as number;
+                setCommsUnreadCount(total);
+            } catch {
+                if (!cancelled) setCommsUnreadCount(0);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
 
     // Fetch rappels count and next date for SDR/BD sidebar badge
     useEffect(() => {
@@ -204,21 +232,33 @@ export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
         return () => { cancelled = true; };
     }, [userRole]);
 
-    // Inject rappels count and next date into the Rappels nav item
+    // Inject rappels count, next date, and comms unread into nav items
     const effectiveNavigation = useMemo(() => {
-        if (callbacksCount === null && !nextCallbackDate) return navigation;
+        const hasRappels = callbacksCount !== null || nextCallbackDate;
+        const hasComms = commsUnreadCount > 0;
+        if (!hasRappels && !hasComms) return navigation;
         return navigation.map((section) => ({
             ...section,
             items: section.items.map((item) => {
-                if (item.href !== RAPPELS_HREF) return item;
-                return {
-                    ...item,
-                    badge: callbacksCount != null ? String(callbacksCount) : undefined,
-                    badgeDetail: nextCallbackDate ?? undefined,
-                };
+                if (item.href === RAPPELS_HREF && hasRappels) {
+                    return {
+                        ...item,
+                        badge: callbacksCount != null ? String(callbacksCount) : undefined,
+                        badgeDetail: nextCallbackDate ?? undefined,
+                        badgeVariant: "rappels" as const,
+                    };
+                }
+                if (COMMS_HREFS.includes(item.href) && hasComms) {
+                    return {
+                        ...item,
+                        badge: String(commsUnreadCount),
+                        badgeVariant: "comms" as const,
+                    };
+                }
+                return item;
             }),
         }));
-    }, [navigation, callbacksCount, nextCallbackDate]);
+    }, [navigation, callbacksCount, nextCallbackDate, commsUnreadCount]);
 
     return (
         <>

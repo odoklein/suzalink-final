@@ -57,13 +57,6 @@ export function Drawer({
         [closeOnEscape, onClose]
     );
 
-    // Handle overlay click
-    const handleOverlayClick = (e: React.MouseEvent) => {
-        if (e.target === e.currentTarget && closeOnOverlay) {
-            onClose();
-        }
-    };
-
     // Lock body scroll when drawer is open
     useEffect(() => {
         if (isOpen) {
@@ -88,27 +81,33 @@ export function Drawer({
 
     if (!isOpen) return null;
 
-    return (
-        <div
-            className="fixed inset-0 z-50 flex"
-            onClick={handleOverlayClick}
-        >
-            {/* Overlay */}
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" />
+    const handleOverlayClickClose = () => {
+        if (closeOnOverlay) onClose();
+    };
 
-            {/* Drawer */}
+    return (
+        <div className="fixed inset-0 z-50 flex">
+            {/* Overlay — click here to close */}
+            <div
+                className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in cursor-pointer"
+                onClick={handleOverlayClickClose}
+                aria-hidden="true"
+            />
+
+            {/* Drawer panel — clicks don't close */}
             <div
                 ref={drawerRef}
                 tabIndex={-1}
+                role="dialog"
+                aria-modal="true"
                 className={cn(
-                    "fixed top-0 bottom-0 w-full bg-white shadow-2xl flex flex-col",
+                    "fixed top-0 bottom-0 w-full flex flex-col bg-white shadow-2xl z-[51]",
                     side === "right"
                         ? "right-0 animate-slide-in-right"
                         : "left-0 animate-slide-in-left",
                     SIZES[size],
                     className
                 )}
-                onClick={(e) => e.stopPropagation()}
             >
                 {/* Header */}
                 {(title || showCloseButton) && (

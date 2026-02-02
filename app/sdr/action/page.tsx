@@ -21,7 +21,9 @@ import {
     RefreshCw,
     AlertCircle,
 } from "lucide-react";
-import { Card, Badge, Button, LoadingState, EmptyState, Tabs } from "@/components/ui";
+import { Card, Badge, Button, LoadingState, EmptyState, Tabs, Drawer, DataTable } from "@/components/ui";
+import type { Column } from "@/components/ui/DataTable";
+import { CompanyDrawer, ContactDrawer } from "@/components/drawers";
 import { BookingModal } from "@/components/sdr/BookingModal";
 import type { ActionResult, Channel } from "@/lib/types";
 import { ACTION_RESULT_LABELS } from "@/lib/types";
@@ -79,6 +81,55 @@ interface ListItem {
     contactsCount: number;
 }
 
+interface QueueItem {
+    contactId: string | null;
+    companyId: string;
+    contact: NextActionData["contact"] | null;
+    company: NonNullable<NextActionData["company"]>;
+    campaignId: string;
+    channel: string;
+    missionName: string;
+    lastAction: NextActionData["lastAction"] | null;
+    priority: string;
+    _displayName?: string;
+    _companyName?: string;
+}
+
+interface DrawerContact {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    email: string | null;
+    phone: string | null;
+    title: string | null;
+    linkedin: string | null;
+    status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
+    companyId: string;
+    companyName?: string;
+}
+
+interface DrawerCompany {
+    id: string;
+    name: string;
+    industry: string | null;
+    country: string | null;
+    website: string | null;
+    size: string | null;
+    status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
+    contacts: Array<{
+        id: string;
+        firstName: string | null;
+        lastName: string | null;
+        email: string | null;
+        phone: string | null;
+        title: string | null;
+        linkedin: string | null;
+        status: string;
+        companyId: string;
+    }>;
+    _count: { contacts: number };
+}
+
 const RESULT_OPTIONS: { value: ActionResult; label: string; icon: React.ReactNode; key: string; color: string }[] = [
     { value: "NO_RESPONSE", label: "Pas de réponse", icon: <XCircle className="w-4 h-4" />, key: "1", color: "slate" },
     { value: "BAD_CONTACT", label: "Mauvais contact", icon: <Ban className="w-4 h-4" />, key: "2", color: "red" },
@@ -124,6 +175,19 @@ export default function SDRActionPage() {
     const [viewType, setViewType] = useState<"all" | "companies" | "contacts">("all");
     const [activeTab, setActiveTab] = useState<string>("intro");
     const [showBookingModal, setShowBookingModal] = useState(false);
+
+    // View mode: card (current) vs table
+    const [viewMode, setViewMode] = useState<"card" | "table">("card");
+    const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
+    const [queueLoading, setQueueLoading] = useState(false);
+    const [submittingRowKey, setSubmittingRowKey] = useState<string | null>(null);
+
+    // Drawer for table view (contact/company fiche)
+    const [drawerContactId, setDrawerContactId] = useState<string | null>(null);
+    const [drawerCompanyId, setDrawerCompanyId] = useState<string | null>(null);
+    const [drawerContact, setDrawerContact] = useState<DrawerContact | null>(null);
+    const [drawerCompany, setDrawerCompany] = useState<DrawerCompany | null>(null);
+    const [drawerLoading, setDrawerLoading] = useState(false);
 
     // Load filters
     useEffect(() => {
@@ -198,6 +262,167 @@ export default function SDRActionPage() {
         if (selectedMissionId !== null) loadNextAction();
         return () => { if (timerRef.current) clearInterval(timerRef.current); };
     }, [selectedMissionId, selectedListId, loadNextAction]);
+
+    // Fetch queue for table view
+    useEffect(() => {
+        if (viewMode !== "table" || selectedMissionId === null) {
+            setQueueItems([]);
+            return;
+        }
+        setQueueLoading(true);
+        const params = new URLSearchParams();
+        params.set("missionId", selectedMissionId);
+        if (selectedListId) params.set("listId", selectedListId);
+        params.set("limit", "100");
+        fetch(`/api/sdr/action-queue?${params.toString()}`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data?.items) {
+                    const items = json.data.items as QueueItem[];
+                    setQueueItems(items.map((i) => ({
+                        ...i,
+                        _displayName: i.contact
+                            ? `${(i.contact.firstName || "").trim()} ${(i.contact.lastName || "").trim()}`.trim() || i.company.name
+                            : i.company.name,
+                        _companyName: i.company.name,
+                    })));
+                } else {
+                    setQueueItems([]);
+                }
+            })
+            .catch(() => setQueueItems([]))
+            .finally(() => setQueueLoading(false));
+    }, [viewMode, selectedMissionId, selectedListId]);
+
+    // Fetch contact when opening contact drawer (table view)
+    useEffect(() => {
+        if (!drawerContactId) {
+            setDrawerContact(null);
+            return;
+        }
+        setDrawerLoading(true);
+        fetch(`/api/contacts/${drawerContactId}`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data) {
+                    const c = json.data;
+                    setDrawerContact({
+                        id: c.id,
+                        firstName: c.firstName,
+                        lastName: c.lastName,
+                        email: c.email,
+                        phone: c.phone,
+                        title: c.title,
+                        linkedin: c.linkedin,
+                        status: c.status ?? "PARTIAL",
+                        companyId: c.company?.id ?? "",
+                        companyName: c.company?.name ?? undefined,
+                    });
+                } else {
+                    setDrawerContact(null);
+                }
+            })
+            .catch(() => setDrawerContact(null))
+            .finally(() => setDrawerLoading(false));
+    }, [drawerContactId]);
+
+    // Fetch company when opening company drawer (table view)
+    useEffect(() => {
+        if (!drawerCompanyId) {
+            setDrawerCompany(null);
+            return;
+        }
+        setDrawerLoading(true);
+        fetch(`/api/companies/${drawerCompanyId}`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data) {
+                    const co = json.data;
+                    setDrawerCompany({
+                        id: co.id,
+                        name: co.name,
+                        industry: co.industry,
+                        country: co.country,
+                        website: co.website,
+                        size: co.size,
+                        status: co.status ?? "PARTIAL",
+                        contacts: (co.contacts ?? []).map((ct: { id: string; firstName: string | null; lastName: string | null; email: string | null; phone: string | null; title: string | null; linkedin: string | null; status: string; companyId: string }) => ({
+                            id: ct.id,
+                            firstName: ct.firstName,
+                            lastName: ct.lastName,
+                            email: ct.email,
+                            phone: ct.phone,
+                            title: ct.title,
+                            linkedin: ct.linkedin,
+                            status: ct.status ?? "PARTIAL",
+                            companyId: ct.companyId,
+                        })),
+                        _count: { contacts: co._count?.contacts ?? co.contacts?.length ?? 0 },
+                    });
+                } else {
+                    setDrawerCompany(null);
+                }
+            })
+            .catch(() => setDrawerCompany(null))
+            .finally(() => setDrawerLoading(false));
+    }, [drawerCompanyId]);
+
+    const queueRowKey = (row: QueueItem) => row.contactId ?? row.companyId;
+    const openDrawerForRow = (row: QueueItem) => {
+        if (row.contactId) {
+            setDrawerCompanyId(null);
+            setDrawerContactId(row.contactId);
+        } else {
+            setDrawerContactId(null);
+            setDrawerCompanyId(row.companyId);
+        }
+    };
+    const closeContactDrawer = () => {
+        setDrawerContactId(null);
+        setDrawerContact(null);
+    };
+    const closeCompanyDrawer = () => {
+        setDrawerCompanyId(null);
+        setDrawerCompany(null);
+    };
+    const handleContactFromCompany = (contact: { id: string }) => {
+        setDrawerCompanyId(null);
+        setDrawerCompany(null);
+        setDrawerContactId(contact.id);
+    };
+
+    const handleQuickAction = async (row: QueueItem, result: ActionResult) => {
+        const key = queueRowKey(row);
+        setSubmittingRowKey(key);
+        const noteRequired = result === "INTERESTED" || result === "CALLBACK_REQUESTED";
+        const note = noteRequired
+            ? (result === "CALLBACK_REQUESTED" ? "Rappel demandé" : "Intéressé")
+            : undefined;
+        try {
+            const res = await fetch("/api/actions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contactId: row.contactId ?? undefined,
+                    companyId: row.contactId ? undefined : row.companyId,
+                    campaignId: row.campaignId,
+                    channel: row.channel,
+                    result,
+                    note: note ?? undefined,
+                    callbackDate: result === "CALLBACK_REQUESTED" ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : undefined,
+                }),
+            });
+            const json = await res.json();
+            if (json.success) {
+                setQueueItems((prev) => prev.filter((r) => queueRowKey(r) !== key));
+                setActionsCompleted((c) => c + 1);
+            }
+        } catch {
+            // ignore
+        } finally {
+            setSubmittingRowKey(null);
+        }
+    };
 
     // Submit
     const handleSubmit = async () => {
@@ -292,32 +517,244 @@ export default function SDRActionPage() {
         ? SCRIPT_TABS.filter(tab => scriptSections && scriptSections[tab.id])
         : [];
 
-    // Loading
+    // ========== TABLE VIEW ==========
+    if (viewMode === "table") {
+        const queueColumns: Column<QueueItem>[] = [
+            {
+                key: "name",
+                header: "Contact / Société",
+                render: (_, row) => {
+                    const name = row.contact
+                        ? `${row.contact.firstName || ""} ${row.contact.lastName || ""}`.trim() || row.company.name
+                        : row.company.name;
+                    return (
+                        <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
+                                {row.contactId ? (
+                                    <User className="w-4 h-4 text-slate-500" />
+                                ) : (
+                                    <Building2 className="w-4 h-4 text-slate-500" />
+                                )}
+                            </div>
+                            <div>
+                                <p className="font-medium text-slate-900 truncate max-w-[200px]">{name}</p>
+                                {row.contact && row.company.name !== name && (
+                                    <p className="text-xs text-slate-500 truncate max-w-[200px]">{row.company.name}</p>
+                                )}
+                            </div>
+                        </div>
+                    );
+                },
+            },
+            {
+                key: "missionName",
+                header: "Mission",
+                render: (v) => <span className="text-sm text-slate-600">{v}</span>,
+            },
+            {
+                key: "lastAction",
+                header: "Dernière action",
+                render: (_, row) =>
+                    row.lastAction ? (
+                        <Badge className={cn("text-xs", PRIORITY_LABELS[row.priority as keyof typeof PRIORITY_LABELS]?.color ?? "bg-slate-100 text-slate-700")}>
+                            {ACTION_RESULT_LABELS[row.lastAction.result as ActionResult] ?? row.lastAction.result}
+                        </Badge>
+                    ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                    ),
+            },
+            {
+                key: "priority",
+                header: "Priorité",
+                render: (v) => (
+                    <Badge className={PRIORITY_LABELS[v as keyof typeof PRIORITY_LABELS]?.color ?? "bg-slate-100 text-slate-700"}>
+                        {PRIORITY_LABELS[v as keyof typeof PRIORITY_LABELS]?.label ?? v}
+                    </Badge>
+                ),
+            },
+            {
+                key: "quickActions",
+                header: "Actions rapides",
+                render: (_, row) => {
+                    const key = queueRowKey(row);
+                    const submitting = submittingRowKey === key;
+                    return (
+                        <div className="flex items-center gap-1 flex-wrap">
+                            {submitting && (
+                                <span className="flex items-center justify-center w-8 h-8 text-indigo-500">
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                </span>
+                            )}
+                            {RESULT_OPTIONS.map((opt) => (
+                                <button
+                                    key={opt.value}
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleQuickAction(row, opt.value);
+                                    }}
+                                    disabled={submitting}
+                                    title={opt.label}
+                                    className={cn(
+                                        "w-8 h-8 rounded-lg border flex items-center justify-center transition-colors",
+                                        "border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600",
+                                        submitting && "opacity-50 pointer-events-none"
+                                    )}
+                                >
+                                    {opt.icon}
+                                </button>
+                            ))}
+                        </div>
+                    );
+                },
+            },
+        ];
+
+        return (
+            <div className="space-y-6">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-3">
+                        <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+                            <button
+                                type="button"
+                                onClick={() => setViewMode("card")}
+                                className={cn(
+                                    "px-3 py-2 text-sm font-medium rounded-md transition-colors",
+                                    viewMode === "card" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                                )}
+                            >
+                                Vue carte
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setViewMode("table")}
+                                className={cn(
+                                    "px-3 py-2 text-sm font-medium rounded-md transition-colors",
+                                    viewMode === "table" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                                )}
+                            >
+                                Vue tableau
+                            </button>
+                        </div>
+                        <select
+                            value={selectedMissionId || ""}
+                            onChange={handleMissionChange}
+                            className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                            {missions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                        </select>
+                        <select
+                            value={selectedListId || "all"}
+                            onChange={handleListChange}
+                            className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                            <option value="all">Toutes les listes</option>
+                            {filteredLists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                        </select>
+                    </div>
+                    <span className="text-sm text-slate-500">{actionsCompleted} actions</span>
+                </div>
+
+                <Card className="overflow-hidden">
+                    <DataTable
+                        data={queueItems}
+                        columns={queueColumns}
+                        keyField={(row) => queueRowKey(row)}
+                        searchable
+                        searchPlaceholder="Rechercher contact ou société..."
+                        searchFields={["_displayName", "_companyName", "missionName"]}
+                        pagination
+                        pageSize={15}
+                        loading={queueLoading}
+                        emptyMessage="Aucun contact dans la file. Changez de mission ou liste."
+                        onRowClick={openDrawerForRow}
+                    />
+                </Card>
+
+                {(drawerContactId || drawerCompanyId) && drawerLoading && (
+                    <Drawer
+                        isOpen
+                        onClose={() => { setDrawerContactId(null); setDrawerCompanyId(null); }}
+                        title="Chargement..."
+                    >
+                        <div className="flex items-center justify-center py-12">
+                            <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+                        </div>
+                    </Drawer>
+                )}
+                {drawerContactId && drawerContact && (
+                    <ContactDrawer
+                        isOpen={!!drawerContactId}
+                        onClose={closeContactDrawer}
+                        contact={drawerContact}
+                        onUpdate={(updated) => setDrawerContact(updated)}
+                        isManager={true}
+                        companies={[]}
+                    />
+                )}
+                {drawerCompanyId && drawerCompany && (
+                    <CompanyDrawer
+                        isOpen={!!drawerCompanyId}
+                        onClose={closeCompanyDrawer}
+                        company={drawerCompany}
+                        onUpdate={(updated) => setDrawerCompany(updated)}
+                        onContactClick={handleContactFromCompany}
+                        isManager={true}
+                    />
+                )}
+            </div>
+        );
+    }
+
+    // Loading (card view)
     if (isLoading && !currentAction) {
         return <LoadingState message="Chargement du prochain contact..." />;
     }
 
-    // Empty queue
+    // Empty queue (card view)
     if (!currentAction?.hasNext) {
         return (
             <div className="space-y-6">
-                {/* Filters */}
-                <div className="flex gap-3">
-                    <select
-                        value={selectedMissionId || ""}
-                        onChange={handleMissionChange}
-                        className="flex-1 h-11 px-4 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    >
-                        {missions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                    </select>
-                    <select
-                        value={selectedListId || "all"}
-                        onChange={handleListChange}
-                        className="flex-1 h-11 px-4 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    >
-                        <option value="all">Toutes les listes</option>
-                        {filteredLists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                    </select>
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-3">
+                        <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+                            <button
+                                type="button"
+                                onClick={() => setViewMode("card")}
+                                className={cn(
+                                    "px-3 py-2 text-sm font-medium rounded-md transition-colors",
+                                    viewMode === "card" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                                )}
+                            >
+                                Vue carte
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setViewMode("table")}
+                                className={cn(
+                                    "px-3 py-2 text-sm font-medium rounded-md transition-colors",
+                                    viewMode === "table" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                                )}
+                            >
+                                Vue tableau
+                            </button>
+                        </div>
+                        <select
+                            value={selectedMissionId || ""}
+                            onChange={handleMissionChange}
+                            className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        >
+                            {missions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                        </select>
+                        <select
+                            value={selectedListId || "all"}
+                            onChange={handleListChange}
+                            className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        >
+                            <option value="all">Toutes les listes</option>
+                            {filteredLists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                        </select>
+                    </div>
                 </div>
 
                 <EmptyState
@@ -352,7 +789,29 @@ export default function SDRActionPage() {
 
             {/* Header with Filters */}
             <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3 flex-1">
+                <div className="flex items-center gap-3 flex-1 flex-wrap">
+                    <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+                        <button
+                            type="button"
+                            onClick={() => setViewMode("card")}
+                            className={cn(
+                                "px-3 py-2 text-sm font-medium rounded-md transition-colors",
+                                viewMode === "card" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                            )}
+                        >
+                            Vue carte
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setViewMode("table")}
+                            className={cn(
+                                "px-3 py-2 text-sm font-medium rounded-md transition-colors",
+                                viewMode === "table" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                            )}
+                        >
+                            Vue tableau
+                        </button>
+                    </div>
                     <select
                         value={selectedMissionId || ""}
                         onChange={handleMissionChange}

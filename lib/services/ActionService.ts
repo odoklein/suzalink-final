@@ -186,6 +186,8 @@ export class ActionService {
         result?: string;
         from?: Date;
         to?: Date;
+        contactId?: string;
+        companyId?: string;
         page?: number;
         limit?: number;
     }) {
@@ -196,6 +198,8 @@ export class ActionService {
 
         if (where.sdrId) whereClause.sdrId = where.sdrId;
         if (where.result) whereClause.result = where.result;
+        if (where.contactId) whereClause.contactId = where.contactId;
+        if (where.companyId) whereClause.companyId = where.companyId;
         if (where.missionId) {
             whereClause.campaign = { missionId: where.missionId };
         }
