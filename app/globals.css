@@ -179,6 +179,31 @@ body {
     color: var(--muted);
 }
 
+/* Ensure form inputs and email content have readable dark text on light backgrounds.
+   Body uses --foreground (light) which would make text invisible on white inputs. */
+input:not(.input),
+textarea:not(.input),
+select:not(.input) {
+    color: #0f172a;
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: #64748b;
+}
+
+/* Email body content (inbox thread view): force dark text when HTML has no color */
+.email-body {
+    color: #0f172a;
+}
+
+.email-body p,
+.email-body span,
+.email-body div,
+.email-body a {
+    color: inherit;
+}
+
 /* Badges */
 .badge {
     display: inline-flex;
