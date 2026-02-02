@@ -715,7 +715,7 @@ export function ContactDrawer({
                                     <textarea
                                         value={newActionNote}
                                         onChange={(e) => setNewActionNote(e.target.value)}
-                                        placeholder="Ajouter une note (requise pour Intéressé / Rappel demandé / Envoi mail)..."
+                                        placeholder="Ajouter une note (requise pour Intéressé / Rappel demandé / Envoie mail)..."
                                         rows={3}
                                         maxLength={500}
                                         className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"

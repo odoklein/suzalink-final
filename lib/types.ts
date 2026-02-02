@@ -31,7 +31,7 @@ export const ACTION_RESULT_LABELS: Record<ActionResult, string> = {
     CALLBACK_REQUESTED: "Rappel demandé",
     MEETING_BOOKED: "Meeting booké",
     DISQUALIFIED: "Disqualifié",
-    ENVOIE_MAIL: "Envoi mail",
+    ENVOIE_MAIL: "Envoie mail",
 };
 
 export const CHANNEL_LABELS: Record<Channel, string> = {
