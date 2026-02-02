@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import {
     Phone,
@@ -20,13 +20,15 @@ import {
     ExternalLink,
     RefreshCw,
     AlertCircle,
+    Filter,
+    RotateCcw,
 } from "lucide-react";
 import { Card, Badge, Button, LoadingState, EmptyState, Tabs, Drawer, DataTable } from "@/components/ui";
 import type { Column } from "@/components/ui/DataTable";
 import { CompanyDrawer, ContactDrawer } from "@/components/drawers";
 import { BookingModal } from "@/components/sdr/BookingModal";
 import type { ActionResult, Channel } from "@/lib/types";
-import { ACTION_RESULT_LABELS } from "@/lib/types";
+import { ACTION_RESULT_LABELS, CHANNEL_LABELS } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 // ============================================
@@ -182,6 +184,11 @@ export default function SDRActionPage() {
     const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
     const [queueLoading, setQueueLoading] = useState(false);
     const [submittingRowKey, setSubmittingRowKey] = useState<string | null>(null);
+    // Table view filters (client-side on current queue)
+    const [tableFilterResult, setTableFilterResult] = useState<string>(""); // "" | ActionResult | "NONE" (no last action)
+    const [tableFilterPriority, setTableFilterPriority] = useState<string>("");
+    const [tableFilterChannel, setTableFilterChannel] = useState<string>("");
+    const [tableFilterType, setTableFilterType] = useState<string>(""); // "" | "contact" | "company"
 
     // Drawer for table view (contact/company fiche)
     const [drawerContactId, setDrawerContactId] = useState<string | null>(null);
@@ -223,6 +230,30 @@ export default function SDRActionPage() {
     const filteredLists = selectedMissionId
         ? lists.filter((l) => l.mission.id === selectedMissionId)
         : lists;
+
+    // Table view: client-side filtered queue (by last action result, priority, channel, type)
+    const filteredQueueItems = useMemo(() => {
+        return queueItems.filter((row) => {
+            if (tableFilterResult) {
+                if (tableFilterResult === "NONE") {
+                    if (row.lastAction) return false;
+                } else if (!row.lastAction || row.lastAction.result !== tableFilterResult) return false;
+            }
+            if (tableFilterPriority && row.priority !== tableFilterPriority) return false;
+            if (tableFilterChannel && row.channel !== tableFilterChannel) return false;
+            if (tableFilterType === "contact" && !row.contactId) return false;
+            if (tableFilterType === "company" && row.contactId) return false;
+            return true;
+        });
+    }, [queueItems, tableFilterResult, tableFilterPriority, tableFilterChannel, tableFilterType]);
+
+    const hasTableFiltersActive = !!(tableFilterResult || tableFilterPriority || tableFilterChannel || tableFilterType);
+    const clearTableFilters = () => {
+        setTableFilterResult("");
+        setTableFilterPriority("");
+        setTableFilterChannel("");
+        setTableFilterType("");
+    };
 
     // Load next action
     const loadNextAction = useCallback(async () => {
@@ -395,9 +426,9 @@ export default function SDRActionPage() {
     const handleQuickAction = async (row: QueueItem, result: ActionResult) => {
         const key = queueRowKey(row);
         setSubmittingRowKey(key);
-        const noteRequired = result === "INTERESTED" || result === "CALLBACK_REQUESTED";
+        const noteRequired = result === "INTERESTED" || result === "CALLBACK_REQUESTED" || result === "ENVOIE_MAIL";
         const note = noteRequired
-            ? (result === "CALLBACK_REQUESTED" ? "Rappel demandé" : "Intéressé")
+            ? (result === "CALLBACK_REQUESTED" ? "Rappel demandé" : result === "ENVOIE_MAIL" ? "Envoie mail" : "Intéressé")
             : undefined;
         try {
             const res = await fetch("/api/actions", {
@@ -417,6 +448,10 @@ export default function SDRActionPage() {
             if (json.success) {
                 setQueueItems((prev) => prev.filter((r) => queueRowKey(r) !== key));
                 setActionsCompleted((c) => c + 1);
+                // Open email client when "Envoie mail" and contact has valid email
+                if (result === "ENVOIE_MAIL" && row.contact?.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.contact.email)) {
+                    window.location.href = `mailto:${row.contact.email}`;
+                }
             }
         } catch {
             // ignore
@@ -613,52 +648,152 @@ export default function SDRActionPage() {
 
         return (
             <div className="space-y-6">
-                <div className="flex items-center justify-between gap-4 flex-wrap">
-                    <div className="flex items-center gap-3">
-                        <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
-                            <button
-                                type="button"
-                                onClick={() => setViewMode("card")}
-                                className={cn(
-                                    "px-3 py-2 text-sm font-medium rounded-md transition-colors",
-                                    viewMode === "card" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
-                                )}
-                            >
-                                Vue carte
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setViewMode("table")}
-                                className={cn(
-                                    "px-3 py-2 text-sm font-medium rounded-md transition-colors",
-                                    viewMode === "table" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
-                                )}
-                            >
-                                Vue tableau
-                            </button>
-                        </div>
-                        <select
-                            value={selectedMissionId || ""}
-                            onChange={handleMissionChange}
-                            className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                {/* View toggle */}
+                <div className="flex items-center gap-2">
+                    <div className="flex rounded-xl border border-slate-200/80 p-1 bg-slate-50/80 shadow-sm">
+                        <button
+                            type="button"
+                            onClick={() => setViewMode("card")}
+                            className={cn(
+                                "px-4 py-2.5 text-sm font-medium rounded-lg transition-all",
+                                viewMode === "card" ? "bg-white text-indigo-600 shadow-sm border border-slate-200/60" : "text-slate-600 hover:text-slate-900"
+                            )}
                         >
-                            {missions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                        </select>
-                        <select
-                            value={selectedListId || "all"}
-                            onChange={handleListChange}
-                            className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            Vue carte
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setViewMode("table")}
+                            className={cn(
+                                "px-4 py-2.5 text-sm font-medium rounded-lg transition-all",
+                                viewMode === "table" ? "bg-white text-indigo-600 shadow-sm border border-slate-200/60" : "text-slate-600 hover:text-slate-900"
+                            )}
                         >
-                            <option value="all">Toutes les listes</option>
-                            {filteredLists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                        </select>
+                            Vue tableau
+                        </button>
                     </div>
-                    <span className="text-sm text-slate-500">{actionsCompleted} actions</span>
                 </div>
+
+                {/* Modern filter header */}
+                <Card className="overflow-hidden border-slate-200/80 bg-gradient-to-br from-slate-50/90 to-white shadow-sm">
+                    <div className="px-5 py-4">
+                        <div className="flex flex-wrap items-end justify-between gap-4">
+                            <div className="flex items-center gap-2 text-slate-700">
+                                <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center">
+                                    <Filter className="w-4 h-4 text-indigo-600" />
+                                </div>
+                                <div>
+                                    <h3 className="text-sm font-semibold text-slate-900">Filtres</h3>
+                                    <p className="text-xs text-slate-500">Affiner la file d&apos;actions</p>
+                                </div>
+                            </div>
+                            {hasTableFiltersActive && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={clearTableFilters}
+                                    className="text-slate-500 hover:text-indigo-600 gap-1.5"
+                                >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                    Réinitialiser
+                                </Button>
+                            )}
+                        </div>
+
+                        <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                            {/* Contexte */}
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Mission</label>
+                                <select
+                                    value={selectedMissionId || ""}
+                                    onChange={handleMissionChange}
+                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow"
+                                >
+                                    {missions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                </select>
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Liste</label>
+                                <select
+                                    value={selectedListId || "all"}
+                                    onChange={handleListChange}
+                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow"
+                                >
+                                    <option value="all">Toutes les listes</option>
+                                    {filteredLists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                                </select>
+                            </div>
+
+                            {/* Statut = dernière action */}
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Statut</label>
+                                <select
+                                    value={tableFilterResult}
+                                    onChange={(e) => setTableFilterResult(e.target.value)}
+                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow"
+                                >
+                                    <option value="">Tous les statuts</option>
+                                    <option value="NONE">Jamais contacté</option>
+                                    {(Object.entries(ACTION_RESULT_LABELS) as [ActionResult, string][]).map(([value, label]) => (
+                                        <option key={value} value={value}>{label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Priorité</label>
+                                <select
+                                    value={tableFilterPriority}
+                                    onChange={(e) => setTableFilterPriority(e.target.value)}
+                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow"
+                                >
+                                    <option value="">Toutes</option>
+                                    {Object.entries(PRIORITY_LABELS).map(([value, { label }]) => (
+                                        <option key={value} value={value}>{label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Canal</label>
+                                <select
+                                    value={tableFilterChannel}
+                                    onChange={(e) => setTableFilterChannel(e.target.value)}
+                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow"
+                                >
+                                    <option value="">Tous</option>
+                                    {(Object.entries(CHANNEL_LABELS) as [Channel, string][]).map(([value, label]) => (
+                                        <option key={value} value={value}>{label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Type</label>
+                                <select
+                                    value={tableFilterType}
+                                    onChange={(e) => setTableFilterType(e.target.value)}
+                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow"
+                                >
+                                    <option value="">Contact + Société</option>
+                                    <option value="contact">Contact uniquement</option>
+                                    <option value="company">Société uniquement</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between">
+                            <span className="text-xs text-slate-500">
+                                {hasTableFiltersActive ? (
+                                    <span><span className="font-medium text-indigo-600">{filteredQueueItems.length}</span> résultat{filteredQueueItems.length !== 1 ? "s" : ""} sur {queueItems.length}</span>
+                                ) : (
+                                    <span><span className="font-medium text-slate-700">{queueItems.length}</span> dans la file</span>
+                                )}
+                            </span>
+                        </div>
+                    </div>
+                </Card>
 
                 <Card className="overflow-hidden">
                     <DataTable
-                        data={queueItems}
+                        data={filteredQueueItems}
                         columns={queueColumns}
                         keyField={(row) => queueRowKey(row)}
                         searchable

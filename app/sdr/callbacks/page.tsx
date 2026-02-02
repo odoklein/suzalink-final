@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card, Badge, Button, Modal, ModalFooter } from "@/components/ui";
+import { Card, Badge, Button, Modal, ModalFooter, Drawer } from "@/components/ui";
+import { CompanyDrawer, ContactDrawer } from "@/components/drawers";
 import {
     Calendar,
     Clock,
     Phone,
-    User,
     Building2,
     ArrowRight,
     Loader2,
@@ -16,6 +16,41 @@ import {
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { formatCallbackDateTime } from "@/lib/utils/parseDateFromNote";
+
+// Drawer types (same shape as SDR action table view)
+interface DrawerContact {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    email: string | null;
+    phone: string | null;
+    title: string | null;
+    linkedin: string | null;
+    status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
+    companyId: string;
+    companyName?: string;
+}
+interface DrawerCompany {
+    id: string;
+    name: string;
+    industry: string | null;
+    country: string | null;
+    website: string | null;
+    size: string | null;
+    status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
+    contacts: Array<{
+        id: string;
+        firstName: string | null;
+        lastName: string | null;
+        email: string | null;
+        phone: string | null;
+        title: string | null;
+        linkedin: string | null;
+        status: string;
+        companyId: string;
+    }>;
+    _count: { contacts: number };
+}
 
 // ============================================
 // TYPES
@@ -64,7 +99,26 @@ export default function SDRCallbacksPage() {
     const [rescheduleDateValue, setRescheduleDateValue] = useState("");
     const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false);
 
-    const openReschedule = (cb: Callback) => {
+    // Drawer for contact/company (same as table view on action page)
+    const [drawerContactId, setDrawerContactId] = useState<string | null>(null);
+    const [drawerCompanyId, setDrawerCompanyId] = useState<string | null>(null);
+    const [drawerContact, setDrawerContact] = useState<DrawerContact | null>(null);
+    const [drawerCompany, setDrawerCompany] = useState<DrawerCompany | null>(null);
+    const [drawerLoading, setDrawerLoading] = useState(false);
+
+    const openDrawerForCallback = (cb: Callback, e?: React.MouseEvent) => {
+        if (e) e.stopPropagation();
+        if (cb.contact) {
+            setDrawerCompanyId(null);
+            setDrawerContactId(cb.contact.id);
+        } else if (cb.company) {
+            setDrawerContactId(null);
+            setDrawerCompanyId(cb.company.id);
+        }
+    };
+
+    const openReschedule = (cb: Callback, e?: React.MouseEvent) => {
+        if (e) e.stopPropagation();
         setRescheduleCallback(cb);
         setRescheduleDateValue(cb.callbackDate ? new Date(cb.callbackDate).toISOString().slice(0, 16) : "");
     };
@@ -113,6 +167,85 @@ export default function SDRCallbacksPage() {
 
         fetchCallbacks();
     }, []);
+
+    // Fetch contact when opening contact drawer
+    useEffect(() => {
+        if (!drawerContactId) {
+            setDrawerContact(null);
+            return;
+        }
+        setDrawerLoading(true);
+        fetch(`/api/contacts/${drawerContactId}`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data) {
+                    const c = json.data;
+                    setDrawerContact({
+                        id: c.id,
+                        firstName: c.firstName,
+                        lastName: c.lastName,
+                        email: c.email,
+                        phone: c.phone,
+                        title: c.title,
+                        linkedin: c.linkedin,
+                        status: c.status ?? "PARTIAL",
+                        companyId: c.company?.id ?? "",
+                        companyName: c.company?.name ?? undefined,
+                    });
+                } else {
+                    setDrawerContact(null);
+                }
+            })
+            .catch(() => setDrawerContact(null))
+            .finally(() => setDrawerLoading(false));
+    }, [drawerContactId]);
+
+    // Fetch company when opening company drawer
+    useEffect(() => {
+        if (!drawerCompanyId) {
+            setDrawerCompany(null);
+            return;
+        }
+        setDrawerLoading(true);
+        fetch(`/api/companies/${drawerCompanyId}`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data) {
+                    const co = json.data;
+                    setDrawerCompany({
+                        id: co.id,
+                        name: co.name,
+                        industry: co.industry,
+                        country: co.country,
+                        website: co.website,
+                        size: co.size,
+                        status: co.status ?? "PARTIAL",
+                        contacts: (co.contacts ?? []).map((ct: { id: string; firstName: string | null; lastName: string | null; email: string | null; phone: string | null; title: string | null; linkedin: string | null; status: string; companyId: string }) => ({
+                            id: ct.id,
+                            firstName: ct.firstName,
+                            lastName: ct.lastName,
+                            email: ct.email,
+                            phone: ct.phone,
+                            title: ct.title,
+                            linkedin: ct.linkedin,
+                            status: ct.status ?? "PARTIAL",
+                            companyId: ct.companyId,
+                        })),
+                        _count: { contacts: co._count?.contacts ?? co.contacts?.length ?? 0 },
+                    });
+                } else {
+                    setDrawerCompany(null);
+                }
+            })
+            .catch(() => setDrawerCompany(null))
+            .finally(() => setDrawerLoading(false));
+    }, [drawerCompanyId]);
+
+    const handleContactFromCompany = (contact: { id: string }) => {
+        setDrawerCompanyId(null);
+        setDrawerCompany(null);
+        setDrawerContactId(contact.id);
+    };
 
     if (isLoading) {
         return (
@@ -168,7 +301,13 @@ export default function SDRCallbacksPage() {
                             <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-amber-400 to-orange-400 rounded-l-2xl group-hover:w-2 transition-all duration-300" />
 
                             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pl-4">
-                                <div className="flex items-start gap-5">
+                                <div
+                                    className="flex items-start gap-5 cursor-pointer min-w-0"
+                                    onClick={() => openDrawerForCallback(callback)}
+                                    role="button"
+                                    tabIndex={0}
+                                    onKeyDown={(e) => e.key === "Enter" && openDrawerForCallback(callback)}
+                                >
                                     <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 flex items-center justify-center flex-shrink-0 border border-amber-100 shadow-inner group-hover:scale-110 transition-transform duration-300">
                                         <Clock className="w-7 h-7 text-amber-600" />
                                     </div>
@@ -231,7 +370,7 @@ export default function SDRCallbacksPage() {
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-3 pl-4 md:pl-0 border-t md:border-t-0 border-slate-50 pt-4 md:pt-0">
+                                <div className="flex items-center gap-3 pl-4 md:pl-0 border-t md:border-t-0 border-slate-50 pt-4 md:pt-0" onClick={(e) => e.stopPropagation()}>
                                     {(callback.contact?.phone || callback.company?.phone) && (
                                         <div className="hidden lg:block text-right mr-2">
                                             <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">Contact</p>
@@ -239,11 +378,11 @@ export default function SDRCallbacksPage() {
                                         </div>
                                     )}
 
-                                    <div className="flex flex-wrap items-center gap-2">
+                                    <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
                                         <Button
                                             variant="secondary"
                                             className="gap-2 border-amber-200 text-amber-700 hover:bg-amber-50"
-                                            onClick={() => openReschedule(callback)}
+                                            onClick={(e) => openReschedule(callback, e)}
                                         >
                                             <CalendarClock className="w-4 h-4" />
                                             Reprogrammer
@@ -263,6 +402,39 @@ export default function SDRCallbacksPage() {
                         </div>
                     ))}
                 </div>
+            )}
+
+            {/* Contact/Company drawer (same as table view) */}
+            {(drawerContactId || drawerCompanyId) && drawerLoading && (
+                <Drawer
+                    isOpen
+                    onClose={() => { setDrawerContactId(null); setDrawerCompanyId(null); }}
+                    title="Chargement..."
+                >
+                    <div className="flex items-center justify-center py-12">
+                        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+                    </div>
+                </Drawer>
+            )}
+            {drawerContactId && drawerContact && (
+                <ContactDrawer
+                    isOpen={!!drawerContactId}
+                    onClose={() => { setDrawerContactId(null); setDrawerContact(null); }}
+                    contact={drawerContact}
+                    onUpdate={(updated) => setDrawerContact(updated)}
+                    isManager={false}
+                    companies={[]}
+                />
+            )}
+            {drawerCompanyId && drawerCompany && (
+                <CompanyDrawer
+                    isOpen={!!drawerCompanyId}
+                    onClose={() => { setDrawerCompanyId(null); setDrawerCompany(null); }}
+                    company={drawerCompany}
+                    onUpdate={(updated) => setDrawerCompany(updated)}
+                    onContactClick={handleContactFromCompany}
+                    isManager={false}
+                />
             )}
 
             {/* Reschedule modal */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
     ChevronUp,
     ChevronDown,
@@ -109,6 +109,17 @@ export function DataTable<T extends Record<string, any>>({
 
     const totalPages = Math.ceil(sortedData.length / pageSize);
 
+    // Reset to first page only when search query changes (not when data changes e.g. after quick action)
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchQuery]);
+
+    // When data length changes (e.g. row removed), clamp current page so we don't show an empty page
+    useEffect(() => {
+        if (!pagination || totalPages < 1) return;
+        setCurrentPage((p) => Math.min(p, totalPages));
+    }, [sortedData.length, pageSize, pagination, totalPages]);
+
     // Handle sort
     const handleSort = (key: string) => {
         if (sortKey === key) {
@@ -123,11 +134,6 @@ export function DataTable<T extends Record<string, any>>({
             setSortDirection("asc");
         }
     };
-
-    // Reset page when data changes
-    useMemo(() => {
-        setCurrentPage(1);
-    }, [searchQuery, data]);
 
     return (
         <div className={cn("space-y-4", className)}>
