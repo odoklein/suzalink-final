@@ -49,9 +49,10 @@ interface Mailbox {
 interface AddMailboxViewProps {
     onCancel: () => void;
     onSuccess: () => void;
+    onMailboxAdded?: () => void;
 }
 
-function AddMailboxView({ onCancel, onSuccess }: AddMailboxViewProps) {
+function AddMailboxView({ onCancel, onSuccess, onMailboxAdded }: AddMailboxViewProps) {
     const [step, setStep] = useState<'select' | 'imap'>('select');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -129,6 +130,7 @@ function AddMailboxView({ onCancel, onSuccess }: AddMailboxViewProps) {
                 throw new Error(result.error || 'Erreur lors de la connexion');
             }
 
+            onMailboxAdded?.();
             onSuccess();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Erreur lors de la connexion');
@@ -335,9 +337,10 @@ function AddMailboxView({ onCancel, onSuccess }: AddMailboxViewProps) {
 interface MailboxManagerDialogProps {
     isOpen: boolean;
     onClose: () => void;
+    onMailboxAdded?: () => void;
 }
 
-export function MailboxManagerDialog({ isOpen, onClose }: MailboxManagerDialogProps) {
+export function MailboxManagerDialog({ isOpen, onClose, onMailboxAdded }: MailboxManagerDialogProps) {
     const [view, setView] = useState<'list' | 'add'>('list');
     const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -346,7 +349,7 @@ export function MailboxManagerDialog({ isOpen, onClose }: MailboxManagerDialogPr
     const fetchMailboxes = async () => {
         setIsLoading(true);
         try {
-            const res = await fetch("/api/email/mailboxes?includeShared=true");
+            const res = await fetch("/api/email/mailboxes?includeShared=true", { cache: "no-store" });
             const json = await res.json();
             if (json.success) {
                 setMailboxes(json.data);
@@ -466,6 +469,7 @@ export function MailboxManagerDialog({ isOpen, onClose }: MailboxManagerDialogPr
                                 setView('list');
                                 fetchMailboxes();
                             }}
+                            onMailboxAdded={onMailboxAdded}
                         />
                     ) : (
                         <div className="space-y-6">

@@ -71,7 +71,7 @@ export function InboxLayout({
     const fetchMailboxes = useCallback(async () => {
         try {
             setIsLoadingMailboxes(true);
-            const response = await fetch('/api/email/mailboxes');
+            const response = await fetch('/api/email/mailboxes', { cache: 'no-store' });
             const result = await response.json();
             
             if (result.success) {
@@ -185,6 +185,7 @@ export function InboxLayout({
                     <MailboxSwitcher
                         selectedMailboxId={selectedMailboxId}
                         onSelectMailbox={handleSelectMailbox}
+                        onMailboxAdded={fetchMailboxes}
                         showTeamInbox={showTeamInbox}
                     />
                 </div>

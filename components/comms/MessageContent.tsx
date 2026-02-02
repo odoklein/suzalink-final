@@ -24,7 +24,7 @@ export function MessageContent({
         <div
             className={cn(
                 "prose prose-sm max-w-none break-words prose-p:my-0.5 prose-ul:my-1 prose-li:my-0",
-                isOwn ? "prose-invert" : "prose-slate",
+                isOwn ? "prose-invert" : "prose-slate text-slate-800 dark:text-slate-200",
                 className
             )}
         >

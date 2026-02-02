@@ -34,6 +34,7 @@ interface Mailbox {
 interface MailboxSwitcherProps {
     selectedMailboxId?: string;
     onSelectMailbox: (mailboxId: string | undefined) => void;
+    onMailboxAdded?: () => void;
     showTeamInbox?: boolean;
 }
 
@@ -44,6 +45,7 @@ interface MailboxSwitcherProps {
 export function MailboxSwitcher({
     selectedMailboxId,
     onSelectMailbox,
+    onMailboxAdded,
     showTeamInbox = false,
 }: MailboxSwitcherProps) {
     const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
@@ -51,28 +53,27 @@ export function MailboxSwitcher({
     const [isOpen, setIsOpen] = useState(false);
     const [showManagerDialog, setShowManagerDialog] = useState(false);
 
-    // Fetch mailboxes
-    useEffect(() => {
-        const fetchMailboxes = async () => {
-            try {
-                const res = await fetch("/api/email/mailboxes?includeShared=true");
-                const json = await res.json();
-                if (json.success) {
-                    setMailboxes(json.data);
-                    // Auto-select first mailbox if none selected
-                    if (!selectedMailboxId && json.data.length > 0) {
-                        onSelectMailbox(json.data[0].id);
-                    }
+    const fetchMailboxes = React.useCallback(async () => {
+        try {
+            setIsLoading(true);
+            const res = await fetch("/api/email/mailboxes?includeShared=true", { cache: "no-store" });
+            const json = await res.json();
+            if (json.success) {
+                setMailboxes(json.data ?? []);
+                if (!selectedMailboxId && (json.data?.length ?? 0) > 0) {
+                    onSelectMailbox(json.data[0].id);
                 }
-            } catch (error) {
-                console.error("Failed to fetch mailboxes:", error);
-            } finally {
-                setIsLoading(false);
             }
-        };
-
-        fetchMailboxes();
+        } catch (error) {
+            console.error("Failed to fetch mailboxes:", error);
+        } finally {
+            setIsLoading(false);
+        }
     }, [selectedMailboxId, onSelectMailbox]);
+
+    useEffect(() => {
+        fetchMailboxes();
+    }, [fetchMailboxes]);
 
     const selectedMailbox = mailboxes.find(m => m.id === selectedMailboxId);
 
@@ -97,6 +98,11 @@ export function MailboxSwitcher({
         );
     }
 
+    const handleMailboxAdded = React.useCallback(() => {
+        onMailboxAdded?.();
+        fetchMailboxes();
+    }, [onMailboxAdded, fetchMailboxes]);
+
     if (mailboxes.length === 0) {
         return (
             <>
@@ -110,6 +116,7 @@ export function MailboxSwitcher({
                 <MailboxManagerDialog
                     isOpen={showManagerDialog}
                     onClose={() => setShowManagerDialog(false)}
+                    onMailboxAdded={handleMailboxAdded}
                 />
             </>
         );
@@ -252,6 +259,7 @@ export function MailboxSwitcher({
             <MailboxManagerDialog
                 isOpen={showManagerDialog}
                 onClose={() => setShowManagerDialog(false)}
+                onMailboxAdded={handleMailboxAdded}
             />
         </div>
     );

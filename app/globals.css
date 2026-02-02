@@ -192,16 +192,20 @@ textarea::placeholder {
     color: #64748b;
 }
 
-/* Email body content (inbox thread view): force dark text when HTML has no color */
+/* Email body content (inbox thread view): force readable text, override inline white/light from senders */
 .email-body {
-    color: #0f172a;
+    color: #0f172a !important;
 }
 
 .email-body p,
 .email-body span,
 .email-body div,
-.email-body a {
-    color: inherit;
+.email-body a,
+.email-body li,
+.email-body td,
+.email-body th,
+.email-body * {
+    color: inherit !important;
 }
 
 /* Badges */
