@@ -48,6 +48,7 @@ enum ActionResult {
   CALLBACK_REQUESTED
   MEETING_BOOKED
   DISQUALIFIED
+  ENVOIE_MAIL
 }
 
 enum SyncDirection {

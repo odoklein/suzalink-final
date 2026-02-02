@@ -113,8 +113,8 @@ export function CompanyDrawer({
     const [missionIdLoading, setMissionIdLoading] = useState(false);
     const [newActionResult, setNewActionResult] = useState<string>("");
     const [newActionNote, setNewActionNote] = useState("");
-    const [newActionCampaignId, setNewActionCampaignId] = useState("");
     const [newActionSaving, setNewActionSaving] = useState(false);
+    const [newCallbackDateValue, setNewCallbackDateValue] = useState("");
 
     const effectiveMissionId = company?.missionId ?? resolvedMissionId ?? undefined;
 
@@ -302,33 +302,45 @@ export function CompanyDrawer({
     };
 
     const handleAddAction = async () => {
-        if (!company || !newActionCampaignId || !newActionResult) {
-            showError("Erreur", "Sélectionnez une campagne et un résultat");
+        const campaignId = campaigns[0]?.id;
+        if (!company || !campaignId) {
+            showError("Erreur", "Aucune campagne disponible pour cette mission");
             return;
         }
-        if ((newActionResult === "INTERESTED" || newActionResult === "CALLBACK_REQUESTED") && !newActionNote.trim()) {
+        if (!newActionResult) {
+            showError("Erreur", "Sélectionnez un résultat");
+            return;
+        }
+        const noteRequired = ["INTERESTED", "CALLBACK_REQUESTED", "ENVOIE_MAIL"].includes(newActionResult);
+        if (noteRequired && !newActionNote.trim()) {
             showError("Erreur", "Une note est requise pour ce résultat");
             return;
         }
         setNewActionSaving(true);
         try {
-            const selectedCampaign = campaigns.find((c) => c.id === newActionCampaignId);
+            const selectedCampaign = campaigns[0];
             const channel = (selectedCampaign?.mission?.channel ?? "CALL") as "CALL" | "EMAIL" | "LINKEDIN";
             const res = await fetch("/api/actions", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     companyId: company.id,
-                    campaignId: newActionCampaignId,
+                    campaignId,
                     channel,
                     result: newActionResult,
                     note: newActionNote.trim() || undefined,
+                    callbackDate:
+                        newActionResult === "CALLBACK_REQUESTED" && newCallbackDateValue
+                            ? new Date(newCallbackDateValue).toISOString()
+                            : undefined,
                 }),
             });
             const json = await res.json();
             if (json.success) {
                 success("Action enregistrée", "L'action a été ajoutée à l'historique");
                 setNewActionNote("");
+                setNewActionResult("");
+                setNewCallbackDateValue("");
                 setActions((prev) => [
                     {
                         id: json.data.id,
@@ -600,32 +612,37 @@ export function CompanyDrawer({
                         ) : (
                             <div className="space-y-4">
                                 <Select
-                                    label="Campagne"
-                                    placeholder="Sélectionner une campagne..."
-                                    options={campaigns.map((c) => ({ value: c.id, label: c.name }))}
-                                    value={newActionCampaignId || campaigns[0]?.id}
-                                    onChange={setNewActionCampaignId}
-                                />
-                                <Select
                                     label="Résultat"
                                     placeholder="Sélectionner un résultat..."
-                                    options={[
-                                        { value: "NO_RESPONSE", label: "Pas de réponse" },
-                                        { value: "BAD_CONTACT", label: "Mauvais contact" },
-                                        { value: "INTERESTED", label: "Intéressé" },
-                                        { value: "CALLBACK_REQUESTED", label: "Rappel demandé" },
-                                        { value: "MEETING_BOOKED", label: "RDV pris" },
-                                        { value: "DISQUALIFIED", label: "Disqualifié" },
-                                    ]}
+                                    options={Object.entries(ACTION_RESULT_LABELS).map(([value, label]) => ({ value, label }))}
                                     value={newActionResult}
                                     onChange={setNewActionResult}
                                 />
+                                {/* Rappel demandé: date de rappel */}
+                                {newActionResult === "CALLBACK_REQUESTED" && (
+                                    <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Clock className="w-5 h-5 text-amber-600" />
+                                            <label className="text-sm font-medium text-slate-900">Date de rappel</label>
+                                        </div>
+                                        <input
+                                            type="datetime-local"
+                                            value={newCallbackDateValue}
+                                            onChange={(e) => setNewCallbackDateValue(e.target.value)}
+                                            min={new Date().toISOString().slice(0, 16)}
+                                            className="w-full px-3 py-2 text-sm border border-amber-200 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-300"
+                                        />
+                                        <p className="text-xs text-slate-500 mt-2">
+                                            Optionnel. Vous pouvez aussi indiquer la date dans la note.
+                                        </p>
+                                    </div>
+                                )}
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Note</label>
                                     <textarea
                                         value={newActionNote}
                                         onChange={(e) => setNewActionNote(e.target.value)}
-                                        placeholder="Ajouter une note (requise pour Intéressé / Rappel demandé)..."
+                                        placeholder="Ajouter une note (requise pour Intéressé / Rappel demandé / Envoi mail)..."
                                         rows={3}
                                         maxLength={500}
                                         className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
@@ -636,7 +653,11 @@ export function CompanyDrawer({
                                     type="button"
                                     variant="primary"
                                     onClick={handleAddAction}
-                                    disabled={newActionSaving || !newActionResult}
+                                    disabled={
+                                        newActionSaving ||
+                                        !newActionResult ||
+                                        (["INTERESTED", "CALLBACK_REQUESTED", "ENVOIE_MAIL"].includes(newActionResult) && !newActionNote.trim())
+                                    }
                                     isLoading={newActionSaving}
                                 >
                                     Enregistrer l'action

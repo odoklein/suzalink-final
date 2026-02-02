@@ -27,6 +27,7 @@ const createActionSchema = z.object({
         'CALLBACK_REQUESTED',
         'MEETING_BOOKED',
         'DISQUALIFIED',
+        'ENVOIE_MAIL',
     ]),
     note: z.string().max(500, 'Note trop longue (max 500 caractères)').optional(),
     callbackDate: z.union([z.string(), z.date()]).optional().transform((s) => (s ? (typeof s === 'string' ? new Date(s) : s) : undefined)),
@@ -85,7 +86,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     const data = await validateRequest(request, createActionSchema);
 
     // Validate required note for certain results
-    if ((data.result === 'INTERESTED' || data.result === 'CALLBACK_REQUESTED') && !data.note?.trim()) {
+    if ((data.result === 'INTERESTED' || data.result === 'CALLBACK_REQUESTED' || data.result === 'ENVOIE_MAIL') && !data.note?.trim()) {
         return errorResponse('Une note est requise pour ce type de résultat', 400);
     }
 

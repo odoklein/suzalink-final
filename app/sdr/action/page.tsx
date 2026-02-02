@@ -137,6 +137,7 @@ const RESULT_OPTIONS: { value: ActionResult; label: string; icon: React.ReactNod
     { value: "CALLBACK_REQUESTED", label: "Rappel demandé", icon: <Clock className="w-4 h-4" />, key: "4", color: "amber" },
     { value: "MEETING_BOOKED", label: "RDV pris", icon: <Calendar className="w-4 h-4" />, key: "5", color: "indigo" },
     { value: "DISQUALIFIED", label: "Disqualifié", icon: <XCircle className="w-4 h-4" />, key: "6", color: "slate" },
+    { value: "ENVOIE_MAIL", label: "Envoi mail", icon: <Mail className="w-4 h-4" />, key: "7", color: "blue" },
 ];
 
 const PRIORITY_LABELS: Record<string, { label: string; color: string }> = {
