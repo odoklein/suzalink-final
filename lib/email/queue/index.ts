@@ -4,6 +4,7 @@
 // ============================================
 
 import { Queue, Worker, Job, QueueEvents } from 'bullmq';
+import Redis from 'ioredis';
 
 // ============================================
 // REDIS CONNECTION CONFIG
@@ -14,6 +15,15 @@ export const REDIS_CONFIG = {
     port: parseInt(process.env.REDIS_PORT || '6379'),
     password: process.env.REDIS_PASSWORD,
     maxRetriesPerRequest: null,
+};
+
+/** Connection options that fail fast (no retries) for the one-time Redis check */
+const REDIS_CHECK_OPTIONS = {
+    ...REDIS_CONFIG,
+    lazyConnect: true,
+    maxRetriesPerRequest: 0,
+    connectTimeout: 2000,
+    retryStrategy: () => null,
 };
 
 // ============================================
@@ -84,6 +94,27 @@ let queues: Map<string, Queue> = new Map();
 let workers: Map<string, Worker> = new Map();
 let isInitialized = false;
 let redisAvailable = true;
+let redisCheckPromise: Promise<void> | null = null;
+
+/**
+ * One-time Redis connectivity check. If Redis is unreachable, sets redisAvailable = false
+ * so we never create Queue instances (and avoid ECONNREFUSED retry spam).
+ */
+export function checkRedisOnce(): Promise<void> {
+    if (redisCheckPromise !== null) return redisCheckPromise;
+    redisCheckPromise = (async () => {
+        const client = new Redis(REDIS_CHECK_OPTIONS as any);
+        try {
+            await client.ping();
+        } catch (err) {
+            redisAvailable = false;
+            console.warn('[Queue] Redis not available (ECONNREFUSED) - queue operations disabled. Start Redis or set REDIS_HOST to use the email queue.');
+        } finally {
+            client.disconnect();
+        }
+    })();
+    return redisCheckPromise;
+}
 
 /**
  * Set Redis availability flag (called by connection monitoring)
@@ -188,6 +219,8 @@ export async function canScheduleJob(queueName: string): Promise<boolean> {
 // ============================================
 
 export async function scheduleEmailSync(data: EmailSyncJobData): Promise<Job<EmailSyncJobData>> {
+    await checkRedisOnce();
+    if (!redisAvailable) throw new Error(`Queue unavailable: Redis not connected`);
     const queue = getEmailSyncQueue();
     return queue.add('sync', data, {
         priority: 1,
@@ -196,6 +229,8 @@ export async function scheduleEmailSync(data: EmailSyncJobData): Promise<Job<Ema
 }
 
 export async function scheduleEmailSend(data: EmailSendJobData): Promise<Job<EmailSendJobData>> {
+    await checkRedisOnce();
+    if (!redisAvailable) throw new Error(`Queue unavailable: Redis not connected`);
     const queue = getEmailSendQueue();
 
     // Create idempotency key based on content to prevent duplicate sends
@@ -215,6 +250,8 @@ export async function scheduleEmailSend(data: EmailSendJobData): Promise<Job<Ema
 }
 
 export async function scheduleSequenceProcess(data: SequenceProcessJobData): Promise<Job<SequenceProcessJobData>> {
+    await checkRedisOnce();
+    if (!redisAvailable) throw new Error(`Queue unavailable: Redis not connected`);
     const queue = getSequenceProcessQueue();
     return queue.add('process', data, {
         priority: 3,
@@ -223,6 +260,8 @@ export async function scheduleSequenceProcess(data: SequenceProcessJobData): Pro
 }
 
 export async function scheduleAnalyticsAggregate(data: AnalyticsAggregateJobData): Promise<Job<AnalyticsAggregateJobData>> {
+    await checkRedisOnce();
+    if (!redisAvailable) throw new Error(`Queue unavailable: Redis not connected`);
     const queue = getAnalyticsAggregateQueue();
     return queue.add('aggregate', data, {
         priority: 5,
@@ -231,6 +270,8 @@ export async function scheduleAnalyticsAggregate(data: AnalyticsAggregateJobData
 }
 
 export async function scheduleWarmupSend(data: WarmupSendJobData): Promise<Job<WarmupSendJobData>> {
+    await checkRedisOnce();
+    if (!redisAvailable) throw new Error(`Queue unavailable: Redis not connected`);
     const queue = getWarmupSendQueue();
     return queue.add('warmup', data, {
         priority: 4,
@@ -239,6 +280,8 @@ export async function scheduleWarmupSend(data: WarmupSendJobData): Promise<Job<W
 }
 
 export async function scheduleAIAnalyze(data: AIAnalyzeJobData): Promise<Job<AIAnalyzeJobData>> {
+    await checkRedisOnce();
+    if (!redisAvailable) throw new Error(`Queue unavailable: Redis not connected`);
     const queue = getAIAnalyzeQueue();
     return queue.add('analyze', data, {
         priority: 5,

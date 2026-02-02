@@ -75,6 +75,11 @@ export function MailboxSwitcher({
         fetchMailboxes();
     }, [fetchMailboxes]);
 
+    const handleMailboxAdded = React.useCallback(() => {
+        onMailboxAdded?.();
+        fetchMailboxes();
+    }, [onMailboxAdded, fetchMailboxes]);
+
     const selectedMailbox = mailboxes.find(m => m.id === selectedMailboxId);
 
     const getStatusColor = (status: string) => {
@@ -97,11 +102,6 @@ export function MailboxSwitcher({
             </div>
         );
     }
-
-    const handleMailboxAdded = React.useCallback(() => {
-        onMailboxAdded?.();
-        fetchMailboxes();
-    }, [onMailboxAdded, fetchMailboxes]);
 
     if (mailboxes.length === 0) {
         return (
