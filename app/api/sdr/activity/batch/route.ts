@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-
-const FIVE_MINUTES_MS = 5 * 60 * 1000;
+import { resolveActivityStatus } from "@/lib/activity/status-resolver";
 
 // ============================================
 // GET /api/sdr/activity/batch?userIds=id1,id2,id3
 // Returns activity status for multiple users in one call (avoids N+1 on team page)
+// Now includes auto-pause logic and richer status information
 // ============================================
 
 export async function GET(request: NextRequest) {
@@ -45,16 +45,30 @@ export async function GET(request: NextRequest) {
             },
         });
 
-        const byUserId: Record<string, { isActive: boolean }> = {};
+        // Build result map with richer status information
+        const byUserId: Record<string, {
+            isActive: boolean;
+            status: string;
+            lastSeenMinutesAgo: number | null;
+        }> = {};
+
+        // Initialize all users as offline
         for (const uid of userIds) {
-            byUserId[uid] = { isActive: false };
+            byUserId[uid] = {
+                isActive: false,
+                status: 'offline',
+                lastSeenMinutesAgo: null,
+            };
         }
-        for (const a of activities) {
-            const isActive =
-                a.currentSessionStartedAt != null &&
-                a.lastActivityAt != null &&
-                now.getTime() - a.lastActivityAt.getTime() < FIVE_MINUTES_MS;
-            byUserId[a.userId] = { isActive };
+
+        // Update with actual activity data
+        for (const activity of activities) {
+            const statusResult = resolveActivityStatus(activity, null, now);
+            byUserId[activity.userId] = {
+                isActive: statusResult.isActive,
+                status: statusResult.displayStatus,
+                lastSeenMinutesAgo: statusResult.lastSeenMinutesAgo,
+            };
         }
 
         return NextResponse.json({ success: true, data: byUserId });

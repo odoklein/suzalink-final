@@ -22,6 +22,10 @@ import {
     Sparkles,
     Briefcase,
     UserMinus,
+    FileText,
+    Plus,
+    X,
+    Eye,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -75,6 +79,25 @@ interface AssignableUser {
     role: string;
 }
 
+interface EmailTemplate {
+    id: string;
+    name: string;
+    subject: string;
+    bodyHtml: string;
+    category: string;
+    variables: string[];
+    createdBy?: {
+        id: string;
+        name: string;
+    };
+}
+
+interface MissionTemplate {
+    id: string;
+    order: number;
+    template: EmailTemplate;
+}
+
 // ============================================
 // CHANNEL CONFIG
 // ============================================
@@ -113,6 +136,17 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
     const [isAssigning, setIsAssigning] = useState(false);
     const [unassigningId, setUnassigningId] = useState<string | null>(null);
     const { position: listMenuPosition, contextData: listMenuData, handleContextMenu: handleListContextMenu, close: closeListMenu } = useContextMenu();
+
+    // Email Templates
+    const [missionTemplates, setMissionTemplates] = useState<MissionTemplate[]>([]);
+    const [availableTemplates, setAvailableTemplates] = useState<EmailTemplate[]>([]);
+    const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
+    const [showAddTemplateModal, setShowAddTemplateModal] = useState(false);
+    const [showPreviewModal, setShowPreviewModal] = useState(false);
+    const [previewTemplate, setPreviewTemplate] = useState<EmailTemplate | null>(null);
+    const [selectedTemplateToAdd, setSelectedTemplateToAdd] = useState<string>("");
+    const [isAddingTemplate, setIsAddingTemplate] = useState(false);
+    const [removingTemplateId, setRemovingTemplateId] = useState<string | null>(null);
 
     // ============================================
     // FETCH MISSION
@@ -174,6 +208,93 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
             }
         } catch (err) {
             console.error("Failed to fetch BDs:", err);
+        }
+    };
+
+    // ============================================
+    // EMAIL TEMPLATES
+    // ============================================
+
+    const fetchMissionTemplates = async () => {
+        if (!mission) return;
+        setIsLoadingTemplates(true);
+        try {
+            const res = await fetch(`/api/missions/${mission.id}/templates`);
+            const json = await res.json();
+            if (json.success) {
+                setMissionTemplates(json.data || []);
+            }
+        } catch (err) {
+            console.error("Failed to fetch mission templates:", err);
+        } finally {
+            setIsLoadingTemplates(false);
+        }
+    };
+
+    const fetchAvailableTemplates = async () => {
+        try {
+            const res = await fetch("/api/email/templates?isShared=true");
+            const json = await res.json();
+            if (json.success) {
+                // Filter out already assigned templates
+                const assignedIds = missionTemplates.map(mt => mt.template.id);
+                const available = (json.data || []).filter((t: EmailTemplate) => !assignedIds.includes(t.id));
+                setAvailableTemplates(available);
+            }
+        } catch (err) {
+            console.error("Failed to fetch available templates:", err);
+        }
+    };
+
+    useEffect(() => {
+        if (mission) {
+            fetchMissionTemplates();
+        }
+    }, [mission?.id]);
+
+    const handleAddTemplate = async () => {
+        if (!mission || !selectedTemplateToAdd) return;
+        setIsAddingTemplate(true);
+        try {
+            const res = await fetch(`/api/missions/${mission.id}/templates`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ templateId: selectedTemplateToAdd }),
+            });
+            const json = await res.json();
+            if (json.success) {
+                success("Template ajouté", "Le template a été assigné à la mission");
+                setShowAddTemplateModal(false);
+                setSelectedTemplateToAdd("");
+                fetchMissionTemplates();
+            } else {
+                showError("Erreur", json.error);
+            }
+        } catch (err) {
+            showError("Erreur", "Impossible d'ajouter le template");
+        } finally {
+            setIsAddingTemplate(false);
+        }
+    };
+
+    const handleRemoveTemplate = async (templateId: string) => {
+        if (!mission) return;
+        setRemovingTemplateId(templateId);
+        try {
+            const res = await fetch(`/api/missions/${mission.id}/templates?templateId=${templateId}`, {
+                method: "DELETE",
+            });
+            const json = await res.json();
+            if (json.success) {
+                success("Template retiré", "Le template a été retiré de la mission");
+                fetchMissionTemplates();
+            } else {
+                showError("Erreur", json.error);
+            }
+        } catch (err) {
+            showError("Erreur", "Impossible de retirer le template");
+        } finally {
+            setRemovingTemplateId(null);
         }
     };
 
@@ -264,16 +385,16 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
 
     const listContextMenuItems = listMenuData
         ? [
-              {
-                  label: "Supprimer",
-                  icon: <Trash2 className="w-4 h-4" />,
-                  onClick: () => {
-                      setListToDelete(listMenuData);
-                      setShowDeleteListModal(true);
-                  },
-                  variant: "danger" as const,
-              },
-          ]
+            {
+                label: "Supprimer",
+                icon: <Trash2 className="w-4 h-4" />,
+                onClick: () => {
+                    setListToDelete(listMenuData);
+                    setShowDeleteListModal(true);
+                },
+                variant: "danger" as const,
+            },
+        ]
         : [];
 
     // ============================================
@@ -719,6 +840,248 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
                     </div>
                 )}
             </div>
+
+            {/* Email Templates Section */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm border-l-4 border-l-indigo-500">
+                <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-100 to-violet-100 flex items-center justify-center">
+                            <Mail className="w-5 h-5 text-indigo-600" />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-semibold text-slate-900">Email Templates</h2>
+                            <p className="text-sm text-slate-500">Templates pour envoi rapide</p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => {
+                            fetchAvailableTemplates();
+                            setShowAddTemplateModal(true);
+                        }}
+                        className="flex items-center gap-2 h-9 px-4 text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
+                    >
+                        <Plus className="w-4 h-4" />
+                        Ajouter
+                    </button>
+                </div>
+
+                {isLoadingTemplates ? (
+                    <div className="flex items-center justify-center py-12">
+                        <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
+                    </div>
+                ) : missionTemplates.length === 0 ? (
+                    <div className="text-center py-12">
+                        <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
+                            <FileText className="w-8 h-8 text-slate-400" />
+                        </div>
+                        <h3 className="text-base font-medium text-slate-900 mb-1">Aucun template</h3>
+                        <p className="text-sm text-slate-500 mb-4">
+                            Ajoutez des templates pour permettre l'envoi rapide d'emails
+                        </p>
+                        <button
+                            onClick={() => {
+                                fetchAvailableTemplates();
+                                setShowAddTemplateModal(true);
+                            }}
+                            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
+                        >
+                            <Plus className="w-4 h-4" />
+                            Ajouter un template
+                        </button>
+                    </div>
+                ) : (
+                    <div className="grid gap-3">
+                        {missionTemplates.map((mt) => (
+                            <div
+                                key={mt.id}
+                                className="group flex items-center gap-4 p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-all"
+                            >
+                                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center flex-shrink-0">
+                                    <Sparkles className="w-6 h-6 text-white" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <p className="font-medium text-slate-900 truncate">{mt.template.name}</p>
+                                        <span className="px-2 py-0.5 text-xs font-medium text-indigo-600 bg-indigo-100 rounded-full">
+                                            {mt.template.category}
+                                        </span>
+                                    </div>
+                                    <p className="text-sm text-slate-500 truncate">{mt.template.subject}</p>
+                                </div>
+                                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button
+                                        onClick={() => {
+                                            setPreviewTemplate(mt.template);
+                                            setShowPreviewModal(true);
+                                        }}
+                                        className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                                        title="Prévisualiser"
+                                    >
+                                        <Eye className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                        onClick={() => handleRemoveTemplate(mt.template.id)}
+                                        disabled={removingTemplateId === mt.template.id}
+                                        className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                                        title="Retirer"
+                                    >
+                                        {removingTemplateId === mt.template.id ? (
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                            <X className="w-4 h-4" />
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Add Template Modal */}
+            {showAddTemplateModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setShowAddTemplateModal(false)} />
+                    <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-600 to-violet-600">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                                    <FileText className="w-5 h-5 text-white" />
+                                </div>
+                                <h2 className="text-lg font-semibold text-white">Ajouter un template</h2>
+                            </div>
+                            <button
+                                onClick={() => setShowAddTemplateModal(false)}
+                                className="p-2 rounded-lg hover:bg-white/20 text-white transition-colors"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="p-6 max-h-[60vh] overflow-y-auto">
+                            {availableTemplates.length === 0 ? (
+                                <div className="text-center py-8">
+                                    <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                                    <p className="text-slate-600 mb-2">Aucun template disponible</p>
+                                    <p className="text-sm text-slate-500">
+                                        Créez des templates partagés dans la section Email
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {availableTemplates.map((template) => (
+                                        <button
+                                            key={template.id}
+                                            onClick={() => setSelectedTemplateToAdd(template.id)}
+                                            className={`w-full flex items-center gap-4 p-4 rounded-xl border text-left transition-all ${selectedTemplateToAdd === template.id
+                                                    ? "border-indigo-500 bg-indigo-50 ring-2 ring-indigo-500/20"
+                                                    : "border-slate-200 hover:border-indigo-300 hover:bg-slate-50"
+                                                }`}
+                                        >
+                                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${selectedTemplateToAdd === template.id
+                                                    ? "bg-indigo-500 text-white"
+                                                    : "bg-slate-100 text-slate-500"
+                                                }`}>
+                                                <Sparkles className="w-5 h-5" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="font-medium text-slate-900 truncate">{template.name}</p>
+                                                <p className="text-sm text-slate-500 truncate">{template.subject}</p>
+                                            </div>
+                                            <span className="px-2 py-0.5 text-xs font-medium text-slate-600 bg-slate-100 rounded-full flex-shrink-0">
+                                                {template.category}
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50">
+                            <button
+                                onClick={() => setShowAddTemplateModal(false)}
+                                className="px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-200 rounded-lg transition-colors"
+                            >
+                                Annuler
+                            </button>
+                            <button
+                                onClick={handleAddTemplate}
+                                disabled={!selectedTemplateToAdd || isAddingTemplate}
+                                className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 rounded-lg disabled:opacity-50 transition-all"
+                            >
+                                {isAddingTemplate ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        Ajout...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Plus className="w-4 h-4" />
+                                        Ajouter
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Template Preview Modal */}
+            {showPreviewModal && previewTemplate && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setShowPreviewModal(false)} />
+                    <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden max-h-[85vh] flex flex-col">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-600 to-violet-600 flex-shrink-0">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                                    <Eye className="w-5 h-5 text-white" />
+                                </div>
+                                <div>
+                                    <h2 className="text-lg font-semibold text-white">{previewTemplate.name}</h2>
+                                    <p className="text-sm text-white/80">{previewTemplate.category}</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setShowPreviewModal(false)}
+                                className="p-2 rounded-lg hover:bg-white/20 text-white transition-colors"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-6">
+                            <div className="mb-4">
+                                <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Objet</label>
+                                <p className="mt-1 text-lg font-medium text-slate-900">{previewTemplate.subject}</p>
+                            </div>
+                            {previewTemplate.variables.length > 0 && (
+                                <div className="mb-4">
+                                    <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Variables</label>
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                        {previewTemplate.variables.map((v) => (
+                                            <span key={v} className="px-2 py-1 text-xs font-medium text-indigo-700 bg-indigo-100 rounded-md">
+                                                {`{{${v}}}`}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            <div>
+                                <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Contenu</label>
+                                <div
+                                    className="mt-2 p-4 bg-slate-50 rounded-xl border border-slate-200 prose prose-sm max-w-none"
+                                    dangerouslySetInnerHTML={{ __html: previewTemplate.bodyHtml }}
+                                />
+                            </div>
+                        </div>
+                        <div className="flex justify-end px-6 py-4 border-t border-slate-200 bg-slate-50 flex-shrink-0">
+                            <button
+                                onClick={() => setShowPreviewModal(false)}
+                                className="px-4 py-2.5 text-sm font-medium text-slate-700 bg-slate-200 hover:bg-slate-300 rounded-lg transition-colors"
+                            >
+                                Fermer
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Delete Confirmation Modal */}
             <ConfirmModal

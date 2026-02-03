@@ -416,6 +416,9 @@ model Mission {
   prospectProfiles    ProspectProfile[]
   prospectSources     ProspectSource[]
   
+  // Mission Email Templates
+  emailTemplates      MissionEmailTemplate[]
+  
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -846,12 +849,17 @@ model CrmActivityDay {
   currentSessionStartedAt DateTime?
   lastActivityAt          DateTime?
   
+  // Session analytics
+  sessionCount            Int       @default(0)  // Number of sessions started today
+  longestSessionSeconds   Int       @default(0)  // Longest single session duration
+  
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
   
   @@unique([userId, date])
   @@index([userId])
   @@index([date])
+  @@index([date, totalActiveSeconds])  // For leaderboards and analytics
 }
 
 // ============================================
@@ -1428,12 +1436,37 @@ model EmailTemplate {
   useCount      Int       @default(0)
   lastUsedAt    DateTime?
   
+  // Mission assignments
+  missionTemplates  MissionEmailTemplate[]
+  
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   
   @@index([createdById])
   @@index([category])
   @@index([isShared])
+}
+
+// ============================================
+// MISSION EMAIL TEMPLATES (Junction Table)
+// Links email templates to missions for quick-send
+// ============================================
+
+model MissionEmailTemplate {
+  id          String        @id @default(cuid())
+  missionId   String
+  mission     Mission       @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  templateId  String
+  template    EmailTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  
+  // Display order in mission
+  order       Int           @default(0)
+  
+  createdAt   DateTime      @default(now())
+  
+  @@unique([missionId, templateId])
+  @@index([missionId])
+  @@index([templateId])
 }
 
 // ============================================

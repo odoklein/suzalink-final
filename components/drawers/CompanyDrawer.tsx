@@ -25,6 +25,7 @@ import {
     Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { QuickEmailModal } from "@/components/email/QuickEmailModal";
 
 // ============================================
 // TYPES
@@ -49,6 +50,7 @@ interface Company {
     country: string | null;
     website: string | null;
     size: string | null;
+    phone: string | null;
     status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
     contacts: Contact[];
     _count: {
@@ -103,6 +105,7 @@ export function CompanyDrawer({
         country: "",
         website: "",
         size: "",
+        phone: "",
     });
     const [actions, setActions] = useState<Array<{ id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string } }>>([]);
     const [actionsLoading, setActionsLoading] = useState(false);
@@ -115,6 +118,8 @@ export function CompanyDrawer({
     const [newActionNote, setNewActionNote] = useState("");
     const [newActionSaving, setNewActionSaving] = useState(false);
     const [newCallbackDateValue, setNewCallbackDateValue] = useState("");
+    const [showQuickEmailModal, setShowQuickEmailModal] = useState(false);
+    const [missionName, setMissionName] = useState<string>("");
 
     const effectiveMissionId = company?.missionId ?? resolvedMissionId ?? undefined;
 
@@ -159,6 +164,24 @@ export function CompanyDrawer({
             .finally(() => setCampaignsLoading(false));
     }, [effectiveMissionId, isCreating]);
 
+    // Fetch mission name for QuickEmailModal
+    useEffect(() => {
+        if (!effectiveMissionId || isCreating) {
+            setMissionName("");
+            return;
+        }
+        fetch(`/api/missions/${effectiveMissionId}`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data?.name) {
+                    setMissionName(json.data.name);
+                } else {
+                    setMissionName("");
+                }
+            })
+            .catch(() => setMissionName(""));
+    }, [effectiveMissionId, isCreating]);
+
     // Fetch actions history when drawer opens with a company
     useEffect(() => {
         if (!isOpen || isCreating || !company?.id) {
@@ -199,6 +222,7 @@ export function CompanyDrawer({
                 country: "",
                 website: "",
                 size: "",
+                phone: "",
             });
             setIsEditing(true);
         } else if (company) {
@@ -211,6 +235,7 @@ export function CompanyDrawer({
                     country: company.country || "",
                     website: company.website || "",
                     size: company.size || "",
+                    phone: company.phone || "",
                 });
                 setIsEditing(false);
             }
@@ -301,6 +326,45 @@ export function CompanyDrawer({
         success("Copié", `${label} copié dans le presse-papier`);
     };
 
+    const recordAction = async (result: string, note?: string, callbackDate?: string) => {
+        const campaignId = campaigns[0]?.id;
+        if (!company || !campaignId) return false;
+        const selectedCampaign = campaigns[0];
+        const channel = (selectedCampaign?.mission?.channel ?? "CALL") as "CALL" | "EMAIL" | "LINKEDIN";
+        const res = await fetch("/api/actions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                companyId: company.id,
+                campaignId,
+                channel: result === "ENVOIE_MAIL" ? "EMAIL" : channel,
+                result,
+                note: note || undefined,
+                callbackDate: callbackDate || undefined,
+            }),
+        });
+        const json = await res.json();
+        if (json.success) {
+            success("Action enregistrée", "L'action a été ajoutée à l'historique");
+            setNewActionNote("");
+            setNewActionResult("");
+            setNewCallbackDateValue("");
+            setActions((prev) => [
+                {
+                    id: json.data.id,
+                    result: json.data.result,
+                    note: json.data.note ?? null,
+                    createdAt: json.data.createdAt,
+                    campaign: json.data.campaign,
+                },
+                ...prev,
+            ]);
+            return true;
+        }
+        showError("Erreur", json.error || "Impossible d'enregistrer l'action");
+        return false;
+    };
+
     const handleAddAction = async () => {
         const campaignId = campaigns[0]?.id;
         if (!company || !campaignId) {
@@ -311,54 +375,34 @@ export function CompanyDrawer({
             showError("Erreur", "Sélectionnez un résultat");
             return;
         }
-        const noteRequired = ["INTERESTED", "CALLBACK_REQUESTED", "ENVOIE_MAIL"].includes(newActionResult);
+        if (newActionResult === "ENVOIE_MAIL") {
+            setShowQuickEmailModal(true);
+            return;
+        }
+        const noteRequired = ["INTERESTED", "CALLBACK_REQUESTED"].includes(newActionResult);
         if (noteRequired && !newActionNote.trim()) {
             showError("Erreur", "Une note est requise pour ce résultat");
             return;
         }
         setNewActionSaving(true);
         try {
-            const selectedCampaign = campaigns[0];
-            const channel = (selectedCampaign?.mission?.channel ?? "CALL") as "CALL" | "EMAIL" | "LINKEDIN";
-            const res = await fetch("/api/actions", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    companyId: company.id,
-                    campaignId,
-                    channel,
-                    result: newActionResult,
-                    note: newActionNote.trim() || undefined,
-                    callbackDate:
-                        newActionResult === "CALLBACK_REQUESTED" && newCallbackDateValue
-                            ? new Date(newCallbackDateValue).toISOString()
-                            : undefined,
-                }),
-            });
-            const json = await res.json();
-            if (json.success) {
-                success("Action enregistrée", "L'action a été ajoutée à l'historique");
-                setNewActionNote("");
-                setNewActionResult("");
-                setNewCallbackDateValue("");
-                setActions((prev) => [
-                    {
-                        id: json.data.id,
-                        result: json.data.result,
-                        note: json.data.note ?? null,
-                        createdAt: json.data.createdAt,
-                        campaign: json.data.campaign,
-                    },
-                    ...prev,
-                ]);
-            } else {
-                showError("Erreur", json.error || "Impossible d'enregistrer l'action");
-            }
+            await recordAction(
+                newActionResult,
+                newActionNote.trim() || undefined,
+                newActionResult === "CALLBACK_REQUESTED" && newCallbackDateValue
+                    ? new Date(newCallbackDateValue).toISOString()
+                    : undefined
+            );
         } catch {
             showError("Erreur", "Impossible d'enregistrer l'action");
         } finally {
             setNewActionSaving(false);
         }
+    };
+
+    const handleEmailSent = () => {
+        recordAction("ENVOIE_MAIL", "Email envoyé via template");
+        setShowQuickEmailModal(false);
     };
 
     if (!isCreating && !company) return null;
@@ -416,7 +460,7 @@ export function CompanyDrawer({
         >
             <div className="space-y-6">
                 {/* Status Badge */}
-                {!isEditing && !isCreating && statusConfig && (
+                {!isEditing && !isCreating && statusConfig && StatusIcon && (
                     <div className={cn(
                         "inline-flex items-center gap-2 px-3 py-1.5 rounded-full",
                         statusConfig.bg,
@@ -457,6 +501,13 @@ export function CompanyDrawer({
                                 value={formData.website}
                                 onChange={(e) => setFormData(prev => ({ ...prev, website: e.target.value }))}
                                 icon={<Globe className="w-4 h-4 text-slate-400" />}
+                            />
+                            <Input
+                                label="Téléphone"
+                                value={formData.phone}
+                                onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                                placeholder="Numéro de téléphone principal"
+                                icon={<Phone className="w-4 h-4 text-slate-400" />}
                             />
                             <Input
                                 label="Taille"
@@ -511,6 +562,28 @@ export function CompanyDrawer({
                                 icon={<Globe className="w-5 h-5 text-indigo-500" />}
                             />
                             <DrawerField
+                                label="Téléphone"
+                                value={
+                                    company!.phone && (
+                                        <div className="flex items-center gap-2">
+                                            <a
+                                                href={`tel:${company!.phone}`}
+                                                className="text-indigo-600 hover:underline font-medium"
+                                            >
+                                                {company!.phone}
+                                            </a>
+                                            <button
+                                                onClick={() => copyToClipboard(company!.phone!, "Téléphone")}
+                                                className="text-slate-400 hover:text-slate-600"
+                                            >
+                                                <Copy className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    )
+                                }
+                                icon={<Phone className="w-5 h-5 text-emerald-500" />}
+                            />
+                            <DrawerField
                                 label="Taille"
                                 value={company!.size}
                                 icon={<Users className="w-5 h-5 text-indigo-500" />}
@@ -518,6 +591,19 @@ export function CompanyDrawer({
                         </div>
                     ) : null}
                 </DrawerSection>
+
+                {/* Quick Call Action - Show prominent call button if company has phone */}
+                {!isEditing && !isCreating && company && company.phone && (
+                    <div className="-mt-2">
+                        <a
+                            href={`tel:${company.phone}`}
+                            className="flex items-center justify-center gap-3 px-6 py-4 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white rounded-xl font-semibold text-base shadow-lg shadow-emerald-500/25 transition-all hover:shadow-xl hover:shadow-emerald-500/30 hover:scale-[1.02]"
+                        >
+                            <Phone className="w-5 h-5" />
+                            Appeler {company.name}
+                        </a>
+                    </div>
+                )}
 
                 {/* Contacts List */}
                 {!isEditing && !isCreating && company && (
@@ -618,6 +704,27 @@ export function CompanyDrawer({
                                     value={newActionResult}
                                     onChange={setNewActionResult}
                                 />
+                                {/* Envoie mail: ouvrir l'envoi par template */}
+                                {newActionResult === "ENVOIE_MAIL" && (
+                                    <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Mail className="w-5 h-5 text-indigo-600" />
+                                            <span className="text-sm font-medium text-slate-900">Envoyer un email avec template</span>
+                                        </div>
+                                        <p className="text-xs text-slate-600 mb-3">
+                                            Choisissez un template et envoyez l&apos;email à un contact de la société.
+                                        </p>
+                                        <Button
+                                            type="button"
+                                            variant="primary"
+                                            onClick={() => setShowQuickEmailModal(true)}
+                                            className="gap-2"
+                                        >
+                                            <Mail className="w-4 h-4" />
+                                            Envoyer avec template
+                                        </Button>
+                                    </div>
+                                )}
                                 {/* Rappel demandé: date de rappel */}
                                 {newActionResult === "CALLBACK_REQUESTED" && (
                                     <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
@@ -637,35 +744,62 @@ export function CompanyDrawer({
                                         </p>
                                     </div>
                                 )}
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Note</label>
-                                    <textarea
-                                        value={newActionNote}
-                                        onChange={(e) => setNewActionNote(e.target.value)}
-                                        placeholder="Ajouter une note (requise pour Intéressé / Rappel demandé / Envoie mail)..."
-                                        rows={3}
-                                        maxLength={500}
-                                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-                                    />
-                                    <p className="text-xs text-slate-400 mt-1 text-right">{newActionNote.length}/500</p>
-                                </div>
-                                <Button
-                                    type="button"
-                                    variant="primary"
-                                    onClick={handleAddAction}
-                                    disabled={
-                                        newActionSaving ||
-                                        !newActionResult ||
-                                        (["INTERESTED", "CALLBACK_REQUESTED", "ENVOIE_MAIL"].includes(newActionResult) && !newActionNote.trim())
-                                    }
-                                    isLoading={newActionSaving}
-                                >
-                                    Enregistrer l'action
-                                </Button>
+                                {newActionResult !== "ENVOIE_MAIL" && (
+                                    <>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Note</label>
+                                            <textarea
+                                                value={newActionNote}
+                                                onChange={(e) => setNewActionNote(e.target.value)}
+                                                placeholder="Ajouter une note (requise pour Intéressé / Rappel demandé)..."
+                                                rows={3}
+                                                maxLength={500}
+                                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                                            />
+                                            <p className="text-xs text-slate-400 mt-1 text-right">{newActionNote.length}/500</p>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            variant="primary"
+                                            onClick={handleAddAction}
+                                            disabled={
+                                                newActionSaving ||
+                                                !newActionResult ||
+                                                (["INTERESTED", "CALLBACK_REQUESTED"].includes(newActionResult) && !newActionNote.trim())
+                                            }
+                                            isLoading={newActionSaving}
+                                        >
+                                            Enregistrer l&apos;action
+                                        </Button>
+                                    </>
+                                )}
                             </div>
                         )}
                     </DrawerSection>
                 )}
+
+                {/* Quick Email Modal (ENVOIE_MAIL) */}
+                {!isCreating && company && (() => {
+                    const firstContactWithEmail = company.contacts?.find((c) => c.email);
+                    return (
+                        <QuickEmailModal
+                            isOpen={showQuickEmailModal}
+                            onClose={() => setShowQuickEmailModal(false)}
+                            onSent={handleEmailSent}
+                            company={{ id: company.id, name: company.name, phone: undefined }}
+                            contact={firstContactWithEmail ? {
+                                id: firstContactWithEmail.id,
+                                firstName: firstContactWithEmail.firstName,
+                                lastName: firstContactWithEmail.lastName,
+                                email: firstContactWithEmail.email,
+                                title: firstContactWithEmail.title,
+                                company: { id: company.id, name: company.name },
+                            } : undefined}
+                            missionId={effectiveMissionId ?? undefined}
+                            missionName={missionName || undefined}
+                        />
+                    );
+                })()}
 
                 {/* Historique des actions (result + note) */}
                 {!isEditing && !isCreating && company && (

@@ -101,8 +101,10 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
         return errorResponse('L\'heure de début doit être avant l\'heure de fin', 400);
     }
 
-    const blockDate = new Date(data.date);
-    blockDate.setHours(0, 0, 0, 0);
+    // Parse date in local timezone to prevent day shifting
+    // Input format: "YYYY-MM-DD"
+    const [year, month, day] = data.date.split('-').map(Number);
+    const blockDate = new Date(year, month - 1, day, 0, 0, 0, 0);
 
     // Check for overlapping blocks
     const overlapping = await prisma.scheduleBlock.findFirst({

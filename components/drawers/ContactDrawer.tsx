@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BookingModal } from "@/components/sdr/BookingModal";
+import { QuickEmailModal } from "@/components/email/QuickEmailModal";
 
 // ============================================
 // TYPES
@@ -41,6 +42,7 @@ interface Contact {
     status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
     companyId: string;
     companyName?: string;
+    companyPhone?: string | null;
     missionId?: string;
 }
 
@@ -107,6 +109,8 @@ export function ContactDrawer({
     const [clientBookingUrl, setClientBookingUrl] = useState<string>("");
     const [showBookingModal, setShowBookingModal] = useState(false);
     const [newCallbackDateValue, setNewCallbackDateValue] = useState("");
+    const [showQuickEmailModal, setShowQuickEmailModal] = useState(false);
+    const [missionName, setMissionName] = useState<string>("");
 
     const effectiveMissionId = contact?.missionId ?? resolvedMissionId ?? undefined;
 
@@ -151,22 +155,28 @@ export function ContactDrawer({
             .finally(() => setCampaignsLoading(false));
     }, [effectiveMissionId, isCreating]);
 
-    // Fetch client booking URL for mission (for MEETING_BOOKED)
+    // Fetch client booking URL and mission name (for MEETING_BOOKED and QuickEmailModal)
     useEffect(() => {
         if (!effectiveMissionId || isCreating) {
             setClientBookingUrl("");
+            setMissionName("");
             return;
         }
         fetch(`/api/missions/${effectiveMissionId}`)
             .then((res) => res.json())
             .then((json) => {
-                if (json.success && json.data?.client?.bookingUrl) {
-                    setClientBookingUrl(json.data.client.bookingUrl);
+                if (json.success && json.data) {
+                    setClientBookingUrl(json.data.client?.bookingUrl ?? "");
+                    setMissionName(json.data.name ?? "");
                 } else {
                     setClientBookingUrl("");
+                    setMissionName("");
                 }
             })
-            .catch(() => setClientBookingUrl(""));
+            .catch(() => {
+                setClientBookingUrl("");
+                setMissionName("");
+            });
     }, [effectiveMissionId, isCreating]);
 
     // Fetch actions history when drawer opens with a contact
@@ -323,6 +333,45 @@ export function ContactDrawer({
         success("Copié", `${label} copié dans le presse-papier`);
     };
 
+    const recordAction = async (result: string, note?: string, callbackDate?: string) => {
+        const campaignId = campaigns[0]?.id;
+        if (!contact || !campaignId) return false;
+        const selectedCampaign = campaigns[0];
+        const channel = (selectedCampaign?.mission?.channel ?? "CALL") as "CALL" | "EMAIL" | "LINKEDIN";
+        const res = await fetch("/api/actions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                contactId: contact.id,
+                campaignId,
+                channel: result === "ENVOIE_MAIL" ? "EMAIL" : channel,
+                result,
+                note: note || undefined,
+                callbackDate: callbackDate || undefined,
+            }),
+        });
+        const json = await res.json();
+        if (json.success) {
+            success("Action enregistrée", "L'action a été ajoutée à l'historique");
+            setNewActionNote("");
+            setNewActionResult("");
+            setNewCallbackDateValue("");
+            setActions((prev) => [
+                {
+                    id: json.data.id,
+                    result: json.data.result,
+                    note: json.data.note ?? null,
+                    createdAt: json.data.createdAt,
+                    campaign: json.data.campaign,
+                },
+                ...prev,
+            ]);
+            return true;
+        }
+        showError("Erreur", json.error || "Impossible d'enregistrer l'action");
+        return false;
+    };
+
     const handleAddAction = async () => {
         const campaignId = campaigns[0]?.id;
         if (!contact || !campaignId) {
@@ -333,54 +382,34 @@ export function ContactDrawer({
             showError("Erreur", "Sélectionnez un résultat");
             return;
         }
-        const noteRequired = ["INTERESTED", "CALLBACK_REQUESTED", "ENVOIE_MAIL"].includes(newActionResult);
+        if (newActionResult === "ENVOIE_MAIL") {
+            setShowQuickEmailModal(true);
+            return;
+        }
+        const noteRequired = ["INTERESTED", "CALLBACK_REQUESTED"].includes(newActionResult);
         if (noteRequired && !newActionNote.trim()) {
             showError("Erreur", "Une note est requise pour ce résultat");
             return;
         }
         setNewActionSaving(true);
         try {
-            const selectedCampaign = campaigns[0];
-            const channel = (selectedCampaign?.mission?.channel ?? "CALL") as "CALL" | "EMAIL" | "LINKEDIN";
-            const res = await fetch("/api/actions", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    contactId: contact.id,
-                    campaignId,
-                    channel,
-                    result: newActionResult,
-                    note: newActionNote.trim() || undefined,
-                    callbackDate:
-                        newActionResult === "CALLBACK_REQUESTED" && newCallbackDateValue
-                            ? new Date(newCallbackDateValue).toISOString()
-                            : undefined,
-                }),
-            });
-            const json = await res.json();
-            if (json.success) {
-                success("Action enregistrée", "L'action a été ajoutée à l'historique");
-                setNewActionNote("");
-                setNewActionResult("");
-                setNewCallbackDateValue("");
-                setActions((prev) => [
-                    {
-                        id: json.data.id,
-                        result: json.data.result,
-                        note: json.data.note ?? null,
-                        createdAt: json.data.createdAt,
-                        campaign: json.data.campaign,
-                    },
-                    ...prev,
-                ]);
-            } else {
-                showError("Erreur", json.error || "Impossible d'enregistrer l'action");
-            }
+            await recordAction(
+                newActionResult,
+                newActionNote.trim() || undefined,
+                newActionResult === "CALLBACK_REQUESTED" && newCallbackDateValue
+                    ? new Date(newCallbackDateValue).toISOString()
+                    : undefined
+            );
         } catch {
             showError("Erreur", "Impossible d'enregistrer l'action");
         } finally {
             setNewActionSaving(false);
         }
+    };
+
+    const handleEmailSent = () => {
+        recordAction("ENVOIE_MAIL", "Email envoyé via template");
+        setShowQuickEmailModal(false);
     };
 
     if (!isCreating && !contact) return null;
@@ -439,7 +468,7 @@ export function ContactDrawer({
         >
             <div className="space-y-6">
                 {/* Avatar & Status */}
-                {!isEditing && !isCreating && (
+                {!isEditing && !isCreating && StatusIcon && (
                     <div className="flex items-center gap-4">
                         <div className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-100 to-emerald-200 flex items-center justify-center text-2xl font-bold text-emerald-600">
                             {(contact!.firstName?.[0] || contact!.lastName?.[0] || "?").toUpperCase()}
@@ -464,27 +493,49 @@ export function ContactDrawer({
                 )}
 
                 {/* Quick Actions */}
-                {!isEditing && !isCreating && contact && (contact.email || contact.phone) && (
-                    <div className="flex items-center gap-2">
-                        {contact.email && (
+                {!isEditing && !isCreating && contact && (
+                    <>
+                        {/* Primary Call Button - Contact or Company Phone */}
+                        {(contact.phone || contact.companyPhone) && (
                             <a
-                                href={`mailto:${contact.email}`}
-                                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-50 text-indigo-600 rounded-xl font-medium text-sm hover:bg-indigo-100 transition-colors"
+                                href={`tel:${contact.phone || contact.companyPhone}`}
+                                className="flex items-center justify-center gap-3 px-6 py-4 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white rounded-xl font-semibold text-base shadow-lg shadow-emerald-500/25 transition-all hover:shadow-xl hover:shadow-emerald-500/30 hover:scale-[1.02]"
                             >
-                                <Send className="w-4 h-4" />
-                                Envoyer un email
+                                <PhoneCall className="w-5 h-5" />
+                                {contact.phone ? (
+                                    <span>Appeler {contact.firstName || 'le contact'}</span>
+                                ) : (
+                                    <span>Appeler {contact.companyName || 'la société'}</span>
+                                )}
                             </a>
                         )}
-                        {contact.phone && (
-                            <a
-                                href={`tel:${contact.phone}`}
-                                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-50 text-emerald-600 rounded-xl font-medium text-sm hover:bg-emerald-100 transition-colors"
-                            >
-                                <PhoneCall className="w-4 h-4" />
-                                Appeler
-                            </a>
+
+                        {/* Secondary Actions */}
+                        {(contact.email || contact.linkedin) && (
+                            <div className="flex items-center gap-2">
+                                {contact.email && (
+                                    <a
+                                        href={`mailto:${contact.email}`}
+                                        className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-indigo-50 text-indigo-600 rounded-xl font-medium text-sm hover:bg-indigo-100 transition-colors"
+                                    >
+                                        <Send className="w-4 h-4" />
+                                        Email
+                                    </a>
+                                )}
+                                {contact.linkedin && (
+                                    <a
+                                        href={contact.linkedin.startsWith("http") ? contact.linkedin : `https://${contact.linkedin}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-50 text-blue-600 rounded-xl font-medium text-sm hover:bg-blue-100 transition-colors"
+                                    >
+                                        <Linkedin className="w-4 h-4" />
+                                        LinkedIn
+                                    </a>
+                                )}
+                            </div>
                         )}
-                    </div>
+                    </>
                 )}
 
                 {/* Contact Info */}
@@ -589,24 +640,47 @@ export function ContactDrawer({
                             <DrawerField
                                 label="Téléphone"
                                 value={
-                                    contact.phone && (
-                                        <div className="flex items-center gap-2">
-                                            <a
-                                                href={`tel:${contact.phone}`}
-                                                className="text-slate-600"
-                                            >
-                                                {contact.phone}
-                                            </a>
-                                            <button
-                                                onClick={() => copyToClipboard(contact.phone!, "Téléphone")}
-                                                className="text-slate-400 hover:text-slate-600"
-                                            >
-                                                <Copy className="w-3.5 h-3.5" />
-                                            </button>
+                                    (contact.phone || contact.companyPhone) && (
+                                        <div className="space-y-2">
+                                            {contact.phone && (
+                                                <div className="flex items-center gap-2">
+                                                    <a
+                                                        href={`tel:${contact.phone}`}
+                                                        className="text-emerald-600 hover:underline font-medium"
+                                                    >
+                                                        {contact.phone}
+                                                    </a>
+                                                    <button
+                                                        onClick={() => copyToClipboard(contact.phone!, "Téléphone")}
+                                                        className="text-slate-400 hover:text-slate-600"
+                                                    >
+                                                        <Copy className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {!contact.phone && contact.companyPhone && (
+                                                <div className="flex items-center gap-2">
+                                                    <a
+                                                        href={`tel:${contact.companyPhone}`}
+                                                        className="text-slate-600 hover:underline"
+                                                    >
+                                                        {contact.companyPhone}
+                                                    </a>
+                                                    <span className="text-xs text-slate-400 px-2 py-0.5 bg-slate-100 rounded">
+                                                        Société
+                                                    </span>
+                                                    <button
+                                                        onClick={() => copyToClipboard(contact.companyPhone!, "Téléphone")}
+                                                        className="text-slate-400 hover:text-slate-600"
+                                                    >
+                                                        <Copy className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
                                     )
                                 }
-                                icon={<Phone className="w-5 h-5 text-indigo-500" />}
+                                icon={<Phone className="w-5 h-5 text-emerald-500" />}
                             />
                             <DrawerField
                                 label="LinkedIn"
@@ -691,6 +765,27 @@ export function ContactDrawer({
                                         </Button>
                                     </div>
                                 )}
+                                {/* Envoie mail: ouvrir l'envoi par template */}
+                                {newActionResult === "ENVOIE_MAIL" && (
+                                    <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Send className="w-5 h-5 text-indigo-600" />
+                                            <span className="text-sm font-medium text-slate-900">Envoyer un email avec template</span>
+                                        </div>
+                                        <p className="text-xs text-slate-600 mb-3">
+                                            Choisissez un template et envoyez l&apos;email directement depuis cette fiche.
+                                        </p>
+                                        <Button
+                                            type="button"
+                                            variant="primary"
+                                            onClick={() => setShowQuickEmailModal(true)}
+                                            className="gap-2"
+                                        >
+                                            <Send className="w-4 h-4" />
+                                            Envoyer avec template
+                                        </Button>
+                                    </div>
+                                )}
                                 {/* Rappel demandé: date de rappel */}
                                 {newActionResult === "CALLBACK_REQUESTED" && (
                                     <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
@@ -710,34 +805,57 @@ export function ContactDrawer({
                                         </p>
                                     </div>
                                 )}
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Note</label>
-                                    <textarea
-                                        value={newActionNote}
-                                        onChange={(e) => setNewActionNote(e.target.value)}
-                                        placeholder="Ajouter une note (requise pour Intéressé / Rappel demandé / Envoie mail)..."
-                                        rows={3}
-                                        maxLength={500}
-                                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-                                    />
-                                    <p className="text-xs text-slate-400 mt-1 text-right">{newActionNote.length}/500</p>
-                                </div>
-                                <Button
-                                    type="button"
-                                    variant="primary"
-                                    onClick={handleAddAction}
-                                    disabled={
-                                        newActionSaving ||
-                                        !newActionResult ||
-                                        (["INTERESTED", "CALLBACK_REQUESTED", "ENVOIE_MAIL"].includes(newActionResult) && !newActionNote.trim())
-                                    }
-                                    isLoading={newActionSaving}
-                                >
-                                    Enregistrer l'action
-                                </Button>
+                                {newActionResult !== "ENVOIE_MAIL" && (
+                                    <>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Note</label>
+                                            <textarea
+                                                value={newActionNote}
+                                                onChange={(e) => setNewActionNote(e.target.value)}
+                                                placeholder="Ajouter une note (requise pour Intéressé / Rappel demandé)..."
+                                                rows={3}
+                                                maxLength={500}
+                                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                                            />
+                                            <p className="text-xs text-slate-400 mt-1 text-right">{newActionNote.length}/500</p>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            variant="primary"
+                                            onClick={handleAddAction}
+                                            disabled={
+                                                newActionSaving ||
+                                                !newActionResult ||
+                                                (["INTERESTED", "CALLBACK_REQUESTED"].includes(newActionResult) && !newActionNote.trim())
+                                            }
+                                            isLoading={newActionSaving}
+                                        >
+                                            Enregistrer l&apos;action
+                                        </Button>
+                                    </>
+                                )}
                             </div>
                         )}
                     </DrawerSection>
+                )}
+
+                {/* Quick Email Modal (ENVOIE_MAIL) */}
+                {!isCreating && contact && (
+                    <QuickEmailModal
+                        isOpen={showQuickEmailModal}
+                        onClose={() => setShowQuickEmailModal(false)}
+                        onSent={handleEmailSent}
+                        contact={{
+                            id: contact.id,
+                            firstName: contact.firstName,
+                            lastName: contact.lastName,
+                            email: contact.email,
+                            title: contact.title,
+                            company: contact.companyId && contact.companyName ? { id: contact.companyId, name: contact.companyName } : undefined,
+                        }}
+                        missionId={effectiveMissionId ?? undefined}
+                        missionName={missionName || undefined}
+                    />
                 )}
 
                 {/* Booking modal (MEETING_BOOKED) */}

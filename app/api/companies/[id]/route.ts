@@ -19,6 +19,7 @@ const updateCompanySchema = z.object({
     country: z.string().optional().nullable(),
     website: z.string().optional().nullable(),
     size: z.string().optional().nullable(),
+    phone: z.string().optional().nullable(),
 });
 
 // ============================================
@@ -94,6 +95,7 @@ export const PUT = withErrorHandler(async (
             country: data.country ?? company.country,
             website: data.website ?? company.website,
             size: data.size ?? company.size,
+            phone: data.phone ?? company.phone,
         },
         include: {
             contacts: true,

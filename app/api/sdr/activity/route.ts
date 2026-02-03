@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { pauseSession } from "@/lib/activity/session-manager";
+import { resolveActivityStatus, shouldAutoPause } from "@/lib/activity/status-resolver";
 
 // ============================================
 // GET /api/sdr/activity - Get activity status
@@ -33,6 +35,7 @@ export async function GET(request: NextRequest) {
         const userId = targetUserId || session.user.id;
         const today = new Date();
         today.setHours(0, 0, 0, 0);
+        const now = new Date();
 
         // Get or create today's activity record
         let activity = await prisma.crmActivityDay.findUnique({
@@ -52,43 +55,41 @@ export async function GET(request: NextRequest) {
                     totalActiveSeconds: 0,
                     currentSessionStartedAt: null,
                     lastActivityAt: null,
+                    sessionCount: 0,
+                    longestSessionSeconds: 0,
                 },
             });
         }
 
-        // Auto-pause check: if session is active but lastActivityAt is > 5 min ago, pause it
-        const now = new Date();
-        const FIVE_MINUTES_MS = 5 * 60 * 1000;
+        // Auto-pause check: if session is active but should be paused
+        if (activity && shouldAutoPause(activity, now)) {
+            console.log(`[GET Activity] Auto-pausing session for user ${userId}`);
+            const pauseResult = await pauseSession(userId);
 
-        if (activity.currentSessionStartedAt && activity.lastActivityAt) {
-            const timeSinceLastActivity = now.getTime() - activity.lastActivityAt.getTime();
-            
-            if (timeSinceLastActivity >= FIVE_MINUTES_MS) {
-                // Auto-pause: add elapsed time to total
-                const sessionDuration = activity.lastActivityAt.getTime() - activity.currentSessionStartedAt.getTime();
-                const sessionSeconds = Math.floor(sessionDuration / 1000);
-
-                activity = await prisma.crmActivityDay.update({
-                    where: { id: activity.id },
-                    data: {
-                        totalActiveSeconds: activity.totalActiveSeconds + sessionSeconds,
-                        currentSessionStartedAt: null,
-                    },
-                });
-            }
+            return NextResponse.json({
+                success: true,
+                data: {
+                    isActive: false,
+                    totalActiveSecondsToday: pauseResult.totalActiveSeconds,
+                    currentSessionStartedAt: null,
+                    lastActivityAt: activity.lastActivityAt?.toISOString() || null,
+                    autoPaused: true,
+                },
+            });
         }
 
-        const isActive = activity.currentSessionStartedAt !== null && 
-                       activity.lastActivityAt !== null &&
-                       (now.getTime() - activity.lastActivityAt.getTime()) < FIVE_MINUTES_MS;
+        // Resolve status using centralized logic
+        const statusResult = resolveActivityStatus(activity, null, now);
 
         return NextResponse.json({
             success: true,
             data: {
-                isActive,
+                isActive: statusResult.isActive,
                 totalActiveSecondsToday: activity.totalActiveSeconds,
                 currentSessionStartedAt: activity.currentSessionStartedAt?.toISOString() || null,
                 lastActivityAt: activity.lastActivityAt?.toISOString() || null,
+                status: statusResult.displayStatus,
+                lastSeenMinutesAgo: statusResult.lastSeenMinutesAgo,
             },
         });
 

@@ -22,11 +22,14 @@ import {
     AlertCircle,
     Filter,
     RotateCcw,
+    MessageSquare,
 } from "lucide-react";
-import { Card, Badge, Button, LoadingState, EmptyState, Tabs, Drawer, DataTable } from "@/components/ui";
+import { Card, Badge, Button, LoadingState, EmptyState, Tabs, Drawer, DataTable, Select } from "@/components/ui";
 import type { Column } from "@/components/ui/DataTable";
 import { CompanyDrawer, ContactDrawer } from "@/components/drawers";
+import { UnifiedActionDrawer } from "@/components/drawers/UnifiedActionDrawer";
 import { BookingModal } from "@/components/sdr/BookingModal";
+import { QuickEmailModal } from "@/components/email/QuickEmailModal";
 import type { ActionResult, Channel } from "@/lib/types";
 import { ACTION_RESULT_LABELS, CHANNEL_LABELS } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -108,6 +111,7 @@ interface DrawerContact {
     status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
     companyId: string;
     companyName?: string;
+    companyPhone?: string | null;
 }
 
 interface DrawerCompany {
@@ -117,6 +121,7 @@ interface DrawerCompany {
     country: string | null;
     website: string | null;
     size: string | null;
+    phone: string | null;
     status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
     contacts: Array<{
         id: string;
@@ -196,6 +201,21 @@ export default function SDRActionPage() {
     const [drawerContact, setDrawerContact] = useState<DrawerContact | null>(null);
     const [drawerCompany, setDrawerCompany] = useState<DrawerCompany | null>(null);
     const [drawerLoading, setDrawerLoading] = useState(false);
+
+    // Quick Email Modal state
+    const [showQuickEmailModal, setShowQuickEmailModal] = useState(false);
+    const [emailModalContact, setEmailModalContact] = useState<{
+        id: string;
+        firstName?: string | null;
+        lastName?: string | null;
+        email?: string | null;
+        title?: string | null;
+        company?: { id: string; name: string };
+    } | null>(null);
+    const [emailModalMissionId, setEmailModalMissionId] = useState<string | null>(null);
+    const [emailModalMissionName, setEmailModalMissionName] = useState<string | null>(null);
+    const [emailModalCompany, setEmailModalCompany] = useState<{ id: string; name: string; phone?: string | null } | null>(null);
+    const [pendingEmailAction, setPendingEmailAction] = useState<{ row: QueueItem; result: ActionResult } | { cardMode: true; result: ActionResult } | null>(null);
 
     // Load filters
     useEffect(() => {
@@ -349,6 +369,7 @@ export default function SDRActionPage() {
                         status: c.status ?? "PARTIAL",
                         companyId: c.company?.id ?? "",
                         companyName: c.company?.name ?? undefined,
+                        companyPhone: c.company?.phone ?? undefined,
                     });
                 } else {
                     setDrawerContact(null);
@@ -377,6 +398,7 @@ export default function SDRActionPage() {
                         country: co.country,
                         website: co.website,
                         size: co.size,
+                        phone: co.phone,
                         status: co.status ?? "PARTIAL",
                         contacts: (co.contacts ?? []).map((ct: { id: string; firstName: string | null; lastName: string | null; email: string | null; phone: string | null; title: string | null; linkedin: string | null; status: string; companyId: string }) => ({
                             id: ct.id,
@@ -400,15 +422,34 @@ export default function SDRActionPage() {
     }, [drawerCompanyId]);
 
     const queueRowKey = (row: QueueItem) => row.contactId ?? row.companyId;
+
+    // Unified drawer state
+    const [unifiedDrawerOpen, setUnifiedDrawerOpen] = useState(false);
+    const [unifiedDrawerContactId, setUnifiedDrawerContactId] = useState<string | null>(null);
+    const [unifiedDrawerCompanyId, setUnifiedDrawerCompanyId] = useState<string | null>(null);
+    const [unifiedDrawerMissionId, setUnifiedDrawerMissionId] = useState<string | undefined>();
+    const [unifiedDrawerMissionName, setUnifiedDrawerMissionName] = useState<string | undefined>();
+
     const openDrawerForRow = (row: QueueItem) => {
-        if (row.contactId) {
-            setDrawerCompanyId(null);
-            setDrawerContactId(row.contactId);
-        } else {
-            setDrawerContactId(null);
-            setDrawerCompanyId(row.companyId);
-        }
+        setUnifiedDrawerContactId(row.contactId || null);
+        setUnifiedDrawerCompanyId(row.companyId);
+
+        // Find mission ID from row
+        const mission = missions.find(m => m.name === row.missionName);
+        setUnifiedDrawerMissionId(mission?.id);
+        setUnifiedDrawerMissionName(row.missionName);
+        setUnifiedDrawerOpen(true);
     };
+
+    const closeUnifiedDrawer = () => {
+        setUnifiedDrawerOpen(false);
+        setUnifiedDrawerContactId(null);
+        setUnifiedDrawerCompanyId(null);
+        setUnifiedDrawerMissionId(undefined);
+        setUnifiedDrawerMissionName(undefined);
+    };
+
+    // Keep legacy close functions for backwards compatibility
     const closeContactDrawer = () => {
         setDrawerContactId(null);
         setDrawerContact(null);
@@ -424,11 +465,30 @@ export default function SDRActionPage() {
     };
 
     const handleQuickAction = async (row: QueueItem, result: ActionResult) => {
+        // For ENVOIE_MAIL, open the QuickEmailModal instead of submitting directly
+        if (result === "ENVOIE_MAIL") {
+            const mission = missions.find(m => m.name === row.missionName);
+            setEmailModalContact(row.contact ? {
+                id: row.contact.id,
+                firstName: row.contact.firstName,
+                lastName: row.contact.lastName,
+                email: row.contact.email,
+                title: row.contact.title,
+                company: { id: row.company.id, name: row.company.name }
+            } : null);
+            setEmailModalCompany(row.contact ? null : { id: row.company.id, name: row.company.name, phone: row.company.phone });
+            setEmailModalMissionId(mission?.id || selectedMissionId);
+            setEmailModalMissionName(mission?.name || row.missionName);
+            setPendingEmailAction({ row, result });
+            setShowQuickEmailModal(true);
+            return;
+        }
+
         const key = queueRowKey(row);
         setSubmittingRowKey(key);
-        const noteRequired = result === "INTERESTED" || result === "CALLBACK_REQUESTED" || result === "ENVOIE_MAIL";
+        const noteRequired = result === "INTERESTED" || result === "CALLBACK_REQUESTED";
         const note = noteRequired
-            ? (result === "CALLBACK_REQUESTED" ? "Rappel demandé" : result === "ENVOIE_MAIL" ? "Envoie mail" : "Intéressé")
+            ? (result === "CALLBACK_REQUESTED" ? "Rappel demandé" : "Intéressé")
             : undefined;
         try {
             const res = await fetch("/api/actions", {
@@ -448,16 +508,64 @@ export default function SDRActionPage() {
             if (json.success) {
                 setQueueItems((prev) => prev.filter((r) => queueRowKey(r) !== key));
                 setActionsCompleted((c) => c + 1);
-                // Open email client when "Envoie mail" and contact has valid email
-                if (result === "ENVOIE_MAIL" && row.contact?.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.contact.email)) {
-                    window.location.href = `mailto:${row.contact.email}`;
-                }
             }
         } catch {
             // ignore
         } finally {
             setSubmittingRowKey(null);
         }
+    };
+
+    // Handle email sent from QuickEmailModal
+    const handleEmailSent = async () => {
+        if (!pendingEmailAction) return;
+        const { result } = pendingEmailAction;
+
+        const isCardMode = "cardMode" in pendingEmailAction && pendingEmailAction.cardMode;
+
+        try {
+            if (isCardMode && currentAction) {
+                await fetch("/api/actions", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        contactId: currentAction.contact?.id,
+                        companyId: !currentAction.contact && currentAction.company ? currentAction.company.id : undefined,
+                        campaignId: currentAction.campaignId,
+                        channel: "EMAIL",
+                        result,
+                        note: "Email envoyé via template",
+                    }),
+                });
+                setActionsCompleted((c) => c + 1);
+                await loadNextAction();
+            } else if (!isCardMode && "row" in pendingEmailAction) {
+                const { row } = pendingEmailAction;
+                const key = queueRowKey(row);
+                await fetch("/api/actions", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        contactId: row.contactId ?? undefined,
+                        companyId: row.contactId ? undefined : row.companyId,
+                        campaignId: row.campaignId,
+                        channel: "EMAIL",
+                        result,
+                        note: "Email envoyé via template",
+                    }),
+                });
+                setQueueItems((prev) => prev.filter((r) => queueRowKey(r) !== key));
+                setActionsCompleted((c) => c + 1);
+            }
+        } catch {
+            // ignore
+        }
+
+        setPendingEmailAction(null);
+        setEmailModalContact(null);
+        setEmailModalCompany(null);
+        setEmailModalMissionId(null);
+        setEmailModalMissionName(null);
     };
 
     // Submit
@@ -469,6 +577,25 @@ export default function SDRActionPage() {
         }
         if ((selectedResult === "INTERESTED" || selectedResult === "CALLBACK_REQUESTED") && !note.trim()) {
             setError("Note requise pour ce résultat");
+            return;
+        }
+
+        // For ENVOIE_MAIL, open QuickEmailModal instead of submitting
+        if (selectedResult === "ENVOIE_MAIL") {
+            const contact = currentAction.contact;
+            setEmailModalContact(contact ? {
+                id: contact.id,
+                firstName: contact.firstName,
+                lastName: contact.lastName,
+                email: contact.email,
+                title: contact.title,
+                company: currentAction.company ? { id: currentAction.company.id, name: currentAction.company.name } : undefined,
+            } : null);
+            setEmailModalCompany(!contact && currentAction.company ? { id: currentAction.company.id, name: currentAction.company.name, phone: currentAction.company.phone } : null);
+            setEmailModalMissionId(selectedMissionId);
+            setEmailModalMissionName(currentAction.missionName ?? undefined);
+            setPendingEmailAction({ cardMode: true, result: selectedResult });
+            setShowQuickEmailModal(true);
             return;
         }
 
@@ -527,7 +654,7 @@ export default function SDRActionPage() {
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
             if (e.target instanceof HTMLTextAreaElement) return;
-            if (e.key >= "1" && e.key <= "6") {
+            if (e.key >= "1" && e.key <= "7") {
                 setSelectedResult(RESULT_OPTIONS[parseInt(e.key) - 1].value);
             }
             if (e.key === "Enter" && selectedResult && !isSubmitting) {
@@ -648,89 +775,140 @@ export default function SDRActionPage() {
 
         return (
             <div className="space-y-6">
-                {/* View toggle */}
-                <div className="flex items-center gap-2">
-                    <div className="flex rounded-xl border border-slate-200/80 p-1 bg-slate-50/80 shadow-sm">
-                        <button
-                            type="button"
-                            onClick={() => setViewMode("card")}
-                            className={cn(
-                                "px-4 py-2.5 text-sm font-medium rounded-lg transition-all",
-                                viewMode === "card" ? "bg-white text-indigo-600 shadow-sm border border-slate-200/60" : "text-slate-600 hover:text-slate-900"
-                            )}
-                        >
-                            Vue carte
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setViewMode("table")}
-                            className={cn(
-                                "px-4 py-2.5 text-sm font-medium rounded-lg transition-all",
-                                viewMode === "table" ? "bg-white text-indigo-600 shadow-sm border border-slate-200/60" : "text-slate-600 hover:text-slate-900"
-                            )}
-                        >
-                            Vue tableau
-                        </button>
+                {/* Modern Header with View Toggle & Stats */}
+                <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 rounded-2xl p-6 shadow-xl">
+                    {/* Background decoration */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 via-transparent to-violet-500/10" />
+                    <div className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl" />
+
+                    <div className="relative">
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                            {/* Left: Title & View Toggle */}
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-sm flex items-center justify-center border border-white/10">
+                                    <Phone className="w-6 h-6 text-white" />
+                                </div>
+                                <div>
+                                    <h1 className="text-xl font-bold text-white">Actions</h1>
+                                    <p className="text-sm text-white/60">Gérez vos actions commerciales</p>
+                                </div>
+                            </div>
+
+                            {/* Right: View Toggle Pills */}
+                            <div className="flex items-center gap-3">
+                                <div className="flex rounded-xl border border-white/10 p-1 bg-white/5 backdrop-blur-sm">
+                                    <button
+                                        type="button"
+                                        onClick={() => setViewMode("card")}
+                                        className={cn(
+                                            "px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2",
+                                            viewMode === "card"
+                                                ? "bg-white text-slate-900 shadow-lg"
+                                                : "text-white/70 hover:text-white hover:bg-white/10"
+                                        )}
+                                    >
+                                        <User className="w-4 h-4" />
+                                        Carte
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setViewMode("table")}
+                                        className={cn(
+                                            "px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2",
+                                            viewMode === "table"
+                                                ? "bg-white text-slate-900 shadow-lg"
+                                                : "text-white/70 hover:text-white hover:bg-white/10"
+                                        )}
+                                    >
+                                        <Building2 className="w-4 h-4" />
+                                        Tableau
+                                    </button>
+                                </div>
+
+                                {/* Stats badge - Actions count only (no timer for SDR/BD) */}
+                                <div className="px-4 py-2 rounded-xl bg-white/10 border border-white/10 backdrop-blur-sm">
+                                    <div className="flex items-center gap-3">
+                                        <div className="flex items-center gap-2">
+                                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                                            <span className="text-sm font-semibold text-white">{actionsCompleted}</span>
+                                            <span className="text-xs text-white/60">actions</span>
+                                        </div>
+
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
                 {/* Modern filter header */}
-                <Card className="overflow-hidden border-slate-200/80 bg-gradient-to-br from-slate-50/90 to-white shadow-sm">
-                    <div className="px-5 py-4">
-                        <div className="flex flex-wrap items-end justify-between gap-4">
-                            <div className="flex items-center gap-2 text-slate-700">
-                                <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center">
-                                    <Filter className="w-4 h-4 text-indigo-600" />
+                {/* Modern Filter Card */}
+                <div className="bg-white/80 backdrop-blur-xl rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
+                    <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50/80 to-white">
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                                    <Filter className="w-4 h-4 text-white" />
                                 </div>
                                 <div>
                                     <h3 className="text-sm font-semibold text-slate-900">Filtres</h3>
-                                    <p className="text-xs text-slate-500">Affiner la file d&apos;actions</p>
+                                    <p className="text-xs text-slate-500">Affinez votre file d'actions</p>
                                 </div>
                             </div>
-                            {hasTableFiltersActive && (
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={clearTableFilters}
-                                    className="text-slate-500 hover:text-indigo-600 gap-1.5"
-                                >
-                                    <RotateCcw className="w-3.5 h-3.5" />
-                                    Réinitialiser
-                                </Button>
-                            )}
+                            <div className="flex items-center gap-2">
+                                {hasTableFiltersActive && (
+                                    <Badge className="bg-indigo-100 text-indigo-600 border-indigo-200">
+                                        {[tableFilterResult, tableFilterPriority, tableFilterChannel, tableFilterType].filter(Boolean).length} filtres actifs
+                                    </Badge>
+                                )}
+                                {hasTableFiltersActive && (
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={clearTableFilters}
+                                        className="text-slate-500 hover:text-red-600 hover:bg-red-50 gap-1.5"
+                                    >
+                                        <RotateCcw className="w-3.5 h-3.5" />
+                                        Réinitialiser
+                                    </Button>
+                                )}
+                            </div>
                         </div>
+                    </div>
 
-                        <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-                            {/* Contexte */}
+                    {/* Filter Grid */}
+                    <div className="p-5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                            {/* Mission */}
                             <div className="space-y-1.5">
                                 <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Mission</label>
                                 <select
                                     value={selectedMissionId || ""}
                                     onChange={handleMissionChange}
-                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow"
+                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow cursor-pointer"
                                 >
                                     {missions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                                 </select>
                             </div>
+                            {/* Liste */}
                             <div className="space-y-1.5">
                                 <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Liste</label>
                                 <select
                                     value={selectedListId || "all"}
                                     onChange={handleListChange}
-                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow"
+                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow cursor-pointer"
                                 >
                                     <option value="all">Toutes les listes</option>
                                     {filteredLists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                                 </select>
                             </div>
-
-                            {/* Statut = dernière action */}
+                            {/* Statut */}
                             <div className="space-y-1.5">
                                 <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Statut</label>
                                 <select
                                     value={tableFilterResult}
                                     onChange={(e) => setTableFilterResult(e.target.value)}
-                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow"
+                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow cursor-pointer"
                                 >
                                     <option value="">Tous les statuts</option>
                                     <option value="NONE">Jamais contacté</option>
@@ -739,12 +917,13 @@ export default function SDRActionPage() {
                                     ))}
                                 </select>
                             </div>
+                            {/* Priorité */}
                             <div className="space-y-1.5">
                                 <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Priorité</label>
                                 <select
                                     value={tableFilterPriority}
                                     onChange={(e) => setTableFilterPriority(e.target.value)}
-                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow"
+                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow cursor-pointer"
                                 >
                                     <option value="">Toutes</option>
                                     {Object.entries(PRIORITY_LABELS).map(([value, { label }]) => (
@@ -752,12 +931,13 @@ export default function SDRActionPage() {
                                     ))}
                                 </select>
                             </div>
+                            {/* Canal */}
                             <div className="space-y-1.5">
                                 <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Canal</label>
                                 <select
                                     value={tableFilterChannel}
                                     onChange={(e) => setTableFilterChannel(e.target.value)}
-                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow"
+                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow cursor-pointer"
                                 >
                                     <option value="">Tous</option>
                                     {(Object.entries(CHANNEL_LABELS) as [Channel, string][]).map(([value, label]) => (
@@ -765,12 +945,13 @@ export default function SDRActionPage() {
                                     ))}
                                 </select>
                             </div>
+                            {/* Type */}
                             <div className="space-y-1.5">
                                 <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Type</label>
                                 <select
                                     value={tableFilterType}
                                     onChange={(e) => setTableFilterType(e.target.value)}
-                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow"
+                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow cursor-pointer"
                                 >
                                     <option value="">Contact + Société</option>
                                     <option value="contact">Contact uniquement</option>
@@ -779,6 +960,7 @@ export default function SDRActionPage() {
                             </div>
                         </div>
 
+                        {/* Results summary */}
                         <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between">
                             <span className="text-xs text-slate-500">
                                 {hasTableFiltersActive ? (
@@ -787,11 +969,38 @@ export default function SDRActionPage() {
                                     <span><span className="font-medium text-slate-700">{queueItems.length}</span> dans la file</span>
                                 )}
                             </span>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                    setQueueLoading(true);
+                                    fetch(`/api/sdr-queue?missionId=${selectedMissionId || ""}&listId=${selectedListId || ""}`)
+                                        .then((res) => res.json())
+                                        .then((json) => {
+                                            if (json.success && Array.isArray(json.data)) {
+                                                const items = json.data;
+                                                setQueueItems(items.map((i: QueueItem) => ({
+                                                    ...i,
+                                                    _displayName: i.contact
+                                                        ? `${(i.contact.firstName || "").trim()} ${(i.contact.lastName || "").trim()}`.trim() || i.company.name
+                                                        : i.company.name,
+                                                    _companyName: i.company.name,
+                                                })));
+                                            }
+                                        })
+                                        .finally(() => setQueueLoading(false));
+                                }}
+                                className="text-slate-500 hover:text-indigo-600 gap-1.5"
+                            >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                Actualiser
+                            </Button>
                         </div>
                     </div>
-                </Card>
+                </div>
 
-                <Card className="overflow-hidden">
+                {/* Data Table */}
+                <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
                     <DataTable
                         data={filteredQueueItems}
                         columns={queueColumns}
@@ -805,40 +1014,58 @@ export default function SDRActionPage() {
                         emptyMessage="Aucun contact dans la file. Changez de mission ou liste."
                         onRowClick={openDrawerForRow}
                     />
-                </Card>
+                </div>
 
-                {(drawerContactId || drawerCompanyId) && drawerLoading && (
-                    <Drawer
-                        isOpen
-                        onClose={() => { setDrawerContactId(null); setDrawerCompanyId(null); }}
-                        title="Chargement..."
-                    >
-                        <div className="flex items-center justify-center py-12">
-                            <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
-                        </div>
-                    </Drawer>
-                )}
-                {drawerContactId && drawerContact && (
-                    <ContactDrawer
-                        isOpen={!!drawerContactId}
-                        onClose={closeContactDrawer}
-                        contact={drawerContact}
-                        onUpdate={(updated) => setDrawerContact(updated)}
-                        isManager={true}
-                        companies={[]}
-                    />
-                )}
-                {drawerCompanyId && drawerCompany && (
-                    <CompanyDrawer
-                        isOpen={!!drawerCompanyId}
-                        onClose={closeCompanyDrawer}
-                        company={drawerCompany}
-                        onUpdate={(updated) => setDrawerCompany(updated)}
-                        onContactClick={handleContactFromCompany}
-                        isManager={true}
-                    />
-                )}
-            </div>
+                {/* Unified Action Drawer */}
+                {
+                    unifiedDrawerCompanyId && (
+                        <UnifiedActionDrawer
+                            isOpen={unifiedDrawerOpen}
+                            onClose={closeUnifiedDrawer}
+                            contactId={unifiedDrawerContactId}
+                            companyId={unifiedDrawerCompanyId}
+                            missionId={unifiedDrawerMissionId}
+                            missionName={unifiedDrawerMissionName}
+                            onActionRecorded={() => {
+                                // Refresh queue items after action recorded
+                                setQueueLoading(true);
+                                fetch(`/api/sdr-queue?missionId=${selectedMissionId || ""}&listId=${selectedListId || ""}`)
+                                    .then((res) => res.json())
+                                    .then((json) => {
+                                        if (json.success && Array.isArray(json.data)) {
+                                            const items = json.data;
+                                            setQueueItems(items.map((i: QueueItem) => ({
+                                                ...i,
+                                                _displayName: i.contact
+                                                    ? `${(i.contact.firstName || "").trim()} ${(i.contact.lastName || "").trim()}`.trim() || i.company.name
+                                                    : i.company.name,
+                                                _companyName: i.company.name,
+                                            })));
+                                        }
+                                    })
+                                    .finally(() => setQueueLoading(false));
+                            }}
+                        />
+                    )
+                }
+
+                <QuickEmailModal
+                    isOpen={showQuickEmailModal}
+                    onClose={() => {
+                        setShowQuickEmailModal(false);
+                        setPendingEmailAction(null);
+                        setEmailModalContact(null);
+                        setEmailModalCompany(null);
+                        setEmailModalMissionId(null);
+                        setEmailModalMissionName(null);
+                    }}
+                    onSent={handleEmailSent}
+                    contact={emailModalContact}
+                    company={emailModalCompany}
+                    missionId={emailModalMissionId}
+                    missionName={emailModalMissionName}
+                />
+            </div >
         );
     }
 
@@ -851,59 +1078,95 @@ export default function SDRActionPage() {
     if (!currentAction?.hasNext) {
         return (
             <div className="space-y-6">
-                <div className="flex items-center justify-between gap-4 flex-wrap">
-                    <div className="flex items-center gap-3">
-                        <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
-                            <button
-                                type="button"
-                                onClick={() => setViewMode("card")}
-                                className={cn(
-                                    "px-3 py-2 text-sm font-medium rounded-md transition-colors",
-                                    viewMode === "card" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
-                                )}
-                            >
-                                Vue carte
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setViewMode("table")}
-                                className={cn(
-                                    "px-3 py-2 text-sm font-medium rounded-md transition-colors",
-                                    viewMode === "table" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
-                                )}
-                            >
-                                Vue tableau
-                            </button>
+                {/* Modern Header */}
+                <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 rounded-2xl p-6 shadow-xl">
+                    <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 via-transparent to-violet-500/10" />
+                    <div className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl" />
+
+                    <div className="relative">
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-sm flex items-center justify-center border border-white/10">
+                                    <Phone className="w-6 h-6 text-white" />
+                                </div>
+                                <div>
+                                    <h1 className="text-xl font-bold text-white">Actions</h1>
+                                    <p className="text-sm text-white/60">Gérez vos actions commerciales</p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-3 flex-wrap">
+                                <div className="flex rounded-xl border border-white/10 p-1 bg-white/5 backdrop-blur-sm">
+                                    <button
+                                        type="button"
+                                        onClick={() => setViewMode("card")}
+                                        className={cn(
+                                            "px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2",
+                                            viewMode === "card"
+                                                ? "bg-white text-slate-900 shadow-lg"
+                                                : "text-white/70 hover:text-white hover:bg-white/10"
+                                        )}
+                                    >
+                                        <User className="w-4 h-4" />
+                                        Carte
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setViewMode("table")}
+                                        className={cn(
+                                            "px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2",
+                                            viewMode === "table"
+                                                ? "bg-white text-slate-900 shadow-lg"
+                                                : "text-white/70 hover:text-white hover:bg-white/10"
+                                        )}
+                                    >
+                                        <Building2 className="w-4 h-4" />
+                                        Tableau
+                                    </button>
+                                </div>
+
+                                <Select
+                                    variant="header-dark"
+                                    value={selectedMissionId || ""}
+                                    onChange={(id) => {
+                                        setSelectedMissionId(id);
+                                        localStorage.setItem("sdr_selected_mission", id);
+                                        setSelectedListId(null);
+                                    }}
+                                    options={missions.map((m) => ({ value: m.id, label: m.name }))}
+                                    placeholder="Mission"
+                                    className="min-w-[180px]"
+                                />
+                                <Select
+                                    variant="header-dark"
+                                    value={selectedListId || "all"}
+                                    onChange={(id) => setSelectedListId(id === "all" ? null : id)}
+                                    options={[
+                                        { value: "all", label: "Toutes les listes" },
+                                        ...filteredLists.map((l) => ({ value: l.id, label: l.name })),
+                                    ]}
+                                    placeholder="Liste"
+                                    className="min-w-[160px]"
+                                />
+                            </div>
                         </div>
-                        <select
-                            value={selectedMissionId || ""}
-                            onChange={handleMissionChange}
-                            className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        >
-                            {missions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                        </select>
-                        <select
-                            value={selectedListId || "all"}
-                            onChange={handleListChange}
-                            className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        >
-                            <option value="all">Toutes les listes</option>
-                            {filteredLists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                        </select>
                     </div>
                 </div>
 
-                <EmptyState
-                    icon={CheckCircle2}
-                    title="File d'attente vide"
-                    description={currentAction?.message || "Aucun contact disponible pour le moment"}
-                    action={
-                        <Button variant="secondary" onClick={loadNextAction} className="gap-2">
-                            <RefreshCw className="w-4 h-4" />
-                            Actualiser
-                        </Button>
-                    }
-                />
+                {/* Empty State Card */}
+                <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-12">
+                    <EmptyState
+                        icon={CheckCircle2}
+                        title="File d'attente vide"
+                        description={currentAction?.message || "Aucun contact disponible pour le moment"}
+                        action={
+                            <Button variant="secondary" onClick={loadNextAction} className="gap-2">
+                                <RefreshCw className="w-4 h-4" />
+                                Actualiser
+                            </Button>
+                        }
+                    />
+                </div>
             </div>
         );
     }
@@ -923,85 +1186,127 @@ export default function SDRActionPage() {
                 </div>
             )}
 
-            {/* Header with Filters */}
-            <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3 flex-1 flex-wrap">
-                    <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
-                        <button
-                            type="button"
-                            onClick={() => setViewMode("card")}
-                            className={cn(
-                                "px-3 py-2 text-sm font-medium rounded-md transition-colors",
-                                viewMode === "card" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
-                            )}
-                        >
-                            Vue carte
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setViewMode("table")}
-                            className={cn(
-                                "px-3 py-2 text-sm font-medium rounded-md transition-colors",
-                                viewMode === "table" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
-                            )}
-                        >
-                            Vue tableau
-                        </button>
+            {/* Modern Header with View Toggle & Context */}
+            <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 rounded-2xl p-6 shadow-xl">
+                {/* Background decoration */}
+                <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 via-transparent to-violet-500/10" />
+                <div className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl" />
+
+                <div className="relative">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                        {/* Left: Title & Context */}
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-sm flex items-center justify-center border border-white/10">
+                                <Phone className="w-6 h-6 text-white" />
+                            </div>
+                            <div>
+                                <h1 className="text-xl font-bold text-white">Actions</h1>
+                                <p className="text-sm text-white/60">{currentAction.missionName || "Gérez vos actions commerciales"}</p>
+                            </div>
+                        </div>
+
+                        {/* Right: Controls & Stats */}
+                        <div className="flex items-center gap-3 flex-wrap">
+                            {/* View Toggle Pills */}
+                            <div className="flex rounded-xl border border-white/10 p-1 bg-white/5 backdrop-blur-sm">
+                                <button
+                                    type="button"
+                                    onClick={() => setViewMode("card")}
+                                    className={cn(
+                                        "px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2",
+                                        viewMode === "card"
+                                            ? "bg-white text-slate-900 shadow-lg"
+                                            : "text-white/70 hover:text-white hover:bg-white/10"
+                                    )}
+                                >
+                                    <User className="w-4 h-4" />
+                                    Carte
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setViewMode("table")}
+                                    className={cn(
+                                        "px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2",
+                                        viewMode === "table"
+                                            ? "bg-white text-slate-900 shadow-lg"
+                                            : "text-white/70 hover:text-white hover:bg-white/10"
+                                    )}
+                                >
+                                    <Building2 className="w-4 h-4" />
+                                    Tableau
+                                </button>
+                            </div>
+
+                            {/* Mission & List Selectors */}
+                            <Select
+                                variant="header-dark"
+                                value={selectedMissionId || ""}
+                                onChange={(id) => {
+                                    setSelectedMissionId(id);
+                                    localStorage.setItem("sdr_selected_mission", id);
+                                    setSelectedListId(null);
+                                }}
+                                options={missions.map((m) => ({ value: m.id, label: m.name }))}
+                                placeholder="Mission"
+                                className="min-w-[180px]"
+                            />
+                            <Select
+                                variant="header-dark"
+                                value={selectedListId || "all"}
+                                onChange={(id) => setSelectedListId(id === "all" ? null : id)}
+                                options={[
+                                    { value: "all", label: "Toutes les listes" },
+                                    ...filteredLists.map((l) => ({ value: l.id, label: l.name })),
+                                ]}
+                                placeholder="Liste"
+                                className="min-w-[160px]"
+                            />
+
+                            {/* Stats Badges */}
+                            <div className="px-4 py-2 rounded-xl bg-white/10 border border-white/10 backdrop-blur-sm">
+                                <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-2">
+                                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                                        <span className="text-sm font-semibold text-white">{actionsCompleted}</span>
+                                        <span className="text-xs text-white/60">actions</span>
+                                    </div>
+                                    {currentAction.priority && (
+                                        <>
+                                            <div className="w-px h-4 bg-white/20" />
+                                            <Badge className={cn("text-xs", PRIORITY_LABELS[currentAction.priority].color)}>
+                                                {PRIORITY_LABELS[currentAction.priority].label}
+                                            </Badge>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <select
-                        value={selectedMissionId || ""}
-                        onChange={handleMissionChange}
-                        className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    >
-                        {missions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                    </select>
-                    <select
-                        value={selectedListId || "all"}
-                        onChange={handleListChange}
-                        className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    >
-                        <option value="all">Toutes les listes</option>
-                        {filteredLists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                    </select>
-                    <select
-                        value={viewType}
-                        onChange={(e) => setViewType(e.target.value as "all" | "companies" | "contacts")}
-                        className="h-10 px-3 text-sm border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    >
-                        <option value="all">Tout afficher</option>
-                        <option value="companies">Sociétés uniquement</option>
-                        <option value="contacts">Contacts uniquement</option>
-                    </select>
-                </div>
-                <div className="flex items-center gap-4 text-sm">
-                    <span className="text-slate-500">{actionsCompleted} actions</span>
-                    <span className={cn(
-                        "font-mono px-2 py-1 rounded-lg",
-                        elapsedTime > 300 ? "bg-amber-50 text-amber-600" : "bg-slate-100 text-slate-600"
-                    )}>
-                        {formatTime(elapsedTime)}
-                    </span>
-                    {currentAction.priority && (
-                        <Badge className={PRIORITY_LABELS[currentAction.priority].color}>
-                            {PRIORITY_LABELS[currentAction.priority].label}
-                        </Badge>
-                    )}
                 </div>
             </div>
 
             {/* Error Alert */}
             {error && (
-                <Card className="!p-4 border-red-200 bg-red-50">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3 text-red-700">
-                            <AlertCircle className="w-5 h-5" />
-                            <span className="text-sm font-medium">{error}</span>
+                <div className="relative overflow-hidden rounded-2xl border border-red-200 bg-gradient-to-r from-red-50 to-rose-50 p-4 shadow-sm">
+                    <div className="absolute inset-0 bg-gradient-to-r from-red-500/5 to-transparent" />
+                    <div className="relative flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center">
+                                <AlertCircle className="w-5 h-5 text-red-600" />
+                            </div>
+                            <div>
+                                <p className="text-sm font-semibold text-red-900">Erreur</p>
+                                <p className="text-sm text-red-700">{error}</p>
+                            </div>
                         </div>
-                        <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600">
-                            <XCircle className="w-4 h-4" />
+                        <button
+                            onClick={() => setError(null)}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-100 transition-colors"
+                        >
+                            <XCircle className="w-5 h-5" />
                         </button>
                     </div>
-                </Card>
+                </div>
             )}
 
             {/* Main Content Grid */}
@@ -1009,34 +1314,44 @@ export default function SDRActionPage() {
                 {/* Left - Contact Panel (2 cols) */}
                 <div className="lg:col-span-2 space-y-4">
                     {/* Company Card */}
-                    <Card>
-                        <div className="flex items-start gap-4">
-                            <div className="w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center flex-shrink-0">
-                                <Building2 className="w-6 h-6 text-indigo-600" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                                <h2 className="text-lg font-semibold text-slate-900 truncate">
-                                    {currentAction.company?.name}
-                                </h2>
-                                <div className="flex items-center gap-2 mt-1 text-sm text-slate-500">
-                                    {currentAction.company?.industry && <span>{currentAction.company.industry}</span>}
-                                    {currentAction.company?.country && <span>• {currentAction.company.country}</span>}
+                    <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
+                        <div className="p-5">
+                            <div className="flex items-start gap-4">
+                                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-100 to-indigo-50 flex items-center justify-center flex-shrink-0 border border-indigo-100">
+                                    <Building2 className="w-7 h-7 text-indigo-600" />
                                 </div>
-                                {currentAction.company?.website && (
-                                    <a
-                                        href={`https://${currentAction.company.website}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1.5 mt-2 text-sm text-indigo-600 hover:text-indigo-700"
-                                    >
-                                        <Globe className="w-3.5 h-3.5" />
-                                        {currentAction.company.website}
-                                        <ExternalLink className="w-3 h-3" />
-                                    </a>
-                                )}
+                                <div className="min-w-0 flex-1">
+                                    <h2 className="text-lg font-bold text-slate-900 truncate">
+                                        {currentAction.company?.name}
+                                    </h2>
+                                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                        {currentAction.company?.industry && (
+                                            <Badge variant="default" className="bg-slate-100 text-slate-600 border-slate-200">
+                                                {currentAction.company.industry}
+                                            </Badge>
+                                        )}
+                                        {currentAction.company?.country && (
+                                            <Badge variant="default" className="bg-slate-100 text-slate-600 border-slate-200">
+                                                {currentAction.company.country}
+                                            </Badge>
+                                        )}
+                                    </div>
+                                    {currentAction.company?.website && (
+                                        <a
+                                            href={`https://${currentAction.company.website}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1.5 mt-3 px-3 py-1.5 text-sm text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
+                                        >
+                                            <Globe className="w-3.5 h-3.5" />
+                                            {currentAction.company.website}
+                                            <ExternalLink className="w-3 h-3" />
+                                        </a>
+                                    )}
+                                </div>
                             </div>
                         </div>
-                    </Card>
+                    </div>
 
                     {/* Contact/Company Card */}
                     <Card>
@@ -1179,135 +1494,203 @@ export default function SDRActionPage() {
 
                 {/* Right - Script Panel (3 cols) */}
                 <div className="lg:col-span-3">
-                    <Card className="h-full">
-                        <div className="flex items-center gap-2 mb-4">
-                            <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
-                                <Sparkles className="w-4 h-4 text-indigo-600" />
+                    <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm h-full overflow-hidden">
+                        <div className="p-5 border-b border-slate-100 bg-gradient-to-r from-slate-50/80 to-white">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
+                                    <Sparkles className="w-5 h-5 text-white" />
+                                </div>
+                                <div>
+                                    <h3 className="text-sm font-bold text-slate-900">Script d'appel</h3>
+                                    <p className="text-xs text-slate-500">Guide conversationnel</p>
+                                </div>
                             </div>
-                            <h3 className="text-sm font-semibold text-slate-900">Script d'appel</h3>
                         </div>
 
-                        {scriptSections && availableScriptTabs.length > 0 ? (
-                            <>
-                                <Tabs
-                                    tabs={availableScriptTabs}
-                                    activeTab={activeTab}
-                                    onTabChange={setActiveTab}
-                                    className="mb-4"
-                                />
-                                <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 min-h-[200px]">
+                        <div className="p-5">
+                            {scriptSections && availableScriptTabs.length > 0 ? (
+                                <>
+                                    <Tabs
+                                        tabs={availableScriptTabs}
+                                        activeTab={activeTab}
+                                        onTabChange={setActiveTab}
+                                        className="mb-4"
+                                    />
+                                    <div className="bg-gradient-to-br from-slate-50 to-slate-100/50 border border-slate-200/60 rounded-xl p-5 min-h-[200px]">
+                                        <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                            {scriptSections[activeTab] || ""}
+                                        </p>
+                                    </div>
+                                </>
+                            ) : currentAction.script ? (
+                                <div className="bg-gradient-to-br from-slate-50 to-slate-100/50 border border-slate-200/60 rounded-xl p-5">
                                     <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                                        {scriptSections[activeTab] || ""}
+                                        {currentAction.script}
                                     </p>
                                 </div>
-                            </>
-                        ) : currentAction.script ? (
-                            <div className="bg-slate-50 border border-slate-100 rounded-xl p-4">
-                                <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                                    {currentAction.script}
-                                </p>
-                            </div>
-                        ) : (
-                            <div className="text-center py-12 text-sm text-slate-400">
-                                <Sparkles className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-                                Aucun script disponible
-                            </div>
-                        )}
-                    </Card>
+                            ) : (
+                                <div className="text-center py-12">
+                                    <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
+                                        <Sparkles className="w-8 h-8 text-slate-300" />
+                                    </div>
+                                    <p className="text-sm text-slate-500">Aucun script disponible</p>
+                                    <p className="text-xs text-slate-400 mt-1">Le script sera affiché ici s'il est configuré</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
             </div>
 
             {/* Action Results */}
-            <Card>
-                <p className="text-sm font-semibold text-slate-900 mb-4">Résultat de l'action</p>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {RESULT_OPTIONS.map((option) => (
-                        <button
-                            key={option.value}
-                            onClick={() => setSelectedResult(option.value)}
-                            className={cn(
-                                "relative flex items-center gap-3 p-4 rounded-xl border-2 transition-all",
-                                selectedResult === option.value
-                                    ? "bg-indigo-50 border-indigo-300"
-                                    : "bg-white border-slate-200 hover:border-slate-300"
-                            )}
-                        >
-                            <span className={selectedResult === option.value ? "text-indigo-600" : "text-slate-400"}>
-                                {option.icon}
-                            </span>
-                            <span className={cn(
-                                "text-sm font-medium",
-                                selectedResult === option.value ? "text-indigo-900" : "text-slate-700"
-                            )}>
-                                {option.label}
-                            </span>
-                            <span className="absolute top-2 right-2 w-5 h-5 flex items-center justify-center text-[10px] font-mono text-slate-400 bg-slate-100 rounded">
-                                {option.key}
-                            </span>
-                        </button>
-                    ))}
+            <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
+                <div className="p-5 border-b border-slate-100 bg-gradient-to-r from-slate-50/80 to-white">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                            <CheckCircle2 className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                            <h3 className="text-sm font-bold text-slate-900">Résultat de l'action</h3>
+                            <p className="text-xs text-slate-500">Sélectionnez le résultat de votre appel</p>
+                        </div>
+                    </div>
                 </div>
-            </Card>
+                <div className="p-5">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {RESULT_OPTIONS.map((option) => (
+                            <button
+                                key={option.value}
+                                onClick={() => setSelectedResult(option.value)}
+                                className={cn(
+                                    "relative flex items-center gap-3 p-4 rounded-xl border-2 transition-all",
+                                    selectedResult === option.value
+                                        ? "bg-gradient-to-br from-indigo-50 to-indigo-100/50 border-indigo-300 shadow-sm"
+                                        : "bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                                )}
+                            >
+                                <span className={cn(
+                                    "w-10 h-10 rounded-lg flex items-center justify-center transition-colors",
+                                    selectedResult === option.value
+                                        ? "bg-indigo-100 text-indigo-600"
+                                        : "bg-slate-100 text-slate-400"
+                                )}>
+                                    {option.icon}
+                                </span>
+                                <span className={cn(
+                                    "text-sm font-medium text-left",
+                                    selectedResult === option.value ? "text-indigo-900" : "text-slate-700"
+                                )}>
+                                    {option.label}
+                                </span>
+                                <span className="absolute top-2 right-2 w-5 h-5 flex items-center justify-center text-[10px] font-mono text-slate-400 bg-slate-100 rounded">
+                                    {option.key}
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </div>
 
             {/* Note */}
-            <Card>
-                <label className="block text-sm font-semibold text-slate-900 mb-3">
-                    Note
-                    {(selectedResult === "INTERESTED" || selectedResult === "CALLBACK_REQUESTED") && (
-                        <span className="text-red-500 ml-1">*</span>
-                    )}
-                </label>
-                <textarea
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="Ajouter une note..."
-                    rows={3}
-                    maxLength={500}
-                    className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-                />
-                <p className="text-xs text-slate-400 mt-2 text-right">{note.length}/500</p>
-            </Card>
+            <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
+                <div className="p-5 border-b border-slate-100 bg-gradient-to-r from-slate-50/80 to-white">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/20">
+                                <MessageSquare className="w-5 h-5 text-white" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-bold text-slate-900">
+                                    Note
+                                    {(selectedResult === "INTERESTED" || selectedResult === "CALLBACK_REQUESTED") && (
+                                        <span className="text-red-500 ml-1">*</span>
+                                    )}
+                                </h3>
+                                <p className="text-xs text-slate-500">Ajoutez des informations sur l'échange</p>
+                            </div>
+                        </div>
+                        <span className="text-xs text-slate-400 font-medium">{note.length}/500</span>
+                    </div>
+                </div>
+                <div className="p-5">
+                    <textarea
+                        value={note}
+                        onChange={(e) => setNote(e.target.value)}
+                        placeholder="Ajouter une note sur l'échange..."
+                        rows={3}
+                        maxLength={500}
+                        className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl bg-slate-50/50 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent focus:bg-white resize-none transition-colors"
+                    />
+                </div>
+            </div>
 
             {/* Callback date (Rappel) - calendar when "Rappel demandé" */}
             {selectedResult === "CALLBACK_REQUESTED" && (
-                <Card className="border-amber-200 bg-amber-50/50">
-                    <div className="flex items-center gap-2 mb-3">
-                        <Clock className="w-5 h-5 text-amber-600" />
-                        <label className="block text-sm font-semibold text-slate-900">Date de rappel</label>
+                <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-2xl border border-amber-200 shadow-sm overflow-hidden">
+                    <div className="p-5 border-b border-amber-100 bg-gradient-to-r from-amber-100/50 to-transparent">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20">
+                                <Calendar className="w-5 h-5 text-white" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-bold text-slate-900">Date de rappel</h3>
+                                <p className="text-xs text-slate-600">
+                                    {currentAction?.missionName ? (
+                                        <span>Mission: {currentAction.missionName}</span>
+                                    ) : (
+                                        "Choisissez une date et heure pour le rappel"
+                                    )}
+                                </p>
+                            </div>
+                        </div>
                     </div>
-                    <p className="text-xs text-slate-500 mb-2">
-                        {currentAction?.missionName && (
-                            <span className="font-medium text-slate-700">Mission: {currentAction.missionName}</span>
-                        )}
-                        {!currentAction?.missionName && "Choisissez une date et heure pour le rappel."}
-                    </p>
-                    <input
-                        type="datetime-local"
-                        value={callbackDateValue}
-                        onChange={(e) => setCallbackDateValue(e.target.value)}
-                        min={new Date().toISOString().slice(0, 16)}
-                        className="w-full px-4 py-3 text-sm border border-amber-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-300"
-                    />
-                    <p className="text-xs text-slate-500 mt-2">
-                        Optionnel. Vous pouvez aussi indiquer la date dans la note (ex: &quot;rappeler demain 14h&quot;).
-                    </p>
-                </Card>
+                    <div className="p-5">
+                        <input
+                            type="datetime-local"
+                            value={callbackDateValue}
+                            onChange={(e) => setCallbackDateValue(e.target.value)}
+                            min={new Date().toISOString().slice(0, 16)}
+                            className="w-full px-4 py-3 text-sm border border-amber-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-300 cursor-pointer"
+                        />
+                        <p className="text-xs text-slate-500 mt-3">
+                            💡 Optionnel. Vous pouvez aussi indiquer la date dans la note (ex: &quot;rappeler demain 14h&quot;).
+                        </p>
+                    </div>
+                </div>
             )}
 
             {/* Submit */}
-            <div className="flex justify-end">
+            <div className="flex justify-end pt-2">
                 <Button
                     variant="primary"
                     size="lg"
                     onClick={handleSubmit}
                     disabled={!selectedResult || isSubmitting}
                     isLoading={isSubmitting}
-                    className="gap-2"
+                    className="gap-2 px-8 shadow-lg shadow-indigo-500/20 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600"
                 >
-                    Valider & Suivant
+                    {isSubmitting ? "Enregistrement..." : "Valider & Suivant"}
                     <ChevronRight className="w-4 h-4" />
                 </Button>
             </div>
+
+            {/* Quick Email Modal (card view) */}
+            <QuickEmailModal
+                isOpen={showQuickEmailModal}
+                onClose={() => {
+                    setShowQuickEmailModal(false);
+                    setPendingEmailAction(null);
+                    setEmailModalContact(null);
+                    setEmailModalCompany(null);
+                    setEmailModalMissionId(null);
+                    setEmailModalMissionName(null);
+                }}
+                onSent={handleEmailSent}
+                contact={emailModalContact}
+                company={emailModalCompany}
+                missionId={emailModalMissionId}
+                missionName={emailModalMissionName}
+            />
 
             {/* Booking Modal */}
             {currentAction?.clientBookingUrl && currentAction.contact && (

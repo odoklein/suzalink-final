@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { startSession } from "@/lib/activity/session-manager";
 
 // ============================================
 // POST /api/sdr/activity/start - Start activity session
@@ -26,57 +26,23 @@ export async function POST(request: NextRequest) {
         }
 
         const userId = session.user.id;
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const now = new Date();
 
-        // Get or create today's activity record
-        let activity = await prisma.crmActivityDay.findUnique({
-            where: {
-                userId_date: {
-                    userId,
-                    date: today,
-                },
-            },
-        });
+        // Use session manager to start session
+        const result = await startSession(userId);
 
-        if (!activity) {
-            activity = await prisma.crmActivityDay.create({
-                data: {
-                    userId,
-                    date: today,
-                    totalActiveSeconds: 0,
-                    currentSessionStartedAt: now,
-                    lastActivityAt: now,
-                },
-            });
-        } else {
-            // If already started, just update lastActivityAt (idempotent)
-            if (!activity.currentSessionStartedAt) {
-                activity = await prisma.crmActivityDay.update({
-                    where: { id: activity.id },
-                    data: {
-                        currentSessionStartedAt: now,
-                        lastActivityAt: now,
-                    },
-                });
-            } else {
-                // Already started, just update lastActivityAt
-                activity = await prisma.crmActivityDay.update({
-                    where: { id: activity.id },
-                    data: {
-                        lastActivityAt: now,
-                    },
-                });
-            }
+        if (!result.success) {
+            return NextResponse.json(
+                { success: false, error: "Failed to start session" },
+                { status: 500 }
+            );
         }
 
         return NextResponse.json({
             success: true,
             data: {
                 isActive: true,
-                totalActiveSecondsToday: activity.totalActiveSeconds,
-                currentSessionStartedAt: activity.currentSessionStartedAt?.toISOString(),
+                totalActiveSecondsToday: result.totalActiveSeconds,
+                currentSessionStartedAt: result.currentSessionStartedAt?.toISOString(),
             },
         });
 
