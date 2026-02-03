@@ -25,6 +25,9 @@ export async function GET(request: Request) {
         const { searchParams } = new URL(request.url);
         const limit = Math.min(Math.max(1, parseInt(searchParams.get("limit") || "100", 10)), 200);
         const skip = Math.max(0, parseInt(searchParams.get("skip") || "0", 10));
+        const missionIdParam = searchParams.get("missionId") || undefined;
+        const dateFromParam = searchParams.get("dateFrom") || undefined;
+        const dateToParam = searchParams.get("dateTo") || undefined;
 
         const userRole = (session.user as { role?: string }).role;
         const isBusinessDeveloper = userRole === "BUSINESS_DEVELOPER";
@@ -44,7 +47,8 @@ export async function GET(request: Request) {
         const whereClause: {
             sdrId?: string;
             result: "CALLBACK_REQUESTED";
-            campaign?: { missionId: { in: string[] } };
+            campaign?: { missionId: string | { in: string[] } };
+            callbackDate?: { gte?: Date; lte?: Date };
         } = {
             result: "CALLBACK_REQUESTED",
         };
@@ -53,9 +57,29 @@ export async function GET(request: Request) {
             if (missionIds.length === 0) {
                 return NextResponse.json({ success: true, data: [] });
             }
-            whereClause.campaign = { missionId: { in: missionIds } };
+            if (missionIdParam && missionIds.includes(missionIdParam)) {
+                whereClause.campaign = { missionId: missionIdParam };
+            } else {
+                whereClause.campaign = { missionId: { in: missionIds } };
+            }
         } else {
             whereClause.sdrId = session.user.id;
+            if (missionIdParam) {
+                whereClause.campaign = { missionId: missionIdParam };
+            }
+        }
+
+        // Date filter: callbackDate range
+        if (dateFromParam || dateToParam) {
+            const dateFrom = dateFromParam ? new Date(dateFromParam) : undefined;
+            const dateTo = dateToParam ? new Date(dateToParam) : undefined;
+            if (dateFrom && dateTo) {
+                whereClause.callbackDate = { gte: dateFrom, lte: dateTo };
+            } else if (dateFrom) {
+                whereClause.callbackDate = { gte: dateFrom };
+            } else if (dateTo) {
+                whereClause.callbackDate = { lte: dateTo };
+            }
         }
 
         const callbacks = await prisma.action.findMany({
@@ -76,6 +100,7 @@ export async function GET(request: Request) {
                         email: true,
                         company: {
                             select: {
+                                id: true,
                                 name: true,
                             }
                         }

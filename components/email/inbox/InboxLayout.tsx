@@ -6,17 +6,9 @@ import { MailboxSwitcher } from "./MailboxSwitcher";
 import { FolderNav } from "./FolderNav";
 import { ThreadList } from "./ThreadList";
 import { ThreadView } from "./ThreadView";
-import { ContextPanel } from "./ContextPanel";
 import { EmailComposer } from "./EmailComposer";
 import { EmailOnboarding } from "./EmailOnboarding";
-import { 
-    PanelLeftClose, 
-    PanelLeftOpen,
-    PanelRightClose,
-    PanelRightOpen,
-    Pencil,
-    Loader2,
-} from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, Pencil, Loader2 } from "lucide-react";
 
 // ============================================
 // TYPES
@@ -63,7 +55,6 @@ export function InboxLayout({
     
     // Panel visibility
     const [isLeftPanelCollapsed, setIsLeftPanelCollapsed] = useState(false);
-    const [isRightPanelVisible, setIsRightPanelVisible] = useState(true);
 
     const hasTriggeredSync = useRef(false);
 
@@ -214,43 +205,28 @@ export function InboxLayout({
             {/* Center Panel - Thread List / Thread View */}
             <div className="flex-1 flex flex-col min-w-0">
                 {/* Toolbar */}
-                <div className="h-12 px-3 flex items-center justify-between border-b border-slate-200 bg-white">
-                    <div className="flex items-center gap-2">
-                        <button
-                            onClick={() => setIsLeftPanelCollapsed(!isLeftPanelCollapsed)}
-                            className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
-                            title={isLeftPanelCollapsed ? "Afficher les dossiers" : "Masquer les dossiers"}
-                        >
-                            {isLeftPanelCollapsed ? (
-                                <PanelLeftOpen className="w-4 h-4" />
-                            ) : (
-                                <PanelLeftClose className="w-4 h-4" />
-                            )}
-                        </button>
-                        <span className="text-sm font-medium text-slate-700 capitalize">
-                            {selectedFolder === "inbox" ? "Boîte de réception" :
-                             selectedFolder === "sent" ? "Envoyés" :
-                             selectedFolder === "drafts" ? "Brouillons" :
-                             selectedFolder === "archive" ? "Archives" :
-                             selectedFolder === "trash" ? "Corbeille" :
-                             selectedFolder === "starred" ? "Favoris" :
-                             selectedFolder === "unread" ? "Non lus" :
-                             selectedFolder}
-                        </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <button
-                            onClick={() => setIsRightPanelVisible(!isRightPanelVisible)}
-                            className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
-                            title={isRightPanelVisible ? "Masquer le contexte" : "Afficher le contexte"}
-                        >
-                            {isRightPanelVisible ? (
-                                <PanelRightClose className="w-4 h-4" />
-                            ) : (
-                                <PanelRightOpen className="w-4 h-4" />
-                            )}
-                        </button>
-                    </div>
+                <div className="h-12 px-3 flex items-center gap-2 border-b border-slate-200 bg-white">
+                    <button
+                        onClick={() => setIsLeftPanelCollapsed(!isLeftPanelCollapsed)}
+                        className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+                        title={isLeftPanelCollapsed ? "Afficher les dossiers" : "Masquer les dossiers"}
+                    >
+                        {isLeftPanelCollapsed ? (
+                            <PanelLeftOpen className="w-4 h-4" />
+                        ) : (
+                            <PanelLeftClose className="w-4 h-4" />
+                        )}
+                    </button>
+                    <span className="text-sm font-medium text-slate-700 capitalize">
+                        {selectedFolder === "inbox" ? "Boîte de réception" :
+                         selectedFolder === "sent" ? "Envoyés" :
+                         selectedFolder === "drafts" ? "Brouillons" :
+                         selectedFolder === "archive" ? "Archives" :
+                         selectedFolder === "trash" ? "Corbeille" :
+                         selectedFolder === "starred" ? "Favoris" :
+                         selectedFolder === "unread" ? "Non lus" :
+                         selectedFolder}
+                    </span>
                 </div>
 
                 {/* Content Area */}
@@ -283,13 +259,6 @@ export function InboxLayout({
                     )}
                 </div>
             </div>
-
-            {/* Right Panel - Context */}
-            {isRightPanelVisible && selectedThread && (
-                <div className="w-80 border-l border-slate-200 bg-slate-50/50 overflow-y-auto">
-                    <ContextPanel threadId={selectedThread.id} />
-                </div>
-            )}
 
             {/* Composer Modal */}
             {isComposerOpen && (
