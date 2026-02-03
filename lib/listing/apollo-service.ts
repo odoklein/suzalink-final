@@ -71,6 +71,7 @@ interface ApolloPersonResponse {
 }
 
 export interface ApolloSearchParams {
+  // Basic Filters
   industry?: string;
   companySize?: string;
   country?: string;
@@ -78,6 +79,25 @@ export interface ApolloSearchParams {
   state?: string;
   jobTitle?: string;
   keywords?: string;
+
+  // Revenue & Funding
+  revenueRange?: string;
+  fundingMin?: number;
+  fundingMax?: number;
+  latestFundingStage?: string;
+
+  // Company Details
+  yearFoundedMin?: number;
+  yearFoundedMax?: number;
+  companyType?: string; // public, private, nonprofit
+  technologies?: string[];
+
+  // Growth & Intent Signals
+  isHiring?: boolean;
+  departmentHeadcount?: string;
+  jobPostings?: string;
+
+  // Pagination
   limit?: number;
   page?: number;
 }
@@ -196,7 +216,8 @@ export async function searchFromApollo(
     const apiParams: Record<string, any> = {
       page: params.page || 1,
       per_page: params.limit || 25,
-      // Organizations Search Params
+
+      // Basic Search
       q_keywords: params.keywords,
       organization_locations:
         [params.country, params.state, params.region].filter(Boolean).length > 0
@@ -205,11 +226,52 @@ export async function searchFromApollo(
       q_organization_keyword: params.industry,
     };
 
+    // Company Size
     if (params.companySize) {
-      // Map "11-50" to "11,50" for Apollo
       apiParams.organization_num_employees_ranges = [
         params.companySize.replace("-", ","),
       ];
+    }
+
+    // Revenue Range
+    if (params.revenueRange) {
+      apiParams.revenue_range = params.revenueRange;
+    }
+
+    // Funding
+    if (params.fundingMin || params.fundingMax) {
+      apiParams.funding_raised_min = params.fundingMin;
+      apiParams.funding_raised_max = params.fundingMax;
+    }
+    if (params.latestFundingStage) {
+      apiParams.latest_funding_stage = params.latestFundingStage;
+    }
+
+    // Year Founded
+    if (params.yearFoundedMin || params.yearFoundedMax) {
+      apiParams.organization_year_founded_min = params.yearFoundedMin;
+      apiParams.organization_year_founded_max = params.yearFoundedMax;
+    }
+
+    // Company Type
+    if (params.companyType) {
+      apiParams.organization_type = params.companyType;
+    }
+
+    // Technologies
+    if (params.technologies && params.technologies.length > 0) {
+      apiParams.technologies = params.technologies;
+    }
+
+    // Hiring Signals
+    if (params.isHiring) {
+      apiParams.organization_is_hiring = true;
+    }
+    if (params.departmentHeadcount) {
+      apiParams.department_headcount = params.departmentHeadcount;
+    }
+    if (params.jobPostings) {
+      apiParams.job_postings = params.jobPostings;
     }
 
     const response = await apolloApiCall<ApolloSearchResponse>(

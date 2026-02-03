@@ -41,6 +41,7 @@ export async function POST(req: NextRequest) {
     // Parse request body
     const body = await req.json();
     const {
+      // Basic filters
       industry,
       companySize,
       country,
@@ -48,6 +49,24 @@ export async function POST(req: NextRequest) {
       state,
       jobTitle,
       keywords,
+
+      // Revenue & Funding
+      revenueRange,
+      fundingMin,
+      fundingMax,
+      latestFundingStage,
+
+      // Company Details
+      yearFoundedMin,
+      yearFoundedMax,
+      companyType,
+      technologies,
+
+      // Growth & Intent
+      isHiring,
+      departmentHeadcount,
+      jobPostings,
+
       limit = 25,
     } = body;
 
@@ -59,7 +78,18 @@ export async function POST(req: NextRequest) {
       !region &&
       !state &&
       !jobTitle &&
-      !keywords
+      !keywords &&
+      !revenueRange &&
+      !fundingMin &&
+      !fundingMax &&
+      !latestFundingStage &&
+      !yearFoundedMin &&
+      !yearFoundedMax &&
+      !companyType &&
+      !technologies &&
+      !isHiring &&
+      !departmentHeadcount &&
+      !jobPostings
     ) {
       return NextResponse.json(
         {
@@ -87,6 +117,17 @@ export async function POST(req: NextRequest) {
       state,
       jobTitle,
       keywords,
+      revenueRange,
+      fundingMin,
+      fundingMax,
+      latestFundingStage,
+      yearFoundedMin,
+      yearFoundedMax,
+      companyType,
+      technologies,
+      isHiring,
+      departmentHeadcount,
+      jobPostings,
       limit,
       page: 1, // TODO: Add pagination support if needed
     });

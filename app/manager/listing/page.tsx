@@ -62,13 +62,31 @@ export default function ListingPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [selected, setSelected] = useState<Set<string>>(new Set());
 
-    // Filters
+    // Basic Filters
     const [industry, setIndustry] = useState("");
     const [companySize, setCompanySize] = useState("");
     const [country, setCountry] = useState("");
     const [region, setRegion] = useState("");
     const [state, setState] = useState("");
     const [keywords, setKeywords] = useState("");
+
+    // Revenue & Funding
+    const [revenueRange, setRevenueRange] = useState("");
+    const [fundingMin, setFundingMin] = useState("");
+    const [fundingMax, setFundingMax] = useState("");
+    const [latestFundingStage, setLatestFundingStage] = useState("");
+
+    // Company Details
+    const [yearFoundedMin, setYearFoundedMin] = useState("");
+    const [yearFoundedMax, setYearFoundedMax] = useState("");
+    const [companyType, setCompanyType] = useState("");
+    const [technologies, setTechnologies] = useState("");
+
+    // Growth & Intent
+    const [isHiring, setIsHiring] = useState(false);
+    const [departmentHeadcount, setDepartmentHeadcount] = useState("");
+    const [jobPostings, setJobPostings] = useState("");
+
     const [limit, setLimit] = useState("25");
 
     // Location Logic
@@ -88,8 +106,13 @@ export default function ListingPage() {
     // ============================================
 
     const handleSearch = async () => {
-        // Validate
-        if (!industry && !companySize && !country && !state && !region && !keywords) {
+        // Validate - at least one filter required
+        const hasFilter = industry || companySize || country || state || region || keywords ||
+            revenueRange || fundingMin || fundingMax || latestFundingStage ||
+            yearFoundedMin || yearFoundedMax || companyType || technologies ||
+            isHiring || departmentHeadcount || jobPostings;
+
+        if (!hasFilter) {
             showError("Erreur", "Veuillez sélectionner au moins un filtre");
             return;
         }
@@ -109,6 +132,17 @@ export default function ListingPage() {
                     state,
                     region,
                     keywords,
+                    revenueRange,
+                    fundingMin: fundingMin ? parseInt(fundingMin) : undefined,
+                    fundingMax: fundingMax ? parseInt(fundingMax) : undefined,
+                    latestFundingStage,
+                    yearFoundedMin: yearFoundedMin ? parseInt(yearFoundedMin) : undefined,
+                    yearFoundedMax: yearFoundedMax ? parseInt(yearFoundedMax) : undefined,
+                    companyType,
+                    technologies: technologies ? technologies.split(',').map(t => t.trim()) : undefined,
+                    isHiring,
+                    departmentHeadcount,
+                    jobPostings,
                     limit: parseInt(limit),
                 }),
             });
@@ -361,6 +395,36 @@ export default function ListingPage() {
         { value: "100", label: "100 résultats" },
     ];
 
+    const revenueOptions = [
+        { value: "", label: "Tous les revenus" },
+        { value: "0-1M", label: "$0 - $1M" },
+        { value: "1M-10M", label: "$1M - $10M" },
+        { value: "10M-50M", label: "$10M - $50M" },
+        { value: "50M-100M", label: "$50M - $100M" },
+        { value: "100M-500M", label: "$100M - $500M" },
+        { value: "500M-1B", label: "$500M - $1B" },
+        { value: "1B+", label: "$1B+" },
+    ];
+
+    const fundingStageOptions = [
+        { value: "", label: "Tous les stades" },
+        { value: "seed", label: "Seed" },
+        { value: "series_a", label: "Series A" },
+        { value: "series_b", label: "Series B" },
+        { value: "series_c", label: "Series C" },
+        { value: "series_d", label: "Series D+" },
+        { value: "ipo", label: "IPO" },
+        { value: "acquired", label: "Acquired" },
+    ];
+
+    const companyTypeOptions = [
+        { value: "", label: "Tous les types" },
+        { value: "public", label: "Publique" },
+        { value: "private", label: "Privée" },
+        { value: "nonprofit", label: "Non-profit" },
+        { value: "government", label: "Gouvernement" },
+    ];
+
     // ============================================
     // RENDER
     // ============================================
@@ -389,84 +453,238 @@ export default function ListingPage() {
                     <h2 className="text-lg font-semibold text-slate-900">Filtres</h2>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">
-                            Secteur d&apos;activité
-                        </label>
-                        <Select
-                            options={industryOptions}
-                            value={industry}
-                            onChange={setIndustry}
-                        />
-                    </div>
+                {/* Basic Filters */}
+                <div className="space-y-4">
+                    <h3 className="text-sm font-semibold text-slate-900 border-b pb-2">Filtres de base</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Secteur d&apos;activité
+                            </label>
+                            <Select
+                                options={industryOptions}
+                                value={industry}
+                                onChange={setIndustry}
+                            />
+                        </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">
-                            Taille d&apos;entreprise
-                        </label>
-                        <Select
-                            options={sizeOptions}
-                            value={companySize}
-                            onChange={setCompanySize}
-                        />
-                    </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Taille d&apos;entreprise
+                            </label>
+                            <Select
+                                options={sizeOptions}
+                                value={companySize}
+                                onChange={setCompanySize}
+                            />
+                        </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">
-                            Pays
-                        </label>
-                        <Select
-                            options={countryOptions}
-                            value={country}
-                            onChange={handleCountryChange}
-                        />
-                    </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Pays
+                            </label>
+                            <Select
+                                options={countryOptions}
+                                value={country}
+                                onChange={handleCountryChange}
+                            />
+                        </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">
-                            Région
-                        </label>
-                        <Select
-                            options={regionOptions}
-                            value={region}
-                            onChange={handleRegionChange}
-                            disabled={!country}
-                        />
-                    </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Région
+                            </label>
+                            <Select
+                                options={regionOptions}
+                                value={region}
+                                onChange={handleRegionChange}
+                                disabled={!country}
+                            />
+                        </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">
-                            État / Province
-                        </label>
-                        <Select
-                            options={stateOptions}
-                            value={state}
-                            onChange={setState}
-                            disabled={!region}
-                        />
-                    </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                État / Province
+                            </label>
+                            <Select
+                                options={stateOptions}
+                                value={state}
+                                onChange={setState}
+                                disabled={!region}
+                            />
+                        </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">
-                            Keywords
-                        </label>
-                        <Input
-                            placeholder="SaaS, E-commerce..."
-                            value={keywords}
-                            onChange={(e) => setKeywords(e.target.value)}
-                        />
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Keywords
+                            </label>
+                            <Input
+                                placeholder="SaaS, E-commerce..."
+                                value={keywords}
+                                onChange={(e) => setKeywords(e.target.value)}
+                            />
+                        </div>
                     </div>
+                </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">
-                            Nombre de résultats
-                        </label>
-                        <Select
-                            options={limitOptions}
-                            value={limit}
-                            onChange={setLimit}
-                        />
+                {/* Revenue & Funding */}
+                <div className="space-y-4 mt-6">
+                    <h3 className="text-sm font-semibold text-slate-900 border-b pb-2">Revenu & Financement</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Tranche de revenu
+                            </label>
+                            <Select
+                                options={revenueOptions}
+                                value={revenueRange}
+                                onChange={setRevenueRange}
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Financement min ($)
+                            </label>
+                            <Input
+                                type="number"
+                                placeholder="1000000"
+                                value={fundingMin}
+                                onChange={(e) => setFundingMin(e.target.value)}
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Financement max ($)
+                            </label>
+                            <Input
+                                type="number"
+                                placeholder="10000000"
+                                value={fundingMax}
+                                onChange={(e) => setFundingMax(e.target.value)}
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Dernier tour de financement
+                            </label>
+                            <Select
+                                options={fundingStageOptions}
+                                value={latestFundingStage}
+                                onChange={setLatestFundingStage}
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Company Details */}
+                <div className="space-y-4 mt-6">
+                    <h3 className="text-sm font-semibold text-slate-900 border-b pb-2">Détails de l&apos;entreprise</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Année de création (min)
+                            </label>
+                            <Input
+                                type="number"
+                                placeholder="2000"
+                                value={yearFoundedMin}
+                                onChange={(e) => setYearFoundedMin(e.target.value)}
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Année de création (max)
+                            </label>
+                            <Input
+                                type="number"
+                                placeholder="2023"
+                                value={yearFoundedMax}
+                                onChange={(e) => setYearFoundedMax(e.target.value)}
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Type d&apos;entreprise
+                            </label>
+                            <Select
+                                options={companyTypeOptions}
+                                value={companyType}
+                                onChange={setCompanyType}
+                            />
+                        </div>
+
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Technologies (séparées par virgule)
+                            </label>
+                            <Input
+                                placeholder="Salesforce, AWS, React..."
+                                value={technologies}
+                                onChange={(e) => setTechnologies(e.target.value)}
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Growth & Intent Signals */}
+                <div className="space-y-4 mt-6">
+                    <h3 className="text-sm font-semibold text-slate-900 border-b pb-2">Signaux de croissance</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div className="flex items-center">
+                            <input
+                                type="checkbox"
+                                id="isHiring"
+                                checked={isHiring}
+                                onChange={(e) => setIsHiring(e.target.checked)}
+                                className="rounded border-slate-300 mr-2"
+                            />
+                            <label htmlFor="isHiring" className="text-sm font-medium text-slate-700">
+                                Entreprises qui recrutent
+                            </label>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Effectif département
+                            </label>
+                            <Input
+                                placeholder="Engineering, Sales..."
+                                value={departmentHeadcount}
+                                onChange={(e) => setDepartmentHeadcount(e.target.value)}
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Offres d&apos;emploi
+                            </label>
+                            <Input
+                                placeholder="VP Sales, Developer..."
+                                value={jobPostings}
+                                onChange={(e) => setJobPostings(e.target.value)}
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Results Limit */}
+                <div className="mt-6 pt-4 border-t">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                Nombre de résultats
+                            </label>
+                            <Select
+                                options={limitOptions}
+                                value={limit}
+                                onChange={setLimit}
+                            />
+                        </div>
                     </div>
                 </div>
 
