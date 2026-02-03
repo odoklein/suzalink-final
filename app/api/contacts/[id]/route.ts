@@ -78,7 +78,7 @@ export const GET = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER', 'SDR']);
+    await requireRole(['MANAGER', 'SDR', 'BUSINESS_DEVELOPER']);
     const { id } = await params;
 
     const contact = await prisma.contact.findUnique({
@@ -127,7 +127,7 @@ export const PUT = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER', 'SDR', 'BUSINESS_DEVELOPER']);
     const { id } = await params;
     const data = await validateRequest(request, updateContactSchema);
 

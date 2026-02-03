@@ -9,7 +9,6 @@ import { PermissionProvider } from "@/lib/permissions/PermissionProvider";
 import { GlobalSidebar, MobileMenuButton } from "./GlobalSidebar";
 import { NavSection, getNavByRole, ROLE_CONFIG } from "@/lib/navigation/config";
 import { NotificationBell } from "@/components/ui/NotificationBell";
-import { ActivityChrono } from "@/components/sdr/ActivityChrono";
 import { cn } from "@/lib/utils";
 
 // ============================================
@@ -122,11 +121,6 @@ function InnerLayout({
                     </div>
                     
                     <div className="flex items-center gap-3">
-                        {/* Activity Chrono for SDRs */}
-                        {(userRole === "SDR" || userRole === "BUSINESS_DEVELOPER") && (
-                            <ActivityChrono />
-                        )}
-                        
                         {/* Notification bell */}
                         <NotificationBell />
                     </div>

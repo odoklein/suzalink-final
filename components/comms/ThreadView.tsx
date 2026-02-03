@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, memo } from "react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -15,6 +15,11 @@ import {
     ChevronDown,
     Clock,
     Sparkles,
+    Loader2,
+    Phone,
+    Calendar,
+    UserPlus,
+    CheckCheck,
 } from "lucide-react";
 import { RichTextEditor } from "./RichTextEditor";
 import { MessageContent } from "./MessageContent";
@@ -33,7 +38,7 @@ interface ThreadViewProps {
         content: string,
         opts?: { mentionIds?: string[]; files?: File[] }
     ) => Promise<void>;
-    onReactionToggle?: () => void;
+    onReactionToggle?: (messageId: string, emoji: string) => Promise<void>;
     currentUserId: string;
     typingUserName?: string;
 }
@@ -130,17 +135,17 @@ export function ThreadView({
         }
     };
 
-    // Helper to get display title for thread
+    // Helper to get display title for thread (for direct: show the OTHER participant's name, not the current user's)
     const getThreadTitle = () => {
         if (thread.channelType === "DIRECT") {
-            // For direct messages, extract recipient name from subject
-            if (thread.subject.startsWith("Message avec ")) {
-                return thread.subject.replace("Message avec ", "");
-            }
-            // Fallback: find the other participant
+            // Prefer the other participant's name so recipient sees sender, not themselves
             const otherParticipant = thread.participants.find(p => p.userId !== currentUserId);
             if (otherParticipant) {
                 return otherParticipant.userName;
+            }
+            // Fallback: parse subject (may show wrong person for recipient)
+            if (thread.subject.startsWith("Message avec ")) {
+                return thread.subject.replace("Message avec ", "");
             }
         }
         return thread.subject;
@@ -150,72 +155,45 @@ export function ThreadView({
     const threadTitle = getThreadTitle();
 
     return (
-        <div className="flex flex-col h-full bg-white">
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-slate-50/50 to-white">
-                <div className="flex items-start gap-3 flex-1 min-w-0">
-                    {/* Avatar for direct messages */}
-                    {isDirectMessage && (
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center text-sm font-semibold text-blue-600 flex-shrink-0">
-                            {threadTitle.charAt(0).toUpperCase()}
-                        </div>
-                    )}
-
-                    <div className="flex-1 min-w-0">
-                        {/* Channel type badge */}
-                        <div className="flex items-center gap-2 mb-1">
-                            {isDirectMessage ? (
-                                <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-                                    Message direct
-                                </span>
-                            ) : (
-                                <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-                                    {thread.channelName}
-                                </span>
-                            )}
-                            {thread.isBroadcast && (
-                                <span className="text-[10px] font-semibold text-rose-600 bg-rose-100 px-2 py-0.5 rounded-full">
-                                    Annonce
-                                </span>
-                            )}
-                            {thread.status !== "OPEN" && (
-                                <span className={cn(
-                                    "text-[10px] font-medium px-2 py-0.5 rounded-full",
-                                    thread.status === "RESOLVED"
-                                        ? "text-emerald-600 bg-emerald-100"
-                                        : "text-slate-600 bg-slate-100"
-                                )}>
-                                    {thread.status === "RESOLVED" ? "Résolu" : "Archivé"}
-                                </span>
+        <div className="flex flex-col h-full bg-white dark:bg-[#151c2a]">
+            {/* Sticky Header - Sales Inbox style */}
+            <header className="h-16 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-6 bg-white/80 dark:bg-[#151c2a]/90 backdrop-blur-sm z-10 shrink-0">
+                <div className="flex items-center gap-4">
+                    <div className="size-10 rounded-full bg-gradient-to-br from-indigo-100 to-indigo-200 dark:from-indigo-900/50 dark:to-indigo-800/50 flex items-center justify-center text-sm font-semibold text-indigo-600 dark:text-indigo-400 shrink-0">
+                        {threadTitle.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <h3 className="font-semibold text-slate-900 dark:text-white">{threadTitle}</h3>
+                            {thread.status === "OPEN" && (
+                                <span className="size-1.5 rounded-full bg-emerald-500" />
                             )}
                         </div>
-
-                        {/* Title - recipient name for direct, subject for others */}
-                        <h2 className="text-lg font-semibold text-slate-900 truncate">
-                            {threadTitle}
-                        </h2>
-
-                        {/* Typing indicator */}
-                        {typingUserName && (
-                            <div className="flex items-center gap-2 mt-1.5">
-                                <div className="flex gap-0.5">
-                                    <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                                    <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                                    <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                                </div>
-                                <p className="text-xs text-indigo-600 font-medium">
-                                    {typingUserName} écrit…
-                                </p>
-                            </div>
-                        )}
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {isDirectMessage
+                                ? "Message direct"
+                                : `${thread.participantCount} participant${thread.participantCount > 1 ? "s" : ""} · ${thread.channelName}`}
+                        </p>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-2">
-                    {/* Participants indicator */}
-                    <button className="flex items-center gap-1.5 px-3 py-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
-                        <Users className="w-4 h-4" />
-                        <span className="text-xs font-medium">{thread.participantCount}</span>
+                    <button
+                        className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-500/5 rounded-lg transition-colors"
+                        title="Appeler"
+                    >
+                        <Phone className="w-4 h-4" />
+                    </button>
+                    <button
+                        className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-500/5 rounded-lg transition-colors"
+                        title="Planifier un RDV"
+                    >
+                        <Calendar className="w-4 h-4" />
+                    </button>
+                    <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 mx-1" />
+                    <button className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-300 transition-colors">
+                        <UserPlus className="w-4 h-4" />
+                        Assigner
                     </button>
 
                     {/* Actions menu */}
@@ -225,8 +203,8 @@ export function ThreadView({
                             className={cn(
                                 "p-2 rounded-lg transition-colors",
                                 showMenu
-                                    ? "bg-slate-100 text-slate-700"
-                                    : "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                                    ? "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                                    : "text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
                             )}
                         >
                             <MoreVertical className="w-4 h-4" />
@@ -238,7 +216,7 @@ export function ThreadView({
                                     className="fixed inset-0 z-10"
                                     onClick={() => setShowMenu(false)}
                                 />
-                                <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-20 animate-in fade-in slide-in-from-top-2 duration-200">
+                                <div className="absolute right-0 top-full mt-2 w-52 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 py-2 z-20 animate-in fade-in slide-in-from-top-2 duration-200">
                                     {thread.status === "OPEN" && (
                                         <>
                                             <button
@@ -246,7 +224,7 @@ export function ThreadView({
                                                     onStatusChange("RESOLVED");
                                                     setShowMenu(false);
                                                 }}
-                                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
                                             >
                                                 <CheckCircle className="w-4 h-4 text-emerald-500" />
                                                 <span>Marquer comme résolu</span>
@@ -256,7 +234,7 @@ export function ThreadView({
                                                     onStatusChange("ARCHIVED");
                                                     setShowMenu(false);
                                                 }}
-                                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
                                             >
                                                 <Archive className="w-4 h-4 text-slate-400" />
                                                 <span>Archiver</span>
@@ -269,7 +247,7 @@ export function ThreadView({
                                                 onStatusChange("ARCHIVED");
                                                 setShowMenu(false);
                                             }}
-                                            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                                            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
                                         >
                                             <Archive className="w-4 h-4 text-slate-400" />
                                             <span>Archiver</span>
@@ -280,31 +258,42 @@ export function ThreadView({
                         )}
                     </div>
 
-                    {/* Close button */}
                     <button
                         onClick={onClose}
-                        className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                        className="p-2 text-slate-500 hover:text-slate-800 dark:hover:text-white rounded-lg transition-colors"
                     >
                         <X className="w-4 h-4" />
                     </button>
                 </div>
-            </div>
+            </header>
+
+            {/* Typing indicator - below header */}
+            {typingUserName && (
+                <div className="flex items-center gap-2 px-6 py-2 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800">
+                    <div className="flex gap-0.5">
+                        <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                        <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                        <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                    </div>
+                    <p className="text-xs text-indigo-600 dark:text-indigo-400 font-medium">
+                        {typingUserName} écrit…
+                    </p>
+                </div>
+            )}
 
             {/* AI Summary */}
             {thread.messages.length >= 5 && (
                 <ThreadSummary threadId={thread.id} />
             )}
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6 bg-gradient-to-b from-slate-50/30 to-white">
-                {/* Date separator for first message */}
+            {/* Messages - inspo: bg-background-light for message area */}
+            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6 bg-slate-50 dark:bg-slate-900/50">
+                {/* Date separator for first message - inspo style */}
                 {thread.messages.length > 0 && (
-                    <div className="flex items-center justify-center">
-                        <div className="px-3 py-1 bg-slate-100 rounded-full">
-                            <span className="text-[11px] font-medium text-slate-500">
-                                {format(new Date(thread.messages[0].createdAt), "EEEE d MMMM", { locale: fr })}
-                            </span>
-                        </div>
+                    <div className="flex justify-center">
+                        <span className="text-xs font-medium text-slate-400 bg-slate-200 dark:bg-slate-800 px-3 py-1 rounded-full">
+                            {format(new Date(thread.messages[0].createdAt), "EEEE d MMMM", { locale: fr })}
+                        </span>
                     </div>
                 )}
 
@@ -323,12 +312,10 @@ export function ThreadView({
                     return (
                         <div key={message.id}>
                             {showDateSeparator && (
-                                <div className="flex items-center justify-center my-6">
-                                    <div className="px-3 py-1 bg-slate-100 rounded-full">
-                                        <span className="text-[11px] font-medium text-slate-500">
-                                            {format(new Date(message.createdAt), "EEEE d MMMM", { locale: fr })}
-                                        </span>
-                                    </div>
+                                <div className="flex justify-center my-6">
+                                    <span className="text-xs font-medium text-slate-400 bg-slate-200 dark:bg-slate-800 px-3 py-1 rounded-full">
+                                        {format(new Date(message.createdAt), "EEEE d MMMM", { locale: fr })}
+                                    </span>
                                 </div>
                             )}
                             <MessageBubble
@@ -344,24 +331,30 @@ export function ThreadView({
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Composer */}
+            {/* Composer - inspo: toolbar, chips, visibility, keyboard hint */}
             {thread.status === "OPEN" && !thread.isBroadcast && (
-                <div className="px-6 py-4 border-t border-slate-200 bg-white space-y-3">
-                    {/* AI Suggestions */}
-                    {!messageContent && thread.messages.length > 0 && (
-                        <SuggestionChips
-                            threadId={thread.id}
-                            onSelect={(content) => setMessageContent(content)}
-                            className="mb-2"
+                <div className="p-6 bg-white dark:bg-[#151c2a] border-t border-slate-200 dark:border-slate-800">
+                    <div className="max-w-4xl mx-auto flex flex-col gap-3">
+                        {/* Quick suggestion chips */}
+                        {!messageContent && thread.messages.length > 0 && (
+                            <div className="flex gap-2 mb-1">
+                                <SuggestionChips
+                                    threadId={thread.id}
+                                    onSelect={(content) => setMessageContent(content)}
+                                />
+                                <TemplatePicker
+                                    onSelect={(content) => setMessageContent(content)}
+                                />
+                            </div>
+                        )}
+
+                        <MessageAttachments
+                            files={files}
+                            onChange={setFiles}
+                            disabled={isSending}
                         />
-                    )}
-                    <MessageAttachments
-                        files={files}
-                        onChange={setFiles}
-                        disabled={isSending}
-                    />
-                    <div className="flex items-end gap-3">
-                        <div className="flex-1 min-w-0 bg-slate-50 rounded-xl border border-slate-200 focus-within:border-indigo-300 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
+
+                        <div className="relative bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl shadow-sm focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition-all">
                             <RichTextEditor
                                 value={messageContent}
                                 onChange={(v, ids) => {
@@ -376,26 +369,34 @@ export function ThreadView({
                                 placeholder="Écrire un message... @mention pour notifier"
                                 disabled={isSending}
                                 mentionOptions={mentionOptions}
-                                minRows={1}
-                                maxRows={5}
+                                minRows={2}
+                                maxRows={6}
                             />
+                            <div className="flex justify-between items-center px-4 pb-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                                <div className="flex items-center gap-2 text-xs text-slate-400">
+                                    <span>Visible par : Tous les participants</span>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleSend}
+                                        disabled={(!messageContent.trim() && files.length === 0) || isSending}
+                                        className={cn(
+                                            "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm",
+                                            (messageContent.trim() || files.length > 0)
+                                                ? "bg-indigo-500 hover:bg-indigo-600 text-white shadow-indigo-500/30"
+                                                : "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
+                                        )}
+                                    >
+                                        Envoyer
+                                        <Send className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                        <TemplatePicker
-                            onSelect={(content) => setMessageContent(content)}
-                        />
-                        <button
-                            type="button"
-                            onClick={handleSend}
-                            disabled={(!messageContent.trim() && files.length === 0) || isSending}
-                            className={cn(
-                                "p-3 rounded-xl transition-all duration-200 flex-shrink-0 shadow-lg",
-                                (messageContent.trim() || files.length > 0)
-                                    ? "bg-gradient-to-br from-indigo-500 to-indigo-600 text-white hover:from-indigo-600 hover:to-indigo-700 shadow-indigo-500/25"
-                                    : "bg-slate-100 text-slate-400 shadow-none"
-                            )}
-                        >
-                            <Send className="w-5 h-5" />
-                        </button>
+                        <p className="text-center text-[10px] text-slate-400">
+                            Appuyez sur Entrée pour envoyer
+                        </p>
                     </div>
                 </div>
             )}
@@ -432,7 +433,7 @@ function MessageBubble({
     isOwn: boolean;
     showAvatar: boolean;
     currentUserId: string;
-    onReactionToggle?: () => void;
+    onReactionToggle?: (messageId: string, emoji: string) => Promise<void>;
 }) {
     // System messages
     if (message.type === "SYSTEM") {
@@ -445,53 +446,61 @@ function MessageBubble({
         );
     }
 
+    const hasReadReceipt = isOwn && message.readBy && message.readBy.length > 0;
+
     return (
         <div
             className={cn(
-                "flex gap-3 group",
+                "flex gap-4 group",
                 isOwn ? "flex-row-reverse" : "flex-row"
             )}
         >
-            {/* Avatar */}
+            {/* Avatar - inspo: size-8, circular */}
             {showAvatar ? (
                 <div
                     className={cn(
-                        "w-10 h-10 rounded-xl flex items-center justify-center text-sm font-semibold flex-shrink-0 shadow-sm",
+                        "size-8 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 mt-1",
                         isOwn
                             ? "bg-gradient-to-br from-indigo-500 to-indigo-600 text-white"
-                            : "bg-gradient-to-br from-slate-100 to-slate-200 text-slate-600"
+                            : "bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-600 text-slate-600 dark:text-slate-300"
                     )}
                 >
                     {message.author.initials}
                 </div>
             ) : (
-                <div className="w-10 flex-shrink-0" />
+                <div className="size-8 flex-shrink-0" />
             )}
 
-            {/* Content */}
-            <div className={cn("max-w-[70%] space-y-1", isOwn && "items-end")}>
+            {/* Content - inspo: chat bubbles with cut corner */}
+            <div className={cn("flex flex-col gap-1 max-w-[75%]", isOwn && "items-end")}>
                 {showAvatar && (
                     <div
                         className={cn(
-                            "flex items-center gap-2 mb-1.5 px-1",
+                            "flex items-baseline gap-2 px-1",
                             isOwn && "flex-row-reverse"
                         )}
                     >
-                        <span className="text-sm font-semibold text-slate-700">
-                            {message.author.name}
+                        <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                            {isOwn ? "Vous" : message.author.name}
                         </span>
-                        <span className="text-[11px] text-slate-400 flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
+                        <span className="text-xs text-slate-400 flex items-center gap-1">
                             {format(new Date(message.createdAt), "HH:mm", { locale: fr })}
+                            {(message as { isOptimistic?: boolean }).isOptimistic && (
+                                <span className="flex items-center gap-1 text-indigo-500">
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    Envoi…
+                                </span>
+                            )}
                         </span>
                     </div>
                 )}
                 <div
                     className={cn(
-                        "px-4 py-3 rounded-2xl text-sm leading-relaxed shadow-sm",
+                        "p-4 text-sm leading-relaxed shadow-sm",
+                        (message as { isOptimistic?: boolean }).isOptimistic && "opacity-90",
                         isOwn
-                            ? "bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-br-md"
-                            : "bg-white border border-slate-200 text-slate-800 rounded-bl-md"
+                            ? "bg-indigo-500 text-white rounded-2xl rounded-tr-none"
+                            : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 rounded-2xl rounded-tl-none"
                     )}
                 >
                     <MessageContent
@@ -511,27 +520,20 @@ function MessageBubble({
                     )}
                 </div>
 
-                {/* Read receipts */}
-                {isOwn && message.readBy && message.readBy.length > 0 && (
-                    <p className="text-[10px] text-slate-400 px-1 text-right">
-                        Lu par {message.readBy.map((r) => r.userName).join(", ")}
-                    </p>
+                {/* Read receipts - inspo: "Read" with done_all icon */}
+                {hasReadReceipt && (
+                    <span className="text-xs font-medium text-slate-400 flex items-center gap-1">
+                        Lu <CheckCheck className="w-3.5 h-3.5" />
+                    </span>
                 )}
 
-                {/* Reactions */}
-                {message.type === "TEXT" && (
+                {/* Reactions - hide for optimistic (sending) messages */}
+                {message.type === "TEXT" && !(message as { isOptimistic?: boolean }).isOptimistic && (
                     <MessageReactions
                         messageId={message.id}
                         reactions={message.reactions ?? []}
                         currentUserId={currentUserId}
-                        onToggle={async (msgId, emoji) => {
-                            await fetch(`/api/comms/messages/${msgId}/reactions`, {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ emoji }),
-                            });
-                            onReactionToggle?.();
-                        }}
+                        onToggle={(msgId, emoji) => onReactionToggle?.(msgId, emoji) ?? Promise.resolve()}
                         isOwn={isOwn}
                     />
                 )}
@@ -563,4 +565,6 @@ function MessageBubble({
     );
 }
 
-export default ThreadView;
+const MemoizedThreadView = memo(ThreadView);
+export default MemoizedThreadView;
+export { ThreadView };

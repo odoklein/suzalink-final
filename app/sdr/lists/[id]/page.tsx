@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { Card, Badge, Button, DataTable, useToast, Modal } from "@/components/ui";
+import { Card, Badge, Button, DataTable, useToast } from "@/components/ui";
 import type { Column } from "@/components/ui/DataTable";
+import { CompanyDrawer, ContactDrawer } from "@/components/drawers";
 import {
     ArrowLeft,
     List as ListIcon,
@@ -20,7 +21,6 @@ import {
     PenLine
 } from "lucide-react";
 import Link from "next/link";
-import { Input } from "@/components/ui";
 
 // ============================================
 // TYPES
@@ -91,14 +91,9 @@ export default function SDRListDetailPage({ params }: { params: Promise<{ id: st
     const [isLoading, setIsLoading] = useState(true);
     const [view, setView] = useState<"companies" | "contacts">("contacts"); // Default to contacts for SDR
 
-    // Edit Modal State
+    // Drawer state (contact or company fiche — view and edit)
     const [editContact, setEditContact] = useState<Contact | null>(null);
     const [editCompany, setEditCompany] = useState<Company | null>(null);
-    const [isSaving, setIsSaving] = useState(false);
-
-    // Editing Form Data
-    const [contactForm, setContactForm] = useState<Partial<Contact>>({});
-    const [companyForm, setCompanyForm] = useState<Partial<Company>>({});
 
     // Resolve params
     useEffect(() => {
@@ -152,75 +147,20 @@ export default function SDRListDetailPage({ params }: { params: Promise<{ id: st
     // EDIT HANDLERS
     // ============================================
 
-    const handleEditContact = (contact: Contact) => {
-        setEditContact(contact);
-        setContactForm({
-            firstName: contact.firstName || "",
-            lastName: contact.lastName || "",
-            email: contact.email || "",
-            phone: contact.phone || "",
-            title: contact.title || "",
-            linkedin: contact.linkedin || "",
-        });
+    const handleEditContact = (contact: Contact | (Contact & { companyName?: string })) => {
+        setEditCompany(null);
+        setEditContact({ ...(contact as Contact), missionId: list?.mission?.id } as Contact & { missionId?: string });
     };
 
     const handleEditCompany = (company: Company) => {
-        setEditCompany(company);
-        setCompanyForm({
-            name: company.name,
-            industry: company.industry || "",
-            country: company.country || "",
-            website: company.website || "",
-        });
-    }
-
-    const saveContact = async () => {
-        if (!editContact) return;
-        setIsSaving(true);
-        try {
-            const res = await fetch(`/api/contacts/${editContact.id}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(contactForm),
-            });
-            const json = await res.json();
-            if (json.success) {
-                success("Succès", "Contact mis à jour");
-                setEditContact(null);
-                fetchList(); // Refresh data
-            } else {
-                showError("Erreur", json.error);
-            }
-        } catch (e) {
-            showError("Erreur", "Sauvegarde échouée");
-        } finally {
-            setIsSaving(false);
-        }
+        setEditContact(null);
+        setEditCompany({ ...company, missionId: list?.mission?.id } as Company & { missionId?: string });
     };
 
-    const saveCompany = async () => {
-        if (!editCompany) return;
-        setIsSaving(true);
-        try {
-            const res = await fetch(`/api/companies/${editCompany.id}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(companyForm),
-            });
-            const json = await res.json();
-            if (json.success) {
-                success("Succès", "Société mise à jour");
-                setEditCompany(null);
-                fetchList();
-            } else {
-                showError("Erreur", json.error);
-            }
-        } catch (e) {
-            showError("Erreur", "Sauvegarde échouée");
-        } finally {
-            setIsSaving(false);
-        }
-    }
+    const handleContactFromCompanyDrawer = (contact: Contact) => {
+        setEditCompany(null);
+        setEditContact({ ...contact, companyName: editCompany?.name ?? undefined });
+    };
 
 
     // ============================================
@@ -401,109 +341,27 @@ export default function SDRListDetailPage({ params }: { params: Promise<{ id: st
                 />
             </Card>
 
-            {/* Edit Contact Modal */}
-            <Modal
+            {/* Contact drawer — view and edit */}
+            <ContactDrawer
                 isOpen={!!editContact}
                 onClose={() => setEditContact(null)}
-                title="Modifier le contact"
-            >
-                <div className="space-y-4 py-4">
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Prénom</label>
-                            <Input
-                                value={contactForm.firstName || ""}
-                                onChange={(e) => setContactForm(prev => ({ ...prev, firstName: e.target.value }))}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Nom</label>
-                            <Input
-                                value={contactForm.lastName || ""}
-                                onChange={(e) => setContactForm(prev => ({ ...prev, lastName: e.target.value }))}
-                            />
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-                        <Input
-                            value={contactForm.email || ""}
-                            onChange={(e) => setContactForm(prev => ({ ...prev, email: e.target.value }))}
-                        />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Téléphone</label>
-                            <Input
-                                value={contactForm.phone || ""}
-                                onChange={(e) => setContactForm(prev => ({ ...prev, phone: e.target.value }))}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Poste (Title)</label>
-                            <Input
-                                value={contactForm.title || ""}
-                                onChange={(e) => setContactForm(prev => ({ ...prev, title: e.target.value }))}
-                            />
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">LinkedIn URL</label>
-                        <Input
-                            value={contactForm.linkedin || ""}
-                            onChange={(e) => setContactForm(prev => ({ ...prev, linkedin: e.target.value }))}
-                        />
-                    </div>
-                </div>
-                <div className="flex justify-end gap-2 mt-6">
-                    <Button variant="ghost" onClick={() => setEditContact(null)}>Annuler</Button>
-                    <Button variant="primary" onClick={saveContact} isLoading={isSaving}>Enregistrer</Button>
-                </div>
-            </Modal>
+                contact={editContact}
+                onUpdate={() => fetchList()}
+                isManager={true}
+                listId={listId || undefined}
+                companies={companies.map((c) => ({ id: c.id, name: c.name }))}
+            />
 
-            {/* Edit Company Modal */}
-            <Modal
+            {/* Company drawer — view and edit */}
+            <CompanyDrawer
                 isOpen={!!editCompany}
                 onClose={() => setEditCompany(null)}
-                title="Modifier la société"
-            >
-                <div className="space-y-4 py-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Nom de la société</label>
-                        <Input
-                            value={companyForm.name || ""}
-                            onChange={(e) => setCompanyForm(prev => ({ ...prev, name: e.target.value }))}
-                        />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Industrie</label>
-                            <Input
-                                value={companyForm.industry || ""}
-                                onChange={(e) => setCompanyForm(prev => ({ ...prev, industry: e.target.value }))}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Pays</label>
-                            <Input
-                                value={companyForm.country || ""}
-                                onChange={(e) => setCompanyForm(prev => ({ ...prev, country: e.target.value }))}
-                            />
-                        </div>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Site Web</label>
-                        <Input
-                            value={companyForm.website || ""}
-                            onChange={(e) => setCompanyForm(prev => ({ ...prev, website: e.target.value }))}
-                        />
-                    </div>
-                </div>
-                <div className="flex justify-end gap-2 mt-6">
-                    <Button variant="ghost" onClick={() => setEditCompany(null)}>Annuler</Button>
-                    <Button variant="primary" onClick={saveCompany} isLoading={isSaving}>Enregistrer</Button>
-                </div>
-            </Modal>
+                company={editCompany}
+                onUpdate={() => fetchList()}
+                onContactClick={handleContactFromCompanyDrawer}
+                isManager={true}
+                listId={listId || undefined}
+            />
         </div>
     );
 }

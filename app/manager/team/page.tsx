@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useToast } from "@/components/ui";
+import { resolveActivityStatus, getStatusConfig } from "@/lib/activity/status-resolver";
 import {
     Users,
     Clock,
@@ -782,6 +783,13 @@ export default function TeamDashboardPage() {
     const [roleFilter, setRoleFilter] = useState<string>("all");
     const [leaderboardMetric, setLeaderboardMetric] = useState<"calls" | "meetings" | "hours">("calls");
 
+    // Trend data state
+    const [trendData, setTrendData] = useState<{
+        hours: { change: number; isPositive: boolean };
+        calls: { change: number; isPositive: boolean };
+        meetings: { change: number; isPositive: boolean };
+    } | null>(null);
+
     const weekDates = useMemo(() => getWeekDates(), []);
 
     // ============================================
@@ -791,22 +799,27 @@ export default function TeamDashboardPage() {
     const fetchData = useCallback(async () => {
         setIsLoading(true);
         try {
-            // Fetch team members (SDRs and BDs)
-            const [usersRes, blocksRes, actionsRes, activitiesRes] = await Promise.all([
+            // Fetch team members (SDRs and BDs), trend data, and daily activity
+            const [usersRes, blocksRes, actionsRes, activitiesRes, trendsRes, dailyActivityRes] = await Promise.all([
                 fetch("/api/users?role=SDR,BUSINESS_DEVELOPER"),
                 fetch(`/api/planning?startDate=${formatDate(weekDates[0])}&endDate=${formatDate(weekDates[4])}`),
                 fetch("/api/actions/stats"),
                 fetch("/api/actions/recent?limit=8"),
+                fetch("/api/analytics/team-trends"),
+                fetch(`/api/analytics/daily-activity?startDate=${formatDate(weekDates[0])}&endDate=${formatDate(weekDates[4])}`),
             ]);
 
             const usersJson = await usersRes.json();
             const blocksJson = await blocksRes.json();
             const actionsJson = await actionsRes.json();
             const activitiesJson = await activitiesRes.json();
+            const trendsJson = await trendsRes.json();
+            const dailyActivityJson = await dailyActivityRes.json();
 
             let teamMembers: TeamMember[] = [];
             let scheduleBlocks: ScheduleBlock[] = [];
             let actionStats: Record<string, any> = {};
+            let dailyActivityData: Record<string, Record<string, number>> = {};
 
             if (usersJson.success) {
                 teamMembers = usersJson.data.users || usersJson.data || [];
@@ -820,38 +833,54 @@ export default function TeamDashboardPage() {
                 actionStats = actionsJson.data || {};
             }
 
+            if (trendsJson.success) {
+                setTrendData(trendsJson.data);
+            }
+
+            if (dailyActivityJson.success) {
+                dailyActivityData = dailyActivityJson.data || {};
+            }
+
             if (activitiesJson.success) {
                 setRecentActivities(activitiesJson.data || []);
             }
 
-            // Fetch SDR activity status (chrono online/offline) for each SDR/BD
+            // Fetch SDR activity status in one batch call (avoids N+1)
             const sdrAndBd = teamMembers.filter(m => ["SDR", "BUSINESS_DEVELOPER"].includes(m.role));
-            const activityResults = await Promise.all(
-                sdrAndBd.map((m) =>
-                    fetch(`/api/sdr/activity?userId=${m.id}`)
-                        .then((r) => r.json())
-                        .then((j) => ({ userId: m.id, isActive: !!j?.data?.isActive }))
-                        .catch(() => ({ userId: m.id, isActive: false }))
-                )
-            );
-            const activityByUserId = new Map(activityResults.map((a) => [a.userId, a.isActive]));
+            const activityByUserId = new Map<string, boolean>();
+            if (sdrAndBd.length > 0) {
+                try {
+                    const ids = sdrAndBd.map((m) => m.id).join(",");
+                    const activityRes = await fetch(`/api/sdr/activity/batch?userIds=${encodeURIComponent(ids)}`);
+                    const activityJson = await activityRes.json();
+                    if (activityJson.success && activityJson.data) {
+                        for (const [uid, v] of Object.entries(activityJson.data as Record<string, { isActive: boolean }>)) {
+                            activityByUserId.set(uid, v?.isActive ?? false);
+                        }
+                    }
+                } catch {
+                    // Fallback: all offline
+                }
+            }
 
             // Compute metrics for each member
             const membersWithMetrics = teamMembers.map((member, index) => {
                 const memberBlocks = scheduleBlocks.filter(b => b.sdrId === member.id);
                 const memberStats = actionStats[member.id] || {};
 
-                // Calculate scheduled hours per day
+                // Calculate scheduled hours and REAL completed hours per day
                 const dailyHours = weekDates.map((date, dayIndex) => {
                     const dateStr = formatDate(date);
                     const dayBlocks = memberBlocks.filter(b => b.date.split("T")[0] === dateStr);
                     const scheduled = dayBlocks.reduce((sum, b) => sum + calcHours(b.startTime, b.endTime), 0);
-                    const completed = dayBlocks
-                        .filter(b => b.status === "COMPLETED")
-                        .reduce((sum, b) => sum + calcHours(b.startTime, b.endTime), 0);
+
+                    // Get REAL completed hours from activity data
+                    const memberActivityData = dailyActivityData[member.id] || {};
+                    const completed = memberActivityData[dateStr] || 0;
 
                     return {
                         day: ["L", "M", "M", "J", "V"][dayIndex],
+                        date: dateStr,
                         scheduled,
                         completed,
                     };
@@ -1039,7 +1068,7 @@ export default function TeamDashboardPage() {
                     label="Heures cette semaine"
                     value={formatHours(teamStats.totalCompletedHours)}
                     subValue={`${teamStats.utilizationRate}% utilisation`}
-                    trend={{ value: 12, isPositive: true }}
+                    trend={trendData?.hours ? { value: trendData.hours.change, isPositive: trendData.hours.isPositive } : undefined}
                     color="emerald"
                 />
                 <StatCard
@@ -1047,7 +1076,7 @@ export default function TeamDashboardPage() {
                     label="Appels totaux"
                     value={teamStats.totalCalls}
                     subValue="cette semaine"
-                    trend={{ value: 8, isPositive: true }}
+                    trend={trendData?.calls ? { value: trendData.calls.change, isPositive: trendData.calls.isPositive } : undefined}
                     color="blue"
                 />
                 <StatCard
@@ -1055,7 +1084,7 @@ export default function TeamDashboardPage() {
                     label="RDV bookés"
                     value={teamStats.totalMeetings}
                     subValue={`${teamStats.avgConversionRate}% taux conv.`}
-                    trend={{ value: 15, isPositive: true }}
+                    trend={trendData?.meetings ? { value: trendData.meetings.change, isPositive: trendData.meetings.isPositive } : undefined}
                     color="amber"
                 />
             </div>

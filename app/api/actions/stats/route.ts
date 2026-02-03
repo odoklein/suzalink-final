@@ -5,7 +5,7 @@ import { authOptions } from "@/lib/auth";
 
 // ============================================
 // GET /api/actions/stats
-// Returns action statistics per user for team dashboard
+// Returns action statistics per user for team dashboard (bulk queries, no N+1)
 // ============================================
 
 export async function GET(request: NextRequest) {
@@ -18,136 +18,78 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        // Parse query params
         const { searchParams } = new URL(request.url);
         const startDate = searchParams.get("startDate");
         const endDate = searchParams.get("endDate");
         const userId = searchParams.get("userId");
 
-        // Build date filter
-        const dateFilter: any = {};
-        if (startDate) {
-            dateFilter.gte = new Date(startDate);
-        }
-        if (endDate) {
-            dateFilter.lte = new Date(endDate);
-        }
+        const dateFilter: { gte?: Date; lte?: Date } = {};
+        if (startDate) dateFilter.gte = new Date(startDate);
+        if (endDate) dateFilter.lte = new Date(endDate);
+        const hasDateFilter = Object.keys(dateFilter).length > 0;
 
-        // Get all SDRs and BDs
+        const now = new Date();
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(now.getDate() - now.getDay() + 1);
+        startOfWeek.setHours(0, 0, 0, 0);
+        const startOfDay = new Date(now);
+        startOfDay.setHours(0, 0, 0, 0);
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
         const users = await prisma.user.findMany({
             where: {
                 role: { in: ["SDR", "BUSINESS_DEVELOPER"] },
                 isActive: true,
-                ...(userId && { id: userId }),
+                ...(userId ? { id: userId } : {}),
             },
-            select: {
-                id: true,
-                name: true,
-            },
+            select: { id: true, name: true },
         });
+        const userIds = users.map((u) => u.id);
+        if (userIds.length === 0) {
+            return NextResponse.json({
+                success: true,
+                data: {},
+                teamStats: { totalCalls: 0, totalMeetings: 0, weeklyTotal: 0, weeklyMeetings: 0 },
+            });
+        }
 
-        // Get action counts per user
-        const userStats: Record<string, any> = {};
+        const sdrWhere = { sdrId: { in: userIds } };
 
-        for (const user of users) {
-            // Get actions for this user
-            const actions = await prisma.action.groupBy({
-                by: ["result"],
-                where: {
-                    sdrId: user.id,
-                    ...(Object.keys(dateFilter).length > 0 && {
-                        createdAt: dateFilter,
-                    }),
-                },
+        // Bulk queries: 4 groupBy + 1 findMany (no N+1)
+        const [rangeGroup, weekGroup, dayGroup, monthGroup, actionsForMission] = await Promise.all([
+            hasDateFilter
+                ? prisma.action.groupBy({
+                    by: ["sdrId", "result"],
+                    where: { ...sdrWhere, createdAt: dateFilter },
+                    _count: true,
+                })
+                : prisma.action.groupBy({
+                    by: ["sdrId", "result"],
+                    where: sdrWhere,
+                    _count: true,
+                }),
+            prisma.action.groupBy({
+                by: ["sdrId", "result"],
+                where: { ...sdrWhere, createdAt: { gte: startOfWeek } },
                 _count: true,
-            });
-
-            // Calculate totals
-            const totalActions = actions.reduce((sum, a) => sum + a._count, 0);
-            const meetingsBooked = actions.find(a => a.result === "MEETING_BOOKED")?._count || 0;
-            const interested = actions.find(a => a.result === "INTERESTED")?._count || 0;
-            const callbacks = actions.find(a => a.result === "CALLBACK_REQUESTED")?._count || 0;
-
-            // Get weekly breakdown
-            const now = new Date();
-            const startOfWeek = new Date(now);
-            startOfWeek.setDate(now.getDate() - now.getDay() + 1); // Monday
-            startOfWeek.setHours(0, 0, 0, 0);
-
-            const weeklyActions = await prisma.action.count({
-                where: {
-                    sdrId: user.id,
-                    createdAt: { gte: startOfWeek },
-                },
-            });
-
-            const weeklyMeetings = await prisma.action.count({
-                where: {
-                    sdrId: user.id,
-                    result: "MEETING_BOOKED",
-                    createdAt: { gte: startOfWeek },
-                },
-            });
-
-            // Get today's stats
-            const startOfDay = new Date();
-            startOfDay.setHours(0, 0, 0, 0);
-
-            const todayActions = await prisma.action.count({
-                where: {
-                    sdrId: user.id,
-                    createdAt: { gte: startOfDay },
-                },
-            });
-
-            // Get today's actions breakdown by result
-            const todayActionsByResult = await prisma.action.groupBy({
-                by: ["result"],
-                where: {
-                    sdrId: user.id,
-                    createdAt: { gte: startOfDay },
-                },
+            }),
+            prisma.action.groupBy({
+                by: ["sdrId", "result"],
+                where: { ...sdrWhere, createdAt: { gte: startOfDay } },
                 _count: true,
-            });
-
-            const todayMeetings = await prisma.action.count({
+            }),
+            prisma.action.groupBy({
+                by: ["sdrId", "result"],
+                where: { ...sdrWhere, createdAt: { gte: startOfMonth } },
+                _count: true,
+            }),
+            prisma.action.findMany({
                 where: {
-                    sdrId: user.id,
-                    result: "MEETING_BOOKED",
-                    createdAt: { gte: startOfDay },
-                },
-            });
-
-            // Get monthly stats
-            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-
-            const monthlyActions = await prisma.action.count({
-                where: {
-                    sdrId: user.id,
-                    createdAt: { gte: startOfMonth },
-                },
-            });
-
-            const monthlyMeetings = await prisma.action.count({
-                where: {
-                    sdrId: user.id,
-                    result: "MEETING_BOOKED",
-                    createdAt: { gte: startOfMonth },
-                },
-            });
-
-            // Calculate conversion rate
-            const conversionRate = totalActions > 0
-                ? ((meetingsBooked / totalActions) * 100).toFixed(1)
-                : 0;
-
-            // Per-mission breakdown (for team [id] Performance tab)
-            const actionsByMission = await prisma.action.findMany({
-                where: {
-                    sdrId: user.id,
-                    ...(Object.keys(dateFilter).length > 0 && { createdAt: dateFilter }),
+                    ...sdrWhere,
+                    ...(hasDateFilter && { createdAt: dateFilter }),
                 },
                 select: {
+                    sdrId: true,
                     result: true,
                     campaign: {
                         select: {
@@ -156,54 +98,74 @@ export async function GET(request: NextRequest) {
                         },
                     },
                 },
-            });
+            }),
+        ]);
 
-            const missionMap = new Map<string, { missionId: string; missionName: string; calls: number; meetings: number }>();
-            for (const a of actionsByMission) {
-                const missionId = a.campaign?.missionId ?? "";
-                const missionName = a.campaign?.mission?.name ?? "Mission";
-                if (!missionId) continue;
-                const existing = missionMap.get(missionId);
-                if (existing) {
-                    existing.calls += 1;
-                    if (a.result === "MEETING_BOOKED") existing.meetings += 1;
-                } else {
-                    missionMap.set(missionId, {
-                        missionId,
-                        missionName,
-                        calls: 1,
-                        meetings: a.result === "MEETING_BOOKED" ? 1 : 0,
-                    });
+        // Aggregate groupBy results per user
+        function agg(rows: { sdrId: string; result: string; _count: number }[]) {
+            const byUser: Record<string, { total: number; MEETING_BOOKED: number; byResult: Record<string, number> }> = {};
+            for (const r of rows) {
+                if (!byUser[r.sdrId]) {
+                    byUser[r.sdrId] = { total: 0, MEETING_BOOKED: 0, byResult: {} };
                 }
+                byUser[r.sdrId].total += r._count;
+                byUser[r.sdrId].byResult[r.result] = r._count;
+                if (r.result === "MEETING_BOOKED") byUser[r.sdrId].MEETING_BOOKED += r._count;
             }
-            const byMission = Array.from(missionMap.values());
+            return byUser;
+        }
+
+        const rangeAgg = agg(rangeGroup.map((g) => ({ sdrId: g.sdrId, result: g.result, _count: g._count })));
+        const weekAgg = agg(weekGroup.map((g) => ({ sdrId: g.sdrId, result: g.result, _count: g._count })));
+        const dayAgg = agg(dayGroup.map((g) => ({ sdrId: g.sdrId, result: g.result, _count: g._count })));
+        const monthAgg = agg(monthGroup.map((g) => ({ sdrId: g.sdrId, result: g.result, _count: g._count })));
+
+        const missionMap = new Map<string, Record<string, { missionId: string; missionName: string; calls: number; meetings: number }>>();
+        for (const a of actionsForMission) {
+            const missionId = a.campaign?.missionId ?? "";
+            const missionName = a.campaign?.mission?.name ?? "Mission";
+            if (!missionId) continue;
+            if (!missionMap.has(a.sdrId)) missionMap.set(a.sdrId, {});
+            const userMissions = missionMap.get(a.sdrId)!;
+            const existing = userMissions[missionId];
+            if (existing) {
+                existing.calls += 1;
+                if (a.result === "MEETING_BOOKED") existing.meetings += 1;
+            } else {
+                userMissions[missionId] = { missionId, missionName, calls: 1, meetings: a.result === "MEETING_BOOKED" ? 1 : 0 };
+            }
+        }
+
+        const userStats: Record<string, any> = {};
+        for (const user of users) {
+            const r = rangeAgg[user.id];
+            const w = weekAgg[user.id];
+            const d = dayAgg[user.id];
+            const m = monthAgg[user.id];
+            const totalActions = r?.total ?? 0;
+            const meetingsBooked = r?.MEETING_BOOKED ?? 0;
+            const conversionRate = totalActions > 0 ? ((meetingsBooked / totalActions) * 100).toFixed(1) : 0;
+            const byMission = missionMap.get(user.id) ? Object.values(missionMap.get(user.id)!) : [];
 
             userStats[user.id] = {
                 userId: user.id,
                 userName: user.name,
                 totalActions,
                 meetingsBooked,
-                interested,
-                callbacks,
+                interested: r?.byResult?.INTERESTED ?? 0,
+                callbacks: r?.byResult?.CALLBACK_REQUESTED ?? 0,
                 conversionRate: Number(conversionRate),
-                // Weekly
-                callsThisWeek: weeklyActions,
-                meetingsThisWeek: weeklyMeetings,
-                // Today
-                callsToday: todayActions,
-                meetingsToday: todayMeetings,
-                resultBreakdownToday: todayActionsByResult.map(a => ({
-                    result: a.result,
-                    count: a._count,
-                })),
-                // Monthly
-                callsThisMonth: monthlyActions,
-                meetingsThisMonth: monthlyMeetings,
+                callsThisWeek: w?.total ?? 0,
+                meetingsThisWeek: w?.MEETING_BOOKED ?? 0,
+                callsToday: d?.total ?? 0,
+                meetingsToday: d?.MEETING_BOOKED ?? 0,
+                resultBreakdownToday: d?.byResult ? Object.entries(d.byResult).map(([result, count]) => ({ result, count })) : [],
+                callsThisMonth: m?.total ?? 0,
+                meetingsThisMonth: m?.MEETING_BOOKED ?? 0,
                 byMission,
             };
         }
 
-        // Calculate team totals
         const teamStats = {
             totalCalls: Object.values(userStats).reduce((sum: number, u: any) => sum + u.totalActions, 0),
             totalMeetings: Object.values(userStats).reduce((sum: number, u: any) => sum + u.meetingsBooked, 0),
@@ -211,12 +173,14 @@ export async function GET(request: NextRequest) {
             weeklyMeetings: Object.values(userStats).reduce((sum: number, u: any) => sum + u.meetingsThisWeek, 0),
         };
 
-        return NextResponse.json({
-            success: true,
-            data: userStats,
-            teamStats,
-        });
-
+        return NextResponse.json(
+            { success: true, data: userStats, teamStats },
+            {
+                headers: {
+                    "Cache-Control": "private, s-maxage=15, stale-while-revalidate=30",
+                },
+            }
+        );
     } catch (error) {
         console.error("[GET /api/actions/stats] Error:", error);
         return NextResponse.json(

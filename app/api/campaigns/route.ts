@@ -32,7 +32,7 @@ const createCampaignSchema = z.object({
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(['MANAGER', 'CLIENT', 'BUSINESS_DEVELOPER']);
+    await requireRole(['MANAGER', 'CLIENT', 'BUSINESS_DEVELOPER', 'SDR']);
     const { searchParams } = new URL(request.url);
     const { page, limit, skip } = getPaginationParams(searchParams);
 

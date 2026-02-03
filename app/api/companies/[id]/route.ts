@@ -19,6 +19,7 @@ const updateCompanySchema = z.object({
     country: z.string().optional().nullable(),
     website: z.string().optional().nullable(),
     size: z.string().optional().nullable(),
+    phone: z.string().optional().nullable(),
 });
 
 // ============================================
@@ -29,7 +30,7 @@ export const GET = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER', 'SDR']);
+    await requireRole(['MANAGER', 'SDR', 'BUSINESS_DEVELOPER']);
     const { id } = await params;
 
     const company = await prisma.company.findUnique({
@@ -74,7 +75,7 @@ export const PUT = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER', 'SDR', 'BUSINESS_DEVELOPER']);
     const { id } = await params;
     const data = await validateRequest(request, updateCompanySchema);
 
@@ -94,6 +95,7 @@ export const PUT = withErrorHandler(async (
             country: data.country ?? company.country,
             website: data.website ?? company.website,
             size: data.size ?? company.size,
+            phone: data.phone ?? company.phone,
         },
         include: {
             contacts: true,

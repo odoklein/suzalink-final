@@ -27,8 +27,10 @@ const createActionSchema = z.object({
         'CALLBACK_REQUESTED',
         'MEETING_BOOKED',
         'DISQUALIFIED',
+        'ENVOIE_MAIL',
     ]),
     note: z.string().max(500, 'Note trop longue (max 500 caractères)').optional(),
+    callbackDate: z.union([z.string(), z.date()]).optional().transform((s) => (s ? (typeof s === 'string' ? new Date(s) : s) : undefined)),
     duration: z.number().positive().max(7200, 'Durée invalide').optional(),
 }).refine(data => data.contactId || data.companyId, {
     message: 'Contact ou Company requis',
@@ -59,11 +61,15 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     const result = searchParams.get('result');
     const from = searchParams.get('from');
     const to = searchParams.get('to');
+    const contactId = searchParams.get('contactId');
+    const companyId = searchParams.get('companyId');
 
     if (missionId) filters.missionId = missionId;
     if (result) filters.result = result;
     if (from) filters.from = new Date(from);
     if (to) filters.to = new Date(to);
+    if (contactId) filters.contactId = contactId;
+    if (companyId) filters.companyId = companyId;
 
     // Use service layer
     const { actions, total } = await actionService.getActions(filters);
@@ -80,21 +86,28 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     const data = await validateRequest(request, createActionSchema);
 
     // Validate required note for certain results
-    if ((data.result === 'INTERESTED' || data.result === 'CALLBACK_REQUESTED') && !data.note?.trim()) {
+    if ((data.result === 'INTERESTED' || data.result === 'CALLBACK_REQUESTED' || data.result === 'ENVOIE_MAIL') && !data.note?.trim()) {
         return errorResponse('Une note est requise pour ce type de résultat', 400);
     }
 
     // Use service layer with transaction
-    const action = await actionService.createAction({
-        contactId: data.contactId,
-        companyId: data.companyId,
-        sdrId: session.user.id,
-        campaignId: data.campaignId,
-        channel: data.channel,
-        result: data.result,
-        note: data.note,
-        duration: data.duration,
-    });
-
-    return successResponse(action, 201);
+    try {
+        const action = await actionService.createAction({
+            contactId: data.contactId,
+            companyId: data.companyId,
+            sdrId: session.user.id,
+            campaignId: data.campaignId,
+            channel: data.channel,
+            result: data.result,
+            note: data.note,
+            callbackDate: data.callbackDate,
+            duration: data.duration,
+        });
+        return successResponse(action, 201);
+    } catch (err) {
+        if (err instanceof Error && err.message === 'DUPLICATE_CALLBACK') {
+            return errorResponse('Un rappel est déjà en attente pour ce contact/campagne. Traitez-le ou reprogrammez-le avant d\'en créer un nouveau.', 409);
+        }
+        throw err;
+    }
 });

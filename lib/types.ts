@@ -17,7 +17,8 @@ export type ActionResult =
     | "INTERESTED"
     | "CALLBACK_REQUESTED"
     | "MEETING_BOOKED"
-    | "DISQUALIFIED";
+    | "DISQUALIFIED"
+    | "ENVOIE_MAIL";
 
 // Opportunity urgency levels
 export type Urgency = "SHORT" | "MEDIUM" | "LONG";
@@ -30,6 +31,7 @@ export const ACTION_RESULT_LABELS: Record<ActionResult, string> = {
     CALLBACK_REQUESTED: "Rappel demandé",
     MEETING_BOOKED: "Meeting booké",
     DISQUALIFIED: "Disqualifié",
+    ENVOIE_MAIL: "Envoie mail",
 };
 
 export const CHANNEL_LABELS: Record<Channel, string> = {

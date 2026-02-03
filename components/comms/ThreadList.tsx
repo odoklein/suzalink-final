@@ -10,17 +10,10 @@ import {
     Users,
     MessageCircle,
     Megaphone,
-    Circle,
-    CheckCircle2,
-    Archive,
-    ChevronRight,
-    Clock,
-    User,
 } from "lucide-react";
 import type {
     CommsThreadListItem,
     CommsChannelType,
-    CommsThreadStatus,
 } from "@/lib/comms/types";
 
 interface ThreadListProps {
@@ -40,66 +33,40 @@ const CHANNEL_ICONS: Record<CommsChannelType, typeof Target> = {
     BROADCAST: Megaphone,
 };
 
-const STATUS_ICONS: Record<CommsThreadStatus, typeof Circle> = {
-    OPEN: Circle,
-    RESOLVED: CheckCircle2,
-    ARCHIVED: Archive,
+const CHANNEL_TAGS: Record<CommsChannelType, string> = {
+    MISSION: "Mission",
+    CLIENT: "Client",
+    CAMPAIGN: "Campagne",
+    GROUP: "Groupe",
+    DIRECT: "Direct",
+    BROADCAST: "Inbound",
 };
-
-const CHANNEL_COLORS: Record<CommsChannelType, { bg: string; text: string; icon: string }> = {
-    MISSION: { bg: "bg-indigo-50", text: "text-indigo-700", icon: "text-indigo-500" },
-    CLIENT: { bg: "bg-emerald-50", text: "text-emerald-700", icon: "text-emerald-500" },
-    CAMPAIGN: { bg: "bg-amber-50", text: "text-amber-700", icon: "text-amber-500" },
-    GROUP: { bg: "bg-violet-50", text: "text-violet-700", icon: "text-violet-500" },
-    DIRECT: { bg: "bg-blue-50", text: "text-blue-700", icon: "text-blue-500" },
-    BROADCAST: { bg: "bg-rose-50", text: "text-rose-700", icon: "text-rose-500" },
-};
-
-const STATUS_COLORS: Record<CommsThreadStatus, string> = {
-    OPEN: "text-emerald-500",
-    RESOLVED: "text-slate-400",
-    ARCHIVED: "text-slate-300",
-};
-
-// Helper to extract recipient name from direct message thread
-function getDirectMessageRecipient(thread: CommsThreadListItem, currentUserId?: string): string | null {
-    if (thread.channelType !== "DIRECT") return null;
-
-    // For direct messages, the channelName often contains the participant info
-    // or we can parse from subject which is "Message avec [Name]"
-    if (thread.subject.startsWith("Message avec ")) {
-        return thread.subject.replace("Message avec ", "");
-    }
-
-    // Fallback to channel name if it's not the generic "Direct" label
-    if (thread.channelName && thread.channelName !== "Direct") {
-        return thread.channelName;
-    }
-
-    return null;
-}
 
 // Get display name for a thread
-function getThreadDisplayName(thread: CommsThreadListItem, currentUserId?: string): string {
+function getThreadDisplayName(thread: CommsThreadListItem, _currentUserId?: string): string {
     if (thread.channelType === "DIRECT") {
-        const recipient = getDirectMessageRecipient(thread, currentUserId);
-        if (recipient) return recipient;
+        if (thread.otherParticipantName) return thread.otherParticipantName;
+        if (thread.subject.startsWith("Message avec ")) {
+            return thread.subject.replace("Message avec ", "");
+        }
     }
-
-    // For other types, show the channel name (mission name, client name, etc.)
     return thread.channelName;
 }
 
-// Get the subtitle for the thread
-function getThreadSubtitle(thread: CommsThreadListItem): string | null {
-    if (thread.channelType === "DIRECT") {
-        return "Message direct";
-    }
-    if (thread.channelType === "BROADCAST") {
-        return "Annonce";
-    }
-    // For mission/client/group, show the subject as subtitle
-    return thread.subject !== thread.channelName ? thread.subject : null;
+// Short relative time (5m, 1h, Yesterday, 2d ago)
+function formatShortTime(date: Date): string {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return "À l'instant";
+    if (diffMins < 60) return `${diffMins}m`;
+    if (diffHours < 24) return `${diffHours}h`;
+    if (diffDays === 1) return "Hier";
+    if (diffDays < 7) return `${diffDays}j`;
+    return formatDistanceToNow(date, { addSuffix: false, locale: fr });
 }
 
 export function ThreadList({
@@ -111,13 +78,17 @@ export function ThreadList({
 }: ThreadListProps) {
     if (isLoading) {
         return (
-            <div className="p-4 space-y-3">
+            <div className="space-y-0">
                 {[1, 2, 3, 4, 5].map((i) => (
                     <div
                         key={i}
-                        className="animate-pulse rounded-xl overflow-hidden"
+                        className="flex items-start gap-3 p-4 border-b border-slate-100 dark:border-slate-800 animate-pulse"
                     >
-                        <div className="h-24 bg-gradient-to-r from-slate-100 to-slate-50" />
+                        <div className="size-10 rounded-full bg-slate-200 dark:bg-slate-700 shrink-0 mt-1" />
+                        <div className="flex-1 space-y-2">
+                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-3/4" />
+                            <div className="h-3 bg-slate-100 dark:bg-slate-800 rounded w-1/2" />
+                        </div>
                     </div>
                 ))}
             </div>
@@ -127,10 +98,10 @@ export function ThreadList({
     if (threads.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center py-16 px-4">
-                <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
                     <MessageCircle className="w-8 h-8 text-slate-400" />
                 </div>
-                <p className="text-base font-medium text-slate-700 mb-1">
+                <p className="text-base font-medium text-slate-700 dark:text-slate-300 mb-1">
                     Aucune discussion
                 </p>
                 <p className="text-sm text-slate-500 text-center">
@@ -141,165 +112,119 @@ export function ThreadList({
     }
 
     return (
-        <div className="p-3 space-y-2">
+        <div className="flex flex-col">
             {threads.map((thread) => {
                 const ChannelIcon = CHANNEL_ICONS[thread.channelType];
-                const StatusIcon = STATUS_ICONS[thread.status];
-                const channelColors = CHANNEL_COLORS[thread.channelType];
                 const isSelected = selectedId === thread.id;
                 const hasUnread = thread.unreadCount > 0;
-
                 const displayName = getThreadDisplayName(thread, currentUserId);
-                const subtitle = getThreadSubtitle(thread);
-                const isDirectMessage = thread.channelType === "DIRECT";
+                const lastPreview = thread.lastMessage
+                    ? thread.channelType === "DIRECT"
+                        ? thread.lastMessage.content
+                        : `${thread.lastMessage.authorName}: ${thread.lastMessage.content}`
+                    : null;
+                const updatedDate = new Date(thread.updatedAt);
 
                 return (
                     <button
                         key={thread.id}
                         onClick={() => onSelect(thread)}
                         className={cn(
-                            "w-full text-left group relative rounded-xl transition-all duration-200",
-                            "hover:shadow-md hover:shadow-slate-200/50",
-                            isSelected
-                                ? "bg-gradient-to-r from-indigo-50 to-indigo-100/50 ring-2 ring-indigo-500/20 shadow-md"
-                                : hasUnread
-                                    ? "bg-gradient-to-r from-blue-50/50 to-white hover:from-blue-50/70"
-                                    : "bg-white hover:bg-slate-50 border border-slate-100 hover:border-slate-200"
+                            "w-full text-left flex items-start gap-3 p-4 border-b border-slate-100 dark:border-slate-800",
+                            "hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer relative group transition-colors",
+                            isSelected && "bg-indigo-500/5 dark:bg-indigo-500/10",
+                            !isSelected && hasUnread && "bg-slate-50/50 dark:bg-slate-800/30"
                         )}
                     >
-                        {/* Active indicator */}
+                        {/* Active indicator - left accent bar */}
                         {isSelected && (
-                            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-3/5 bg-indigo-500 rounded-r-full" />
+                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500 rounded-r" />
                         )}
 
-                        <div className="p-4">
-                            {/* Header row */}
-                            <div className="flex items-start gap-3">
-                                {/* Avatar/Icon */}
-                                {isDirectMessage ? (
-                                    // For direct messages, show a user avatar with initials
-                                    <div
-                                        className={cn(
-                                            "w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-105",
-                                            "bg-gradient-to-br from-blue-100 to-blue-200 text-blue-600 font-semibold text-sm"
-                                        )}
-                                    >
-                                        {displayName.charAt(0).toUpperCase()}
-                                    </div>
-                                ) : (
-                                    <div
-                                        className={cn(
-                                            "w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-105",
-                                            channelColors.bg
-                                        )}
-                                    >
-                                        <ChannelIcon className={cn("w-5 h-5", channelColors.icon)} />
-                                    </div>
-                                )}
-
-                                {/* Content */}
-                                <div className="flex-1 min-w-0">
-                                    {/* Channel type indicator & status */}
-                                    <div className="flex items-center gap-2 mb-1">
-                                        {!isDirectMessage && (
-                                            <span className={cn(
-                                                "text-[11px] font-medium px-1.5 py-0.5 rounded-full",
-                                                channelColors.bg, channelColors.text
-                                            )}>
-                                                {thread.channelType === "MISSION" && "Mission"}
-                                                {thread.channelType === "CLIENT" && "Client"}
-                                                {thread.channelType === "GROUP" && "Groupe"}
-                                                {thread.channelType === "CAMPAIGN" && "Campagne"}
-                                                {thread.channelType === "BROADCAST" && "Annonce"}
-                                            </span>
-                                        )}
-                                        {thread.isBroadcast && (
-                                            <span className="text-[10px] font-semibold text-rose-600 bg-rose-100 px-2 py-0.5 rounded-full">
-                                                Annonce
-                                            </span>
-                                        )}
-                                        {thread.status !== "OPEN" && (
-                                            <StatusIcon className={cn("w-3.5 h-3.5", STATUS_COLORS[thread.status])} />
-                                        )}
-                                    </div>
-
-                                    {/* Display name (person name for direct messages, channel name for others) */}
-                                    <h4
-                                        className={cn(
-                                            "text-sm truncate leading-snug",
-                                            hasUnread
-                                                ? "font-semibold text-slate-900"
-                                                : "font-medium text-slate-700"
-                                        )}
-                                    >
-                                        {displayName}
-                                    </h4>
-
-                                    {/* Subtitle if exists (subject for non-direct) */}
-                                    {subtitle && !isDirectMessage && (
-                                        <p className="text-xs text-slate-500 truncate mt-0.5">
-                                            {subtitle}
-                                        </p>
-                                    )}
-
-                                    {/* Last message preview */}
-                                    {thread.lastMessage && (
-                                        <p className="text-xs text-slate-500 truncate mt-1.5 leading-relaxed">
-                                            {isDirectMessage ? (
-                                                // For direct messages, don't show author name as it's obvious
-                                                thread.lastMessage.content
-                                            ) : (
-                                                <>
-                                                    <span className="font-medium text-slate-600">
-                                                        {thread.lastMessage.authorName}:
-                                                    </span>{" "}
-                                                    {thread.lastMessage.content}
-                                                </>
-                                            )}
-                                        </p>
-                                    )}
-                                </div>
-
-                                {/* Right side: time & unread badge */}
-                                <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                                    <span className="text-[11px] text-slate-400 flex items-center gap-1">
-                                        <Clock className="w-3 h-3" />
-                                        {formatDistanceToNow(new Date(thread.updatedAt), {
-                                            addSuffix: false,
-                                            locale: fr,
-                                        })}
-                                    </span>
-                                    {hasUnread ? (
-                                        <span className="min-w-[22px] h-[22px] rounded-full bg-gradient-to-br from-indigo-500 to-indigo-600 text-white text-[11px] font-bold flex items-center justify-center px-1.5 shadow-sm shadow-indigo-500/25">
-                                            {thread.unreadCount > 9 ? "9+" : thread.unreadCount}
-                                        </span>
-                                    ) : (
-                                        <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-slate-400 transition-colors" />
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Footer: participants & messages (hide for direct) */}
-                            {!isDirectMessage && (
-                                <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100/80 ml-14">
-                                    <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                                        <Users className="w-3.5 h-3.5" />
-                                        <span>
-                                            {thread.participantCount} participant
-                                            {thread.participantCount > 1 ? "s" : ""}
-                                        </span>
-                                    </div>
-                                    <div className="w-1 h-1 rounded-full bg-slate-300" />
-                                    <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                                        <MessageCircle className="w-3.5 h-3.5" />
-                                        <span>
-                                            {thread.messageCount} message
-                                            {thread.messageCount > 1 ? "s" : ""}
-                                        </span>
-                                    </div>
-                                </div>
+                        {/* Avatar - circular like inspo */}
+                        <div
+                            className={cn(
+                                "size-10 rounded-full flex items-center justify-center shrink-0 mt-0.5 flex-shrink-0",
+                                thread.channelType === "DIRECT"
+                                    ? "bg-gradient-to-br from-indigo-100 to-indigo-200 dark:from-indigo-900/50 dark:to-indigo-800/50 text-indigo-600 dark:text-indigo-400 font-semibold text-sm"
+                                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                            )}
+                        >
+                            {thread.channelType === "DIRECT" ? (
+                                displayName.charAt(0).toUpperCase()
+                            ) : (
+                                <ChannelIcon className="w-5 h-5" />
                             )}
                         </div>
+
+                        {/* Content */}
+                        <div className="flex flex-col flex-1 min-w-0">
+                            <div className="flex justify-between items-baseline mb-0.5 gap-2">
+                                <p
+                                    className={cn(
+                                        "text-sm truncate pr-2",
+                                        hasUnread
+                                            ? "font-semibold text-slate-900 dark:text-white"
+                                            : "font-medium text-slate-900 dark:text-white"
+                                    )}
+                                >
+                                    {displayName}
+                                </p>
+                                {hasUnread ? (
+                                    <span className="size-2 rounded-full bg-emerald-500 shrink-0 mt-1.5" />
+                                ) : (
+                                    <span
+                                        className={cn(
+                                            "text-xs shrink-0",
+                                            isSelected
+                                                ? "text-indigo-600 dark:text-indigo-400 font-medium"
+                                                : "text-slate-400 font-normal"
+                                        )}
+                                    >
+                                        {formatShortTime(updatedDate)}
+                                    </span>
+                                )}
+                            </div>
+
+                            {lastPreview && (
+                                <p
+                                    className={cn(
+                                        "text-xs truncate",
+                                        hasUnread
+                                            ? "text-slate-700 dark:text-slate-300 font-medium"
+                                            : "text-slate-500 dark:text-slate-400"
+                                    )}
+                                >
+                                    {lastPreview}
+                                </p>
+                            )}
+
+                            {/* Tags - small pills like inspo */}
+                            <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                {thread.channelType !== "DIRECT" && (
+                                    <span className="text-[10px] bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded px-1.5 py-0.5 text-slate-500 dark:text-slate-400">
+                                        {CHANNEL_TAGS[thread.channelType]}
+                                    </span>
+                                )}
+                                {thread.isBroadcast && (
+                                    <span className="text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded px-1.5 py-0.5 font-medium">
+                                        Annonce
+                                    </span>
+                                )}
+                                {thread.status === "OPEN" && thread.unreadCount > 0 && (
+                                    <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded px-1.5 py-0.5 font-medium">
+                                        Non lu
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Unread count badge */}
+                        {hasUnread && (
+                            <span className="flex-shrink-0 min-w-[1.25rem] h-5 px-1.5 flex items-center justify-center rounded-full text-[10px] font-bold bg-indigo-500 text-white mt-1">
+                                {thread.unreadCount > 99 ? "99+" : thread.unreadCount}
+                            </span>
+                        )}
                     </button>
                 );
             })}

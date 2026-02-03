@@ -289,7 +289,7 @@ export function RichTextEditor({
                     rows={minRows}
                     className={cn(
                         "w-full resize-none bg-transparent px-4 py-3 text-sm",
-                        "placeholder:text-slate-400",
+                        "!text-slate-900 placeholder:!text-slate-400",
                         "focus:outline-none",
                         "disabled:opacity-50 disabled:cursor-not-allowed"
                     )}

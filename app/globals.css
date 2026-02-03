@@ -179,6 +179,35 @@ body {
     color: var(--muted);
 }
 
+/* Ensure form inputs and email content have readable dark text on light backgrounds.
+   Body uses --foreground (light) which would make text invisible on white inputs. */
+input:not(.input),
+textarea:not(.input),
+select:not(.input) {
+    color: #0f172a;
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: #64748b;
+}
+
+/* Email body content (inbox thread view): force readable text, override inline white/light from senders */
+.email-body {
+    color: #0f172a !important;
+}
+
+.email-body p,
+.email-body span,
+.email-body div,
+.email-body a,
+.email-body li,
+.email-body td,
+.email-body th,
+.email-body * {
+    color: inherit !important;
+}
+
 /* Badges */
 .badge {
     display: inline-flex;
@@ -1050,6 +1079,15 @@ body {
 
 .dev-scrollbar::-webkit-scrollbar-thumb:hover {
     background: var(--dev-slate-400);
+}
+
+/* Hide scrollbar but keep functionality */
+.no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
 }
 
 /* ============================================

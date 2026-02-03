@@ -105,8 +105,14 @@ function getColor(id: string) {
     return MISSION_COLORS[Math.abs(hash) % MISSION_COLORS.length];
 }
 
+// Use local date (not UTC) so planning "Friday" stays Friday in all timezones
 function normalizeDate(d: string | Date): string {
-    return typeof d === 'string' ? d.split("T")[0] : new Date(d).toISOString().split("T")[0];
+    if (typeof d === 'string') return d.split("T")[0];
+    const date = new Date(d);
+    const y = date.getFullYear();
+    const m = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    return `${y}-${m}-${day}`;
 }
 
 function calcHours(start: string, end: string): number {
@@ -540,13 +546,13 @@ export default function PlanningPage() {
     const fetchData = useCallback(async () => {
         setIsLoading(true);
         try {
-            const startDate = currentWeekStart.toISOString().split("T")[0];
+            const startDate = normalizeDate(currentWeekStart);
             const endDate = new Date(currentWeekStart);
             endDate.setDate(endDate.getDate() + 6);
 
             const [teamRes, blocksRes, missionsRes] = await Promise.all([
                 fetch("/api/planning/sdrs"),
-                fetch(`/api/planning?startDate=${startDate}&endDate=${endDate.toISOString().split("T")[0]}`),
+                fetch(`/api/planning?startDate=${startDate}&endDate=${normalizeDate(endDate)}`),
                 fetch("/api/missions?isActive=true"),
             ]);
 
@@ -693,8 +699,8 @@ export default function PlanningPage() {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    sourceStartDate: currentWeekStart.toISOString().split("T")[0],
-                    targetStartDate: next.toISOString().split("T")[0],
+                    sourceStartDate: normalizeDate(currentWeekStart),
+                    targetStartDate: normalizeDate(next),
                 }),
             });
             const json = await res.json();

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { MailboxSwitcher } from "./MailboxSwitcher";
 import { FolderNav } from "./FolderNav";
@@ -65,11 +65,13 @@ export function InboxLayout({
     const [isLeftPanelCollapsed, setIsLeftPanelCollapsed] = useState(false);
     const [isRightPanelVisible, setIsRightPanelVisible] = useState(true);
 
+    const hasTriggeredSync = useRef(false);
+
     // Fetch mailboxes
     const fetchMailboxes = useCallback(async () => {
         try {
             setIsLoadingMailboxes(true);
-            const response = await fetch('/api/email/mailboxes');
+            const response = await fetch('/api/email/mailboxes', { cache: 'no-store' });
             const result = await response.json();
             
             if (result.success) {
@@ -91,6 +93,14 @@ export function InboxLayout({
     useEffect(() => {
         fetchMailboxes();
     }, []);
+
+    // Auto-sync emails when entering the email page (once per mount when mailboxes are loaded)
+    useEffect(() => {
+        if (mailboxes.length > 0 && !hasTriggeredSync.current) {
+            hasTriggeredSync.current = true;
+            fetch('/api/email/sync', { method: 'POST' }).catch(() => {});
+        }
+    }, [mailboxes.length]);
 
     // Handlers
     const handleSelectMailbox = useCallback((mailboxId: string | undefined) => {
@@ -175,6 +185,7 @@ export function InboxLayout({
                     <MailboxSwitcher
                         selectedMailboxId={selectedMailboxId}
                         onSelectMailbox={handleSelectMailbox}
+                        onMailboxAdded={fetchMailboxes}
                         showTeamInbox={showTeamInbox}
                     />
                 </div>

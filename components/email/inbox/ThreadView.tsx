@@ -431,11 +431,11 @@ function EmailMessage({
                     )}
 
                     {/* Email body */}
-                    <div className="pt-4 prose prose-sm prose-slate max-w-none">
+                    <div className="pt-4 prose prose-sm prose-slate max-w-none text-slate-900">
                         {email.bodyHtml ? (
                             <div
                                 dangerouslySetInnerHTML={{ __html: sanitizeHtml(email.bodyHtml) }}
-                                className="email-body"
+                                className="email-body text-slate-900"
                             />
                         ) : (
                             <pre className="whitespace-pre-wrap font-sans text-slate-700">

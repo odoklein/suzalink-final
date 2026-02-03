@@ -36,11 +36,13 @@ async function ensureTypingFanOut(): Promise<void> {
 
 /**
  * Publish "message_created" to all participants of a thread except the author.
+ * Includes userName so clients can render instantly without refetch.
  */
 export async function publishMessageCreated(
     threadId: string,
     messageId: string,
     authorId: string,
+    authorName: string,
     content: string,
     createdAt: string
 ): Promise<void> {
@@ -53,6 +55,7 @@ export async function publishMessageCreated(
         threadId,
         messageId,
         userId: authorId,
+        userName: authorName,
         content,
         createdAt,
     };

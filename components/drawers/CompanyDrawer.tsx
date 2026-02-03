@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Drawer, DrawerSection, DrawerField, Button, Input, Badge, useToast } from "@/components/ui";
+import { useState, useEffect, useRef } from "react";
+import { Drawer, DrawerSection, DrawerField, Button, Input, Badge, Select, useToast } from "@/components/ui";
+import { ACTION_RESULT_LABELS, type ActionResult } from "@/lib/types";
 import {
     Building2,
     Globe,
@@ -21,8 +22,10 @@ import {
     Mail,
     Phone,
     Linkedin,
+    Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { QuickEmailModal } from "@/components/email/QuickEmailModal";
 
 // ============================================
 // TYPES
@@ -47,11 +50,13 @@ interface Company {
     country: string | null;
     website: string | null;
     size: string | null;
+    phone: string | null;
     status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
     contacts: Contact[];
     _count: {
         contacts: number;
     };
+    missionId?: string;
 }
 
 interface CompanyDrawerProps {
@@ -100,30 +105,144 @@ export function CompanyDrawer({
         country: "",
         website: "",
         size: "",
+        phone: "",
     });
+    const [actions, setActions] = useState<Array<{ id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string } }>>([]);
+    const [actionsLoading, setActionsLoading] = useState(false);
+    const lastCompanyIdRef = useRef<string | null>(null);
+    const [campaigns, setCampaigns] = useState<Array<{ id: string; name: string; mission?: { channel: string } }>>([]);
+    const [campaignsLoading, setCampaignsLoading] = useState(false);
+    const [resolvedMissionId, setResolvedMissionId] = useState<string | null>(null);
+    const [missionIdLoading, setMissionIdLoading] = useState(false);
+    const [newActionResult, setNewActionResult] = useState<string>("");
+    const [newActionNote, setNewActionNote] = useState("");
+    const [newActionSaving, setNewActionSaving] = useState(false);
+    const [newCallbackDateValue, setNewCallbackDateValue] = useState("");
+    const [showQuickEmailModal, setShowQuickEmailModal] = useState(false);
+    const [missionName, setMissionName] = useState<string>("");
 
-    // Reset form when company changes or when creating
+    const effectiveMissionId = company?.missionId ?? resolvedMissionId ?? undefined;
+
+    // Resolve missionId when company has no missionId (e.g. opened from list)
+    useEffect(() => {
+        if (!company?.id || isCreating || company.missionId) {
+            setResolvedMissionId(null);
+            return;
+        }
+        setMissionIdLoading(true);
+        fetch(`/api/companies/${company.id}/mission`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data?.missionId) {
+                    setResolvedMissionId(json.data.missionId);
+                } else {
+                    setResolvedMissionId(null);
+                }
+            })
+            .catch(() => setResolvedMissionId(null))
+            .finally(() => setMissionIdLoading(false));
+    }, [company?.id, company?.missionId, isCreating]);
+
+    // Fetch campaigns when we have missionId (for "add action" form)
+    useEffect(() => {
+        if (!effectiveMissionId || isCreating) {
+            setCampaigns([]);
+            setCampaignsLoading(false);
+            return;
+        }
+        setCampaignsLoading(true);
+        fetch(`/api/campaigns?missionId=${effectiveMissionId}&isActive=true&limit=50`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && Array.isArray(json.data)) {
+                    setCampaigns(json.data);
+                } else {
+                    setCampaigns([]);
+                }
+            })
+            .catch(() => setCampaigns([]))
+            .finally(() => setCampaignsLoading(false));
+    }, [effectiveMissionId, isCreating]);
+
+    // Fetch mission name for QuickEmailModal
+    useEffect(() => {
+        if (!effectiveMissionId || isCreating) {
+            setMissionName("");
+            return;
+        }
+        fetch(`/api/missions/${effectiveMissionId}`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data?.name) {
+                    setMissionName(json.data.name);
+                } else {
+                    setMissionName("");
+                }
+            })
+            .catch(() => setMissionName(""));
+    }, [effectiveMissionId, isCreating]);
+
+    // Fetch actions history when drawer opens with a company
+    useEffect(() => {
+        if (!isOpen || isCreating || !company?.id) {
+            setActions([]);
+            return;
+        }
+        setActionsLoading(true);
+        fetch(`/api/actions?companyId=${company.id}&limit=20`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && Array.isArray(json.data)) {
+                    setActions(
+                        (json.data as Array<{ id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string } }>).map(
+                            (a: { id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string } }) => ({
+                                id: a.id,
+                                result: a.result,
+                                note: a.note ?? null,
+                                createdAt: a.createdAt,
+                                campaign: a.campaign,
+                            })
+                        )
+                    );
+                } else {
+                    setActions([]);
+                }
+            })
+            .catch(() => setActions([]))
+            .finally(() => setActionsLoading(false));
+    }, [isOpen, isCreating, company?.id]);
+
+    // Reset form only when company *id* changes (not on every parent re-render with new object ref)
     useEffect(() => {
         if (isCreating) {
+            lastCompanyIdRef.current = null;
             setFormData({
                 name: "",
                 industry: "",
                 country: "",
                 website: "",
                 size: "",
+                phone: "",
             });
             setIsEditing(true);
         } else if (company) {
-            setFormData({
-                name: company.name || "",
-                industry: company.industry || "",
-                country: company.country || "",
-                website: company.website || "",
-                size: company.size || "",
-            });
-            setIsEditing(false);
+            const isNewCompany = lastCompanyIdRef.current !== company.id;
+            lastCompanyIdRef.current = company.id;
+            if (isNewCompany) {
+                setFormData({
+                    name: company.name || "",
+                    industry: company.industry || "",
+                    country: company.country || "",
+                    website: company.website || "",
+                    size: company.size || "",
+                    phone: company.phone || "",
+                });
+                setIsEditing(false);
+            }
+        } else {
+            lastCompanyIdRef.current = null;
         }
-    }, [company, isCreating]);
+    }, [company?.id, isCreating]);
 
     // ============================================
     // SAVE HANDLER
@@ -168,8 +287,8 @@ export function CompanyDrawer({
                 setIsSaving(false);
             }
         } else {
-            // Update existing company
-            if (!company || !listId) return;
+            // Update existing company (listId only required for create)
+            if (!company) return;
 
             setIsSaving(true);
             try {
@@ -207,6 +326,85 @@ export function CompanyDrawer({
         success("Copié", `${label} copié dans le presse-papier`);
     };
 
+    const recordAction = async (result: string, note?: string, callbackDate?: string) => {
+        const campaignId = campaigns[0]?.id;
+        if (!company || !campaignId) return false;
+        const selectedCampaign = campaigns[0];
+        const channel = (selectedCampaign?.mission?.channel ?? "CALL") as "CALL" | "EMAIL" | "LINKEDIN";
+        const res = await fetch("/api/actions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                companyId: company.id,
+                campaignId,
+                channel: result === "ENVOIE_MAIL" ? "EMAIL" : channel,
+                result,
+                note: note || undefined,
+                callbackDate: callbackDate || undefined,
+            }),
+        });
+        const json = await res.json();
+        if (json.success) {
+            success("Action enregistrée", "L'action a été ajoutée à l'historique");
+            setNewActionNote("");
+            setNewActionResult("");
+            setNewCallbackDateValue("");
+            setActions((prev) => [
+                {
+                    id: json.data.id,
+                    result: json.data.result,
+                    note: json.data.note ?? null,
+                    createdAt: json.data.createdAt,
+                    campaign: json.data.campaign,
+                },
+                ...prev,
+            ]);
+            return true;
+        }
+        showError("Erreur", json.error || "Impossible d'enregistrer l'action");
+        return false;
+    };
+
+    const handleAddAction = async () => {
+        const campaignId = campaigns[0]?.id;
+        if (!company || !campaignId) {
+            showError("Erreur", "Aucune campagne disponible pour cette mission");
+            return;
+        }
+        if (!newActionResult) {
+            showError("Erreur", "Sélectionnez un résultat");
+            return;
+        }
+        if (newActionResult === "ENVOIE_MAIL") {
+            setShowQuickEmailModal(true);
+            return;
+        }
+        const noteRequired = ["INTERESTED", "CALLBACK_REQUESTED"].includes(newActionResult);
+        if (noteRequired && !newActionNote.trim()) {
+            showError("Erreur", "Une note est requise pour ce résultat");
+            return;
+        }
+        setNewActionSaving(true);
+        try {
+            await recordAction(
+                newActionResult,
+                newActionNote.trim() || undefined,
+                newActionResult === "CALLBACK_REQUESTED" && newCallbackDateValue
+                    ? new Date(newCallbackDateValue).toISOString()
+                    : undefined
+            );
+        } catch {
+            showError("Erreur", "Impossible d'enregistrer l'action");
+        } finally {
+            setNewActionSaving(false);
+        }
+    };
+
+    const handleEmailSent = () => {
+        recordAction("ENVOIE_MAIL", "Email envoyé via template");
+        setShowQuickEmailModal(false);
+    };
+
     if (!isCreating && !company) return null;
 
     const statusConfig = isCreating ? null : STATUS_CONFIG[company!.status];
@@ -225,6 +423,7 @@ export function CompanyDrawer({
                         {isEditing || isCreating ? (
                             <>
                                 <Button
+                                    type="button"
                                     variant="ghost"
                                     onClick={() => {
                                         setIsEditing(false);
@@ -236,6 +435,7 @@ export function CompanyDrawer({
                                     Annuler
                                 </Button>
                                 <Button
+                                    type="button"
                                     variant="primary"
                                     onClick={handleSave}
                                     disabled={isSaving || !formData.name.trim()}
@@ -246,6 +446,7 @@ export function CompanyDrawer({
                             </>
                         ) : (
                             <Button
+                                type="button"
                                 variant="secondary"
                                 onClick={() => setIsEditing(true)}
                             >
@@ -259,7 +460,7 @@ export function CompanyDrawer({
         >
             <div className="space-y-6">
                 {/* Status Badge */}
-                {!isEditing && !isCreating && statusConfig && (
+                {!isEditing && !isCreating && statusConfig && StatusIcon && (
                     <div className={cn(
                         "inline-flex items-center gap-2 px-3 py-1.5 rounded-full",
                         statusConfig.bg,
@@ -300,6 +501,13 @@ export function CompanyDrawer({
                                 value={formData.website}
                                 onChange={(e) => setFormData(prev => ({ ...prev, website: e.target.value }))}
                                 icon={<Globe className="w-4 h-4 text-slate-400" />}
+                            />
+                            <Input
+                                label="Téléphone"
+                                value={formData.phone}
+                                onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                                placeholder="Numéro de téléphone principal"
+                                icon={<Phone className="w-4 h-4 text-slate-400" />}
                             />
                             <Input
                                 label="Taille"
@@ -354,6 +562,28 @@ export function CompanyDrawer({
                                 icon={<Globe className="w-5 h-5 text-indigo-500" />}
                             />
                             <DrawerField
+                                label="Téléphone"
+                                value={
+                                    company!.phone && (
+                                        <div className="flex items-center gap-2">
+                                            <a
+                                                href={`tel:${company!.phone}`}
+                                                className="text-indigo-600 hover:underline font-medium"
+                                            >
+                                                {company!.phone}
+                                            </a>
+                                            <button
+                                                onClick={() => copyToClipboard(company!.phone!, "Téléphone")}
+                                                className="text-slate-400 hover:text-slate-600"
+                                            >
+                                                <Copy className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    )
+                                }
+                                icon={<Phone className="w-5 h-5 text-emerald-500" />}
+                            />
+                            <DrawerField
                                 label="Taille"
                                 value={company!.size}
                                 icon={<Users className="w-5 h-5 text-indigo-500" />}
@@ -361,6 +591,19 @@ export function CompanyDrawer({
                         </div>
                     ) : null}
                 </DrawerSection>
+
+                {/* Quick Call Action - Show prominent call button if company has phone */}
+                {!isEditing && !isCreating && company && company.phone && (
+                    <div className="-mt-2">
+                        <a
+                            href={`tel:${company.phone}`}
+                            className="flex items-center justify-center gap-3 px-6 py-4 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white rounded-xl font-semibold text-base shadow-lg shadow-emerald-500/25 transition-all hover:shadow-xl hover:shadow-emerald-500/30 hover:scale-[1.02]"
+                        >
+                            <Phone className="w-5 h-5" />
+                            Appeler {company.name}
+                        </a>
+                    </div>
+                )}
 
                 {/* Contacts List */}
                 {!isEditing && !isCreating && company && (
@@ -430,6 +673,172 @@ export function CompanyDrawer({
                                         </button>
                                     );
                                 })}
+                            </div>
+                        )}
+                    </DrawerSection>
+                )}
+
+                {/* Ajouter une action / note — always show when in view mode so user can leave a note */}
+                {!isEditing && !isCreating && company && (
+                    <DrawerSection title="Ajouter une action / note">
+                        {missionIdLoading ? (
+                            <div className="flex items-center gap-2 py-4 text-slate-500 text-sm">
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Chargement...
+                            </div>
+                        ) : campaignsLoading ? (
+                            <div className="flex items-center gap-2 py-4 text-slate-500 text-sm">
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Chargement des campagnes...
+                            </div>
+                        ) : !effectiveMissionId ? (
+                            <p className="text-sm text-slate-500 py-4">Impossible de charger la mission pour cette société.</p>
+                        ) : campaigns.length === 0 ? (
+                            <p className="text-sm text-slate-500 py-4">Aucune campagne disponible pour cette mission.</p>
+                        ) : (
+                            <div className="space-y-4">
+                                <Select
+                                    label="Résultat"
+                                    placeholder="Sélectionner un résultat..."
+                                    options={Object.entries(ACTION_RESULT_LABELS).map(([value, label]) => ({ value, label }))}
+                                    value={newActionResult}
+                                    onChange={setNewActionResult}
+                                />
+                                {/* Envoie mail: ouvrir l'envoi par template */}
+                                {newActionResult === "ENVOIE_MAIL" && (
+                                    <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Mail className="w-5 h-5 text-indigo-600" />
+                                            <span className="text-sm font-medium text-slate-900">Envoyer un email avec template</span>
+                                        </div>
+                                        <p className="text-xs text-slate-600 mb-3">
+                                            Choisissez un template et envoyez l&apos;email à un contact de la société.
+                                        </p>
+                                        <Button
+                                            type="button"
+                                            variant="primary"
+                                            onClick={() => setShowQuickEmailModal(true)}
+                                            className="gap-2"
+                                        >
+                                            <Mail className="w-4 h-4" />
+                                            Envoyer avec template
+                                        </Button>
+                                    </div>
+                                )}
+                                {/* Rappel demandé: date de rappel */}
+                                {newActionResult === "CALLBACK_REQUESTED" && (
+                                    <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Clock className="w-5 h-5 text-amber-600" />
+                                            <label className="text-sm font-medium text-slate-900">Date de rappel</label>
+                                        </div>
+                                        <input
+                                            type="datetime-local"
+                                            value={newCallbackDateValue}
+                                            onChange={(e) => setNewCallbackDateValue(e.target.value)}
+                                            min={new Date().toISOString().slice(0, 16)}
+                                            className="w-full px-3 py-2 text-sm border border-amber-200 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-300"
+                                        />
+                                        <p className="text-xs text-slate-500 mt-2">
+                                            Optionnel. Vous pouvez aussi indiquer la date dans la note.
+                                        </p>
+                                    </div>
+                                )}
+                                {newActionResult !== "ENVOIE_MAIL" && (
+                                    <>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Note</label>
+                                            <textarea
+                                                value={newActionNote}
+                                                onChange={(e) => setNewActionNote(e.target.value)}
+                                                placeholder="Ajouter une note (requise pour Intéressé / Rappel demandé)..."
+                                                rows={3}
+                                                maxLength={500}
+                                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                                            />
+                                            <p className="text-xs text-slate-400 mt-1 text-right">{newActionNote.length}/500</p>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            variant="primary"
+                                            onClick={handleAddAction}
+                                            disabled={
+                                                newActionSaving ||
+                                                !newActionResult ||
+                                                (["INTERESTED", "CALLBACK_REQUESTED"].includes(newActionResult) && !newActionNote.trim())
+                                            }
+                                            isLoading={newActionSaving}
+                                        >
+                                            Enregistrer l&apos;action
+                                        </Button>
+                                    </>
+                                )}
+                            </div>
+                        )}
+                    </DrawerSection>
+                )}
+
+                {/* Quick Email Modal (ENVOIE_MAIL) */}
+                {!isCreating && company && (() => {
+                    const firstContactWithEmail = company.contacts?.find((c) => c.email);
+                    return (
+                        <QuickEmailModal
+                            isOpen={showQuickEmailModal}
+                            onClose={() => setShowQuickEmailModal(false)}
+                            onSent={handleEmailSent}
+                            company={{ id: company.id, name: company.name, phone: undefined }}
+                            contact={firstContactWithEmail ? {
+                                id: firstContactWithEmail.id,
+                                firstName: firstContactWithEmail.firstName,
+                                lastName: firstContactWithEmail.lastName,
+                                email: firstContactWithEmail.email,
+                                title: firstContactWithEmail.title,
+                                company: { id: company.id, name: company.name },
+                            } : undefined}
+                            missionId={effectiveMissionId ?? undefined}
+                            missionName={missionName || undefined}
+                        />
+                    );
+                })()}
+
+                {/* Historique des actions (result + note) */}
+                {!isEditing && !isCreating && company && (
+                    <DrawerSection title="Historique des actions">
+                        {actionsLoading ? (
+                            <div className="flex items-center justify-center py-6">
+                                <Loader2 className="w-6 h-6 text-slate-400 animate-spin" />
+                            </div>
+                        ) : actions.length === 0 ? (
+                            <p className="text-sm text-slate-500 py-4">Aucune action enregistrée</p>
+                        ) : (
+                            <div className="space-y-3 max-h-[280px] overflow-y-auto">
+                                {actions.map((a) => (
+                                    <div
+                                        key={a.id}
+                                        className="p-3 rounded-lg border border-slate-100 bg-slate-50/50 text-sm"
+                                    >
+                                        <div className="flex items-center justify-between gap-2 mb-1">
+                                            <span className="font-medium text-slate-700">
+                                                {ACTION_RESULT_LABELS[a.result as keyof typeof ACTION_RESULT_LABELS] ?? a.result}
+                                            </span>
+                                            <span className="text-xs text-slate-400">
+                                                {new Date(a.createdAt).toLocaleDateString("fr-FR", {
+                                                    day: "2-digit",
+                                                    month: "short",
+                                                    year: "numeric",
+                                                    hour: "2-digit",
+                                                    minute: "2-digit",
+                                                })}
+                                            </span>
+                                        </div>
+                                        {a.campaign?.name && (
+                                            <p className="text-xs text-slate-500 mb-1">{a.campaign.name}</p>
+                                        )}
+                                        {a.note && (
+                                            <p className="text-slate-600 mt-1 whitespace-pre-wrap">{a.note}</p>
+                                        )}
+                                    </div>
+                                ))}
                             </div>
                         )}
                     </DrawerSection>

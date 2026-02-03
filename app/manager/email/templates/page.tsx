@@ -15,6 +15,8 @@ import {
     Share2,
     Lock,
     Eye,
+    Code,
+    Type,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 
@@ -53,6 +55,7 @@ interface TemplateEditorProps {
 function TemplateEditor({ template, onClose, onSave }: TemplateEditorProps) {
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [bodyMode, setBodyMode] = useState<"text" | "html">("text");
     const [form, setForm] = useState({
         name: template?.name || "",
         subject: template?.subject || "",
@@ -60,6 +63,14 @@ function TemplateEditor({ template, onClose, onSave }: TemplateEditorProps) {
         category: template?.category || "general",
         isShared: template?.isShared || false,
     });
+
+    // Detect HTML mode when editing existing template
+    useEffect(() => {
+        const html = template?.bodyHtml || "";
+        if (html && /<\s*(html|head|body|style|div|table)[\s>]/i.test(html)) {
+            setBodyMode("html");
+        }
+    }, [template?.id]);
 
     const categories = [
         { value: "general", label: "Général" },
@@ -192,16 +203,51 @@ function TemplateEditor({ template, onClose, onSave }: TemplateEditorProps) {
                             </div>
 
                             <div className="col-span-2">
-                                <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                                    Contenu de l'email *
-                                </label>
+                                <div className="flex items-center justify-between mb-1.5">
+                                    <label className="block text-sm font-medium text-slate-700">
+                                        Contenu de l&apos;email *
+                                    </label>
+                                    <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+                                        <button
+                                            type="button"
+                                            onClick={() => setBodyMode("text")}
+                                            className={cn(
+                                                "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
+                                                bodyMode === "text" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                                            )}
+                                        >
+                                            <Type className="w-3.5 h-3.5" />
+                                            Texte simple
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setBodyMode("html")}
+                                            className={cn(
+                                                "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
+                                                bodyMode === "html" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                                            )}
+                                        >
+                                            <Code className="w-3.5 h-3.5" />
+                                            HTML / CSS
+                                        </button>
+                                    </div>
+                                </div>
+                                <p className="text-xs text-slate-500 mb-2">
+                                    {bodyMode === "text" ? (
+                                        <>Utilisez des variables : {"{{firstName}}"}, {"{{lastName}}"}, {"{{company}}"}, {"{{title}}"}</>
+                                    ) : (
+                                        <>Collez un template HTML/CSS complet. Les variables {"{{variable}}"} seront remplacées.</>
+                                    )}
+                                </p>
                                 <textarea
                                     required
                                     value={form.bodyHtml}
                                     onChange={(e) => setForm({ ...form, bodyHtml: e.target.value })}
-                                    rows={12}
-                                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-                                    placeholder="Bonjour {{firstName}},&#10;&#10;Je me permets de vous contacter..."
+                                    rows={bodyMode === "html" ? 18 : 12}
+                                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-y min-h-[200px]"
+                                    placeholder={bodyMode === "text"
+                                        ? "Bonjour {{firstName}},\n\nJe me permets de vous contacter..."
+                                        : '<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial; }\n  </style>\n</head>\n<body>\n  <p>Bonjour {{firstName}},</p>\n  <p>...</p>\n</body>\n</html>'}
                                 />
                             </div>
                         </div>

@@ -30,6 +30,7 @@ const PERMISSIONS: PermissionDef[] = [
     
     // Pages - Email Hub
     { code: "pages.email", name: "Email Hub", description: "Accès au hub email", category: "pages" },
+    { code: "pages.comms", name: "Communication", description: "Accès au module de communication", category: "pages" },
     
     // Pages - SDR/BD
     { code: "pages.action", name: "Actions", description: "Accès à la page d'actions SDR", category: "pages" },
@@ -102,7 +103,7 @@ const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
         // Full access to all pages
         "pages.dashboard", "pages.clients", "pages.missions", "pages.campaigns", 
         "pages.lists", "pages.analytics", "pages.planning", "pages.files", 
-        "pages.users", "pages.sdrs", "pages.projects", "pages.settings", "pages.email",
+        "pages.users", "pages.sdrs", "pages.projects", "pages.settings", "pages.email", "pages.comms",
         // Full access to all features
         "features.create_mission", "features.edit_mission", "features.delete_mission", "features.assign_sdr",
         "features.create_list", "features.edit_list", "features.delete_list", "features.import_lists", "features.export_data",
@@ -121,7 +122,7 @@ const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     ],
     SDR: [
         // Limited pages
-        "pages.dashboard", "pages.action", "pages.lists", "pages.opportunities", "pages.settings", "pages.email",
+        "pages.dashboard", "pages.action", "pages.lists", "pages.opportunities", "pages.settings", "pages.email", "pages.comms",
         // Limited features
         "features.export_data",
         // SDR actions
@@ -130,7 +131,7 @@ const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     ],
     BUSINESS_DEVELOPER: [
         // BD pages (superset of SDR)
-        "pages.dashboard", "pages.action", "pages.lists", "pages.opportunities", "pages.settings", "pages.email",
+        "pages.dashboard", "pages.action", "pages.lists", "pages.opportunities", "pages.settings", "pages.email", "pages.comms",
         "pages.portfolio", "pages.onboarding", "pages.clients", "pages.missions", "pages.campaigns", "pages.projects",
         // BD features
         "features.create_mission", "features.edit_mission",
@@ -149,7 +150,7 @@ const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     ],
     DEVELOPER: [
         // Developer pages
-        "pages.dashboard", "pages.projects", "pages.settings", "pages.files",
+        "pages.dashboard", "pages.projects", "pages.settings", "pages.files", "pages.comms",
         // Developer features
         "features.upload_files", "features.manage_folders",
         // No actions

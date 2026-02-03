@@ -97,7 +97,7 @@ export function Modal({
                 ref={modalRef}
                 tabIndex={-1}
                 className={cn(
-                    "relative w-full bg-white/95 backdrop-blur-xl supports-[backdrop-filter]:bg-white/80 border border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.12)] rounded-3xl overflow-hidden flex flex-col",
+                    "relative w-full bg-white border border-slate-200 shadow-xl rounded-2xl overflow-hidden flex flex-col text-slate-900",
                     "transform transition-all duration-300 ease-out animate-scale-in max-h-[85vh]",
                     SIZES[size],
                     className
@@ -106,15 +106,15 @@ export function Modal({
             >
                 {/* Header */}
                 {(title || showCloseButton) && (
-                    <div className="flex-shrink-0 flex items-start justify-between px-6 py-5 border-b border-slate-100/50 bg-gradient-to-b from-white/50 to-transparent">
+                    <div className="flex-shrink-0 flex items-start justify-between px-6 py-5 border-b border-slate-200 bg-slate-50">
                         <div className="pr-8">
                             {title && (
-                                <h2 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-700">
+                                <h2 className="text-xl font-bold text-slate-900">
                                     {title}
                                 </h2>
                             )}
                             {description && (
-                                <p className="text-sm text-slate-500 mt-1.5 font-medium">
+                                <p className="text-sm text-slate-600 mt-1.5 font-medium">
                                     {description}
                                 </p>
                             )}
@@ -122,7 +122,7 @@ export function Modal({
                         {showCloseButton && (
                             <button
                                 onClick={onClose}
-                                className="absolute right-4 top-4 p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100/80 rounded-full transition-all duration-200 hover:rotate-90 z-10"
+                                className="absolute right-4 top-4 p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-200 rounded-full transition-all duration-200 z-10"
                             >
                                 <X className="w-5 h-5" />
                             </button>
@@ -130,8 +130,8 @@ export function Modal({
                     </div>
                 )}
 
-                {/* Content */}
-                <div className="p-6 md:p-8 overflow-y-auto custom-scrollbar flex-1">{children}</div>
+                {/* Content - explicit bg and text so content is never white-on-white */}
+                <div className="p-6 md:p-8 overflow-y-auto custom-scrollbar flex-1 bg-white text-slate-900">{children}</div>
             </div>
         </div>
     );
