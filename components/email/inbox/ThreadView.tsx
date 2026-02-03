@@ -17,6 +17,7 @@ import {
     ChevronUp,
     Loader2,
     AlertCircle,
+    Sparkles,
 } from "lucide-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -88,6 +89,9 @@ export function ThreadView({
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [expandedEmails, setExpandedEmails] = useState<Set<string>>(new Set());
+    const [recaps, setRecaps] = useState<Record<string, string>>({});
+    const [recapLoading, setRecapLoading] = useState<Record<string, boolean>>({});
+    const [recapError, setRecapError] = useState<Record<string, string>>({});
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     // Fetch thread
@@ -126,6 +130,58 @@ export function ThreadView({
             messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
         }
     }, [isLoading, thread?.emails.length]);
+
+    // Fetch recap when email is expanded (cached by email.id)
+    useEffect(() => {
+        if (!thread?.emails.length) return;
+
+        const getBodyText = (email: Email): string => {
+            if (email.bodyText?.trim()) return email.bodyText.trim();
+            if (email.bodyHtml) {
+                return email.bodyHtml
+                    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+                    .replace(/<[^>]+>/g, " ")
+                    .replace(/\s+/g, " ")
+                    .trim();
+            }
+            return "";
+        };
+
+        thread.emails.forEach((email) => {
+            if (!expandedEmails.has(email.id)) return;
+            if (recaps[email.id] || recapLoading[email.id]) return;
+
+            const bodyText = getBodyText(email);
+            if (!bodyText) return;
+
+            setRecapLoading((prev) => ({ ...prev, [email.id]: true }));
+            setRecapError((prev) => {
+                const next = { ...prev };
+                delete next[email.id];
+                return next;
+            });
+
+            fetch("/api/ai/mistral/email-recap", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ emailBodyText: bodyText.slice(0, 15000) }),
+            })
+                .then((res) => res.json())
+                .then((json) => {
+                    if (json.success && json.data?.recap) {
+                        setRecaps((prev) => ({ ...prev, [email.id]: json.data.recap }));
+                    } else {
+                        setRecapError((prev) => ({ ...prev, [email.id]: json.error || "Recap indisponible" }));
+                    }
+                })
+                .catch(() => {
+                    setRecapError((prev) => ({ ...prev, [email.id]: "Recap indisponible" }));
+                })
+                .finally(() => {
+                    setRecapLoading((prev) => ({ ...prev, [email.id]: false }));
+                });
+        });
+    }, [thread?.id, thread?.emails, expandedEmails]);
 
     // Toggle email expansion
     const toggleEmail = (emailId: string) => {
@@ -285,6 +341,9 @@ export function ThreadView({
                         isLast={index === thread.emails.length - 1}
                         onToggle={() => toggleEmail(email.id)}
                         mailboxEmail={thread.mailbox.email}
+                        recap={recaps[email.id]}
+                        recapLoading={recapLoading[email.id]}
+                        recapError={recapError[email.id]}
                     />
                 ))}
                 <div ref={messagesEndRef} />
@@ -330,6 +389,9 @@ interface EmailMessageProps {
     isLast: boolean;
     onToggle: () => void;
     mailboxEmail: string;
+    recap?: string;
+    recapLoading?: boolean;
+    recapError?: string;
 }
 
 function EmailMessage({
@@ -338,6 +400,9 @@ function EmailMessage({
     isLast,
     onToggle,
     mailboxEmail,
+    recap,
+    recapLoading,
+    recapError,
 }: EmailMessageProps) {
     const isOutbound = email.direction === "OUTBOUND";
     const date = email.receivedAt || email.sentAt;
@@ -408,6 +473,31 @@ function EmailMessage({
             {/* Body - Collapsible */}
             {isExpanded && (
                 <div className="px-4 pb-4 border-t border-slate-100">
+                    {/* AI Recap */}
+                    {(email.bodyText || email.bodyHtml) && (recap !== undefined || recapLoading || recapError) && (
+                        <div className="py-3 border-b border-slate-100">
+                            <div className="flex items-start gap-2 p-3 rounded-xl bg-indigo-50/80 border border-indigo-100">
+                                <Sparkles className="w-4 h-4 text-indigo-500 flex-shrink-0 mt-0.5" />
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-medium text-indigo-700 uppercase tracking-wider mb-1">
+                                        Résumé
+                                    </p>
+                                    {recapLoading && (
+                                        <div className="flex items-center gap-2 text-sm text-slate-500">
+                                            <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
+                                            <span>Génération du résumé...</span>
+                                        </div>
+                                    )}
+                                    {recapError && !recapLoading && (
+                                        <p className="text-sm text-slate-500">{recapError}</p>
+                                    )}
+                                    {recap && !recapLoading && (
+                                        <p className="text-sm text-slate-700">{recap}</p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     {/* Attachments */}
                     {email.attachments.length > 0 && (
                         <div className="flex flex-wrap gap-2 py-3 border-b border-slate-100">

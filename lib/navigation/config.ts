@@ -105,12 +105,6 @@ export const MANAGER_NAV: NavSection[] = [
         permission: "pages.prospects",
       },
       {
-        href: "/manager/prospects",
-        icon: Users,
-        label: "Prospects",
-        permission: "pages.prospects",
-      },
-      {
         href: "/manager/billing",
         icon: Receipt,
         label: "Facturation",

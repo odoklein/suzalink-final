@@ -104,6 +104,7 @@ export function checkRedisOnce(): Promise<void> {
     if (redisCheckPromise !== null) return redisCheckPromise;
     redisCheckPromise = (async () => {
         const client = new Redis(REDIS_CHECK_OPTIONS as any);
+        client.on('error', () => {}); // Prevent unhandled error event on connection failure
         try {
             await client.ping();
         } catch (err) {

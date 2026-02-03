@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { scheduleEmailSync } from '@/lib/email/queue';
+import { scheduleEmailSync, checkRedisOnce, isRedisAvailable } from '@/lib/email/queue';
+import { emailSyncService } from '@/lib/email/services/sync-service';
 import { prisma } from '@/lib/prisma';
 
 export async function POST(req: NextRequest) {
@@ -31,25 +32,45 @@ export async function POST(req: NextRequest) {
             });
         }
 
-        // Schedule sync for each mailbox
-        let scheduledCount = 0;
-        for (const mb of mailboxes) {
-            try {
-                await scheduleEmailSync({
-                    mailboxId: mb.id,
-                    userId: session.user.id,
-                    fullSync: false // incremental sync
-                });
-                scheduledCount++;
-            } catch (err) {
-                console.error(`Failed to schedule sync for mailbox ${mb.id}:`, err);
+        await checkRedisOnce();
+
+        if (isRedisAvailable()) {
+            // Schedule sync via queue
+            let scheduledCount = 0;
+            for (const mb of mailboxes) {
+                try {
+                    await scheduleEmailSync({
+                        mailboxId: mb.id,
+                        userId: session.user.id,
+                        fullSync: false
+                    });
+                    scheduledCount++;
+                } catch (err) {
+                    console.error(`Failed to schedule sync for mailbox ${mb.id}:`, err);
+                }
             }
+            return NextResponse.json({
+                success: true,
+                message: 'Synchronisation lancée',
+                count: scheduledCount
+            });
         }
 
+        // Redis unavailable: run sync inline (no queue)
+        let syncedCount = 0;
+        for (const mb of mailboxes) {
+            try {
+                const result = await emailSyncService.syncMailbox(mb.id, { fullSync: false });
+                if (result.success) syncedCount++;
+            } catch (err) {
+                console.error(`Inline sync failed for mailbox ${mb.id}:`, err);
+            }
+        }
         return NextResponse.json({
             success: true,
-            message: 'Synchronisation lancée',
-            count: scheduledCount
+            message: 'Synchronisation effectuée (sans file d’attente — Redis indisponible)',
+            count: syncedCount,
+            queueDisabled: true
         });
     } catch (error) {
         console.error('POST /api/email/sync error:', error);

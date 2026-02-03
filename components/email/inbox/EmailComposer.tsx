@@ -22,7 +22,9 @@ import {
     Loader2,
     Calendar,
     Clock,
+    Sparkles,
 } from "lucide-react";
+import { AiEmailDraftDialog } from "@/components/email/AiEmailDraftDialog";
 
 // ============================================
 // TYPES
@@ -77,6 +79,7 @@ export function EmailComposer({
     const [toInput, setToInput] = useState("");
     const [ccInput, setCcInput] = useState("");
     const [bccInput, setBccInput] = useState("");
+    const [showAiDraftDialog, setShowAiDraftDialog] = useState(false);
 
     const editorRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -429,6 +432,15 @@ export function EmailComposer({
                         >
                             <Link2 className="w-4 h-4" />
                         </button>
+                        <div className="w-px h-4 bg-slate-200 mx-1" />
+                        <button
+                            onClick={() => setShowAiDraftDialog(true)}
+                            className="p-1.5 rounded hover:bg-indigo-50 text-indigo-600 flex items-center gap-1"
+                            title="Rédaction assistée par IA"
+                        >
+                            <Sparkles className="w-4 h-4" />
+                            <span className="text-xs font-medium">AI</span>
+                        </button>
                     </div>
 
                     {/* Editor */}
@@ -509,6 +521,20 @@ export function EmailComposer({
                     </div>
                 </>
             )}
+
+            <AiEmailDraftDialog
+                open={showAiDraftDialog}
+                onClose={() => setShowAiDraftDialog(false)}
+                subject={subject}
+                onInsert={(html) => {
+                    if (editorRef.current) {
+                        const current = editorRef.current.innerHTML || "";
+                        editorRef.current.innerHTML = current + html;
+                        editorRef.current.focus();
+                    }
+                    setShowAiDraftDialog(false);
+                }}
+            />
         </div>
     );
 }

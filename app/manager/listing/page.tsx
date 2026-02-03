@@ -245,45 +245,51 @@ export default function ListingPage() {
             header: "Entreprise",
             render: (_value, result) => (
                 <div>
-                    <div className="font-medium text-slate-900 flex items-center gap-2">
-                        <Building2 className="w-4 h-4 text-slate-400" />
+                    <div className="font-medium text-slate-900 text-sm flex items-center gap-1.5">
+                        <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                         {result.company.name}
                     </div>
-                    {result.company.domain && (
-                        <div className="text-sm text-slate-500 flex items-center gap-1 mt-1">
-                            <Globe className="w-3 h-3" />
+                    {result.company.domain ? (
+                        <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                            <Globe className="w-3 h-3 text-slate-400" />
                             {result.company.domain}
                         </div>
-                    )}
+                    ) : null}
                 </div>
             ),
         },
         {
             key: "industry",
             header: "Secteur",
-            render: (_value, result) => result.company.industry || "—",
+            render: (_value, result) => (
+                <span className={result.company.industry ? "text-slate-700 text-sm" : "text-slate-400 text-xs"}>{result.company.industry || "—"}</span>
+            ),
         },
         {
             key: "size",
             header: "Taille",
-            render: (_value, result) => result.company.size || "—",
+            render: (_value, result) => (
+                <span className={result.company.size ? "text-slate-700 text-sm" : "text-slate-400 text-xs"}>{result.company.size || "—"}</span>
+            ),
         },
         {
             key: "country",
             header: "Pays",
-            render: (_value, result) => result.company.country || "—",
+            render: (_value, result) => (
+                <span className={result.company.country ? "text-slate-700 text-sm" : "text-slate-400 text-xs"}>{result.company.country || "—"}</span>
+            ),
         },
         {
             key: "phone",
             header: "Téléphone",
             render: (_value, result) => (
-                <div className="text-sm text-slate-600 whitespace-nowrap">
+                <div className="whitespace-nowrap text-sm">
                     {result.company.phone ? (
-                        <a href={`tel:${result.company.phone}`} className="hover:text-indigo-600">
+                        <a href={`tel:${result.company.phone}`} className="text-slate-700 hover:text-indigo-600">
                             {result.company.phone}
                         </a>
                     ) : (
-                        "—"
+                        <span className="text-slate-400 text-xs">—</span>
                     )}
                 </div>
             ),
@@ -291,7 +297,9 @@ export default function ListingPage() {
         {
             key: "state",
             header: "État / Province",
-            render: (_value, result) => result.company.state || "—",
+            render: (_value, result) => (
+                <span className={result.company.state ? "text-slate-700 text-sm" : "text-slate-400 text-xs"}>{result.company.state || "—"}</span>
+            ),
         },
         {
             key: "website",
@@ -302,12 +310,14 @@ export default function ListingPage() {
                         href={`https://${result.company.domain}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
+                        className="text-indigo-600 hover:text-indigo-700 text-sm inline-flex items-center gap-1"
                     >
                         <Globe className="w-3 h-3" />
                         Visiter
                     </a>
-                ) : "—"
+                ) : (
+                    <span className="text-slate-400 text-xs">—</span>
+                )
             ),
         },
         {
@@ -321,7 +331,7 @@ export default function ListingPage() {
                             ? "bg-blue-100 text-blue-700"
                             : "bg-amber-100 text-amber-700";
                 return (
-                    <Badge className={color}>
+                    <Badge className={`${color} text-xs font-medium`}>
                         {result.confidence}%
                     </Badge>
                 );
@@ -331,7 +341,7 @@ export default function ListingPage() {
             key: "source",
             header: "Source",
             render: (_value, result) => (
-                <Badge className="bg-indigo-100 text-indigo-700">
+                <Badge className="bg-slate-100 text-slate-600 text-xs font-medium">
                     {result.source}
                 </Badge>
             ),
@@ -429,336 +439,193 @@ export default function ListingPage() {
     // RENDER
     // ============================================
 
+    const pageSize = parseInt(limit, 10) || 25;
+
     return (
-        <div className="space-y-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-900">
-                        Enterprise Listing
-                    </h1>
-                    <p className="text-slate-600 mt-1">
-                        Découvrir et générer des leads B2B
-                    </p>
-                </div>
-                <Badge className="bg-indigo-100 text-indigo-700">
-                    Powered by Apollo.io
-                </Badge>
-            </div>
-
-            {/* Filters */}
-            <Card className="p-6">
-                <div className="flex items-center gap-2 mb-4">
-                    <Filter className="w-5 h-5 text-slate-600" />
-                    <h2 className="text-lg font-semibold text-slate-900">Filtres</h2>
-                </div>
-
-                {/* Basic Filters */}
-                <div className="space-y-4">
-                    <h3 className="text-sm font-semibold text-slate-900 border-b pb-2">Filtres de base</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Secteur d&apos;activité
-                            </label>
-                            <Select
-                                options={industryOptions}
-                                value={industry}
-                                onChange={setIndustry}
-                            />
+        <div className="flex gap-4 min-h-0">
+            {/* Left filter sidebar — condensed, clear hierarchy */}
+            <aside className="w-52 shrink-0 flex flex-col">
+                <Card className="p-3 flex flex-col flex-1 min-h-0 overflow-hidden">
+                    <div className="flex items-center gap-1.5 mb-3 shrink-0">
+                        <Filter className="w-4 h-4 text-slate-400" />
+                        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Filtres</h2>
+                    </div>
+                    <div className="flex-1 overflow-y-auto space-y-3 pr-0.5 text-[13px]">
+                        {/* Basic */}
+                        <div className="space-y-1.5">
+                            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1">Base</h3>
+                            <div className="space-y-1.5">
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-0.5">Secteur</label>
+                                    <Select options={industryOptions} value={industry} onChange={setIndustry} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-0.5">Taille</label>
+                                    <Select options={sizeOptions} value={companySize} onChange={setCompanySize} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-0.5">Pays</label>
+                                    <Select options={countryOptions} value={country} onChange={handleCountryChange} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-0.5">Région</label>
+                                    <Select options={regionOptions} value={region} onChange={handleRegionChange} disabled={!country} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-0.5">État</label>
+                                    <Select options={stateOptions} value={state} onChange={setState} disabled={!region} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-0.5">Keywords</label>
+                                    <Input placeholder="SaaS, E-commerce..." value={keywords} onChange={(e) => setKeywords(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
+                                </div>
+                            </div>
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Taille d&apos;entreprise
-                            </label>
-                            <Select
-                                options={sizeOptions}
-                                value={companySize}
-                                onChange={setCompanySize}
-                            />
+                        {/* Revenue & Funding */}
+                        <div className="space-y-1.5">
+                            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1">Revenu & financement</h3>
+                            <div className="space-y-1.5">
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-0.5">Revenu</label>
+                                    <Select options={revenueOptions} value={revenueRange} onChange={setRevenueRange} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-0.5">Financement min ($)</label>
+                                    <Input type="number" placeholder="1M" value={fundingMin} onChange={(e) => setFundingMin(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-0.5">Financement max ($)</label>
+                                    <Input type="number" placeholder="10M" value={fundingMax} onChange={(e) => setFundingMax(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-0.5">Dernier tour</label>
+                                    <Select options={fundingStageOptions} value={latestFundingStage} onChange={setLatestFundingStage} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                </div>
+                            </div>
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Pays
-                            </label>
-                            <Select
-                                options={countryOptions}
-                                value={country}
-                                onChange={handleCountryChange}
-                            />
+                        {/* Company Details */}
+                        <div className="space-y-1.5">
+                            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1">Entreprise</h3>
+                            <div className="space-y-1.5">
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-0.5">Année min / max</label>
+                                    <div className="flex gap-1">
+                                        <Input type="number" placeholder="2000" value={yearFoundedMin} onChange={(e) => setYearFoundedMin(e.target.value)} className="!py-1.5 !text-xs !rounded-lg flex-1" />
+                                        <Input type="number" placeholder="2023" value={yearFoundedMax} onChange={(e) => setYearFoundedMax(e.target.value)} className="!py-1.5 !text-xs !rounded-lg flex-1" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-0.5">Type</label>
+                                    <Select options={companyTypeOptions} value={companyType} onChange={setCompanyType} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-0.5">Technologies</label>
+                                    <Input placeholder="Salesforce, AWS..." value={technologies} onChange={(e) => setTechnologies(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
+                                </div>
+                            </div>
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Région
-                            </label>
-                            <Select
-                                options={regionOptions}
-                                value={region}
-                                onChange={handleRegionChange}
-                                disabled={!country}
-                            />
+                        {/* Growth & Intent */}
+                        <div className="space-y-1.5">
+                            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1">Croissance</h3>
+                            <div className="space-y-1.5">
+                                <div className="flex items-center gap-2">
+                                    <input type="checkbox" id="isHiring" checked={isHiring} onChange={(e) => setIsHiring(e.target.checked)} className="rounded border-slate-300 w-3.5 h-3.5" />
+                                    <label htmlFor="isHiring" className="text-[11px] text-slate-500">Recrutent</label>
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-0.5">Effectif dépt.</label>
+                                    <Input placeholder="Engineering, Sales..." value={departmentHeadcount} onChange={(e) => setDepartmentHeadcount(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-0.5">Offres d&apos;emploi</label>
+                                    <Input placeholder="VP Sales..." value={jobPostings} onChange={(e) => setJobPostings(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
+                                </div>
+                            </div>
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                État / Province
-                            </label>
-                            <Select
-                                options={stateOptions}
-                                value={state}
-                                onChange={setState}
-                                disabled={!region}
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Keywords
-                            </label>
-                            <Input
-                                placeholder="SaaS, E-commerce..."
-                                value={keywords}
-                                onChange={(e) => setKeywords(e.target.value)}
-                            />
+                        <div className="pt-1.5 border-t border-slate-100">
+                            <label className="block text-[11px] text-slate-500 mb-0.5">Par page</label>
+                            <Select options={limitOptions} value={limit} onChange={setLimit} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
                         </div>
                     </div>
-                </div>
-
-                {/* Revenue & Funding */}
-                <div className="space-y-4 mt-6">
-                    <h3 className="text-sm font-semibold text-slate-900 border-b pb-2">Revenu & Financement</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Tranche de revenu
-                            </label>
-                            <Select
-                                options={revenueOptions}
-                                value={revenueRange}
-                                onChange={setRevenueRange}
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Financement min ($)
-                            </label>
-                            <Input
-                                type="number"
-                                placeholder="1000000"
-                                value={fundingMin}
-                                onChange={(e) => setFundingMin(e.target.value)}
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Financement max ($)
-                            </label>
-                            <Input
-                                type="number"
-                                placeholder="10000000"
-                                value={fundingMax}
-                                onChange={(e) => setFundingMax(e.target.value)}
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Dernier tour de financement
-                            </label>
-                            <Select
-                                options={fundingStageOptions}
-                                value={latestFundingStage}
-                                onChange={setLatestFundingStage}
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                {/* Company Details */}
-                <div className="space-y-4 mt-6">
-                    <h3 className="text-sm font-semibold text-slate-900 border-b pb-2">Détails de l&apos;entreprise</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Année de création (min)
-                            </label>
-                            <Input
-                                type="number"
-                                placeholder="2000"
-                                value={yearFoundedMin}
-                                onChange={(e) => setYearFoundedMin(e.target.value)}
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Année de création (max)
-                            </label>
-                            <Input
-                                type="number"
-                                placeholder="2023"
-                                value={yearFoundedMax}
-                                onChange={(e) => setYearFoundedMax(e.target.value)}
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Type d&apos;entreprise
-                            </label>
-                            <Select
-                                options={companyTypeOptions}
-                                value={companyType}
-                                onChange={setCompanyType}
-                            />
-                        </div>
-
-                        <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Technologies (séparées par virgule)
-                            </label>
-                            <Input
-                                placeholder="Salesforce, AWS, React..."
-                                value={technologies}
-                                onChange={(e) => setTechnologies(e.target.value)}
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                {/* Growth & Intent Signals */}
-                <div className="space-y-4 mt-6">
-                    <h3 className="text-sm font-semibold text-slate-900 border-b pb-2">Signaux de croissance</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div className="flex items-center">
-                            <input
-                                type="checkbox"
-                                id="isHiring"
-                                checked={isHiring}
-                                onChange={(e) => setIsHiring(e.target.checked)}
-                                className="rounded border-slate-300 mr-2"
-                            />
-                            <label htmlFor="isHiring" className="text-sm font-medium text-slate-700">
-                                Entreprises qui recrutent
-                            </label>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Effectif département
-                            </label>
-                            <Input
-                                placeholder="Engineering, Sales..."
-                                value={departmentHeadcount}
-                                onChange={(e) => setDepartmentHeadcount(e.target.value)}
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Offres d&apos;emploi
-                            </label>
-                            <Input
-                                placeholder="VP Sales, Developer..."
-                                value={jobPostings}
-                                onChange={(e) => setJobPostings(e.target.value)}
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                {/* Results Limit */}
-                <div className="mt-6 pt-4 border-t">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                Nombre de résultats
-                            </label>
-                            <Select
-                                options={limitOptions}
-                                value={limit}
-                                onChange={setLimit}
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                <div className="flex justify-end mt-6">
-                    <Button
-                        variant="primary"
-                        onClick={handleSearch}
-                        disabled={isLoading}
-                    >
-                        {isLoading ? (
-                            <>
-                                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                                Recherche en cours...
-                            </>
-                        ) : (
-                            <>
-                                <Search className="w-4 h-4 mr-2" />
-                                Rechercher
-                            </>
-                        )}
-                    </Button>
-                </div>
-            </Card>
-
-            {/* Bulk Actions */}
-            {selected.size > 0 && (
-                <Card className="p-4 bg-indigo-50 border-indigo-200">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 text-indigo-900">
-                            <CheckCircle2 className="w-5 h-5" />
-                            <span className="font-medium">
-                                {selected.size} prospect(s) sélectionné(s)
-                            </span>
-                        </div>
-                        <Button variant="primary" onClick={handleBulkImport}>
-                            Envoyer au Pipeline
+                    <div className="pt-3 mt-2 border-t border-slate-200 shrink-0">
+                        <Button variant="primary" onClick={handleSearch} disabled={isLoading} className="w-full !py-2 text-xs">
+                            {isLoading ? (
+                                <>
+                                    <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                                    Recherche...
+                                </>
+                            ) : (
+                                <>
+                                    <Search className="w-3.5 h-3.5 mr-1.5" />
+                                    Rechercher
+                                </>
+                            )}
                         </Button>
                     </div>
                 </Card>
-            )}
+            </aside>
 
-            {/* Results */}
-            <Card>
-                {isLoading ? (
-                    <LoadingState message="Recherche en cours sur Apollo.io..." />
-                ) : results.length === 0 ? (
-                    <EmptyState
-                        icon={Search}
-                        title="Aucun résultat"
-                        description="Utilisez les filtres ci-dessus pour rechercher des leads B2B"
-                    />
-                ) : (
-                    <>
-                        <div className="p-4 border-b border-slate-200">
-                            <div className="flex items-center justify-between">
-                                <div className="text-sm text-slate-600">
-                                    {results.length} résultat(s) trouvé(s)
-                                </div>
-                                {selected.size > 0 && (
-                                    <div className="text-sm text-indigo-600">
-                                        {selected.size} sélectionné(s)
-                                    </div>
-                                )}
+            {/* Main: header + bulk actions + table — clear hierarchy */}
+            <main className="flex-1 min-w-0 flex flex-col gap-3">
+                <div className="flex items-center justify-between shrink-0">
+                    <div>
+                        <h1 className="text-xl font-bold text-slate-900 tracking-tight">Enterprise Listing</h1>
+                        <p className="text-xs text-slate-500 mt-0.5">Découvrir et générer des leads B2B</p>
+                    </div>
+                    <Badge className="bg-indigo-50 text-indigo-600 text-[11px] font-medium border border-indigo-100">Apollo.io</Badge>
+                </div>
+
+                {/* Bulk actions bar */}
+                {selected.size > 0 && (
+                    <Card className="p-3 bg-indigo-50/80 border-indigo-100 shrink-0">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <CheckCircle2 className="w-4 h-4 text-indigo-600" />
+                                <span className="text-sm font-medium text-indigo-900">{selected.size} sélectionné(s)</span>
+                            </div>
+                            <Button variant="primary" onClick={handleBulkImport} className="!py-2 text-xs">
+                                Envoyer au Pipeline
+                            </Button>
+                        </div>
+                    </Card>
+                )}
+
+                {/* Data table + pagination */}
+                <Card className="flex-1 min-h-0 flex flex-col overflow-hidden p-4">
+                    {isLoading ? (
+                        <LoadingState message="Recherche en cours sur Apollo.io..." />
+                    ) : results.length === 0 ? (
+                        <EmptyState
+                            icon={Search}
+                            title="Aucun résultat"
+                            description="Utilisez les filtres à gauche pour rechercher des leads B2B"
+                        />
+                    ) : (
+                        <div className="flex flex-col min-h-0 flex-1">
+                            <div className="flex items-center justify-between mb-3 shrink-0">
+                                <span className="text-xs text-slate-500">{results.length} résultat(s)</span>
+                                {selected.size > 0 && <span className="text-xs font-medium text-indigo-600">{selected.size} sélectionné(s)</span>}
+                            </div>
+                            <div className="flex-1 min-h-0 overflow-auto">
+                                <DataTable
+                                    data={results}
+                                    columns={columns}
+                                    keyField="id"
+                                    pagination={true}
+                                    pageSize={pageSize}
+                                    loading={false}
+                                    emptyMessage="Aucune donnée"
+                                    className="text-sm"
+                                />
                             </div>
                         </div>
-                        <DataTable
-                            data={results}
-                            columns={columns}
-                            keyField="id"
-                            pagination={false}
-                        />
-                    </>
-                )}
-            </Card>
+                    )}
+                </Card>
+            </main>
         </div>
     );
 }

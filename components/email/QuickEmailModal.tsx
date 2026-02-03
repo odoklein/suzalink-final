@@ -19,6 +19,7 @@ import {
     Sparkles,
     Inbox,
 } from "lucide-react";
+import { AiEmailDraftDialog } from "@/components/email/AiEmailDraftDialog";
 
 // ============================================
 // TYPES
@@ -91,7 +92,8 @@ export function QuickEmailModal({
     const [selectedMailboxId, setSelectedMailboxId] = useState<string>("");
     const [templates, setTemplates] = useState<MissionTemplate[]>([]);
     const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
-    const [recipientEmail, setRecipientEmail] = useState<string>("");
+    const [recipientEmail, setRecipientEmail] = useState<string>(""); // confirmed recipient (used for send)
+    const [recipientInput, setRecipientInput] = useState<string>(""); // current input while typing
     const [subject, setSubject] = useState<string>("");
     const [bodyHtml, setBodyHtml] = useState<string>("");
 
@@ -102,6 +104,7 @@ export function QuickEmailModal({
     const [isEditing, setIsEditing] = useState(false);
     const [sentSuccess, setSentSuccess] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [showAiDraftDialog, setShowAiDraftDialog] = useState(false);
 
     const editorRef = useRef<HTMLDivElement>(null);
     const modalRef = useRef<HTMLDivElement>(null);
@@ -131,20 +134,33 @@ export function QuickEmailModal({
             // Set recipient from contact
             if (contact?.email) {
                 setRecipientEmail(contact.email);
+                setRecipientInput("");
             } else {
                 setRecipientEmail("");
+                setRecipientInput("");
             }
         }
     }, [isOpen, contact]);
 
-    // Build domain suggestions: show when user typed something and no @ yet
-    const localPart = recipientEmail.includes("@")
-        ? recipientEmail.slice(0, recipientEmail.indexOf("@"))
-        : recipientEmail.trim();
-    const shouldShowSuggestions = showDomainSuggestions && localPart.length > 0;
+    // Build domain suggestions: always show when focused; suggest full emails when 1+ char (so 2 letters etc.)
+    const localPart = recipientInput.includes("@")
+        ? recipientInput.slice(0, recipientInput.indexOf("@"))
+        : recipientInput.trim();
+    const shouldShowSuggestions = showDomainSuggestions;
     const suggestedEmails = shouldShowSuggestions
-        ? EMAIL_DOMAINS.map((d) => localPart + d)
+        ? localPart.length >= 1
+            ? EMAIL_DOMAINS.map((d) => localPart + d)
+            : []
         : [];
+
+    // Effective recipient for Send: confirmed badge OR current input (completed if partial)
+    const effectiveRecipient = recipientEmail
+        ? recipientEmail
+        : recipientInput.trim()
+            ? recipientInput.includes("@")
+                ? recipientInput.trim()
+                : recipientInput.trim() + EMAIL_DOMAINS[0]
+            : "";
 
     // Fetch mailboxes
     useEffect(() => {
@@ -229,7 +245,7 @@ export function QuickEmailModal({
     // ============================================
 
     const handleSend = async () => {
-        if (!selectedMailboxId || !recipientEmail) {
+        if (!selectedMailboxId || !effectiveRecipient) {
             setError("Sélectionnez une boîte mail et un destinataire");
             return;
         }
@@ -244,7 +260,7 @@ export function QuickEmailModal({
                 body: JSON.stringify({
                     mailboxId: selectedMailboxId,
                     templateId: selectedTemplateId || undefined,
-                    to: [{ email: recipientEmail }],
+                    to: [{ email: effectiveRecipient }],
                     contactId: contact?.id,
                     companyId: company?.id || contact?.company?.id,
                     customSubject: subject,
@@ -277,25 +293,35 @@ export function QuickEmailModal({
         }
     }, [onClose]);
 
-    // On blur: if input has no @, complete with first domain so address is selected (unless user picked a suggestion)
+    // On blur: confirm recipient (no Tab needed). Complete with first domain if partial; set as confirmed and show as badge.
     const handleRecipientBlur = () => {
         if (selectedSuggestionRef.current) {
             selectedSuggestionRef.current = false;
             setShowDomainSuggestions(false);
             return;
         }
-        const value = recipientEmail.trim();
-        if (value && !value.includes("@")) {
-            setRecipientEmail(value + EMAIL_DOMAINS[0]);
+        const value = recipientInput.trim();
+        if (!value) {
+            setShowDomainSuggestions(false);
+            return;
         }
+        const fullEmail = value.includes("@") ? value : value + EMAIL_DOMAINS[0];
+        setRecipientEmail(fullEmail);
+        setRecipientInput("");
         setShowDomainSuggestions(false);
     };
 
     const handleSelectSuggestion = (fullEmail: string) => {
         selectedSuggestionRef.current = true;
         setRecipientEmail(fullEmail);
+        setRecipientInput("");
         setShowDomainSuggestions(false);
         recipientInputRef.current?.focus();
+    };
+
+    const handleRemoveRecipient = () => {
+        setRecipientEmail("");
+        setRecipientInput("");
     };
 
     useEffect(() => {
@@ -447,17 +473,32 @@ export function QuickEmailModal({
                                     <User className="w-4 h-4" />
                                     Destinataire
                                 </label>
-                                <input
-                                    ref={recipientInputRef}
-                                    type="email"
-                                    value={recipientEmail}
-                                    onChange={(e) => setRecipientEmail(e.target.value)}
-                                    onFocus={() => setShowDomainSuggestions(true)}
-                                    onBlur={handleRecipientBlur}
-                                    placeholder="email@example.com"
-                                    className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                                    autoComplete="off"
-                                />
+                                <div className="flex flex-wrap items-center gap-2 min-h-11 px-3 py-2 bg-white border border-slate-200 rounded-xl focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-transparent transition-all">
+                                    {recipientEmail && (
+                                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-600 text-white text-sm font-medium">
+                                            {recipientEmail}
+                                            <button
+                                                type="button"
+                                                onClick={handleRemoveRecipient}
+                                                className="p-0.5 rounded hover:bg-slate-500 text-white/90 hover:text-white transition-colors"
+                                                title="Supprimer"
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        </span>
+                                    )}
+                                    <input
+                                        ref={recipientInputRef}
+                                        type="text"
+                                        value={recipientInput}
+                                        onChange={(e) => setRecipientInput(e.target.value)}
+                                        onFocus={() => setShowDomainSuggestions(true)}
+                                        onBlur={handleRecipientBlur}
+                                        placeholder={recipientEmail ? "Ajouter un destinataire" : "email@example.com"}
+                                        className="flex-1 min-w-[120px] h-8 bg-transparent text-slate-900 text-sm placeholder:text-slate-400 focus:outline-none"
+                                        autoComplete="off"
+                                    />
+                                </div>
                                 {suggestedEmails.length > 0 && (
                                     <div
                                         className="absolute left-0 right-0 top-full mt-1 z-10 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
@@ -581,10 +622,19 @@ export function QuickEmailModal({
                                         <label className="text-sm font-medium text-slate-700">
                                             Contenu
                                         </label>
-                                        <button
-                                            onClick={() => setShowPreview(!showPreview)}
-                                            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
-                                        >
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => setShowAiDraftDialog(true)}
+                                                className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-indigo-600 hover:bg-indigo-50 transition-colors"
+                                                title="Rédaction assistée par IA"
+                                            >
+                                                <Sparkles className="w-4 h-4" />
+                                                AI
+                                            </button>
+                                            <button
+                                                onClick={() => setShowPreview(!showPreview)}
+                                                className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
+                                            >
                                             {showPreview ? (
                                                 <>
                                                     <ChevronUp className="w-3 h-3" />
@@ -596,7 +646,8 @@ export function QuickEmailModal({
                                                     Afficher
                                                 </>
                                             )}
-                                        </button>
+                                            </button>
+                                        </div>
                                     </div>
                                     {showPreview && (
                                         <div className={cn(
@@ -620,6 +671,16 @@ export function QuickEmailModal({
                             )}
                         </div>
 
+                        <AiEmailDraftDialog
+                            open={showAiDraftDialog}
+                            onClose={() => setShowAiDraftDialog(false)}
+                            subject={subject}
+                            onInsert={(html) => {
+                                setBodyHtml((prev) => prev + html);
+                                setShowAiDraftDialog(false);
+                            }}
+                        />
+
                         {/* Footer */}
                         <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 bg-slate-50">
                             <button
@@ -630,7 +691,7 @@ export function QuickEmailModal({
                             </button>
                             <button
                                 onClick={handleSend}
-                                disabled={isSending || !selectedMailboxId || !recipientEmail || (!selectedTemplateId && !subject)}
+                                disabled={isSending || !selectedMailboxId || !effectiveRecipient || (!selectedTemplateId && !subject)}
                                 className={cn(
                                     "flex items-center gap-2 px-6 py-2.5 text-sm font-semibold rounded-xl transition-all",
                                     "bg-gradient-to-r from-indigo-600 to-violet-600 text-white",
