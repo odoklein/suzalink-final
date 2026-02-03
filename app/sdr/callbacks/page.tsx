@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Card, Badge, Button, Modal, ModalFooter, Drawer } from "@/components/ui";
-import { CompanyDrawer, ContactDrawer } from "@/components/drawers";
+import { useState, useEffect, useCallback } from "react";
+import { Card, Badge, Button, Modal, ModalFooter, Select } from "@/components/ui";
+import { UnifiedActionDrawer } from "@/components/drawers/UnifiedActionDrawer";
 import {
-    Calendar,
     Clock,
     Phone,
     Building2,
@@ -12,49 +11,20 @@ import {
     Loader2,
     CheckCircle2,
     CalendarClock,
+    Filter,
 } from "lucide-react";
 import Link from "next/link";
-import { cn } from "@/lib/utils";
 import { formatCallbackDateTime } from "@/lib/utils/parseDateFromNote";
-
-// Drawer types (same shape as SDR action table view)
-interface DrawerContact {
-    id: string;
-    firstName: string | null;
-    lastName: string | null;
-    email: string | null;
-    phone: string | null;
-    title: string | null;
-    linkedin: string | null;
-    status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
-    companyId: string;
-    companyName?: string;
-}
-interface DrawerCompany {
-    id: string;
-    name: string;
-    industry: string | null;
-    country: string | null;
-    website: string | null;
-    size: string | null;
-    status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
-    contacts: Array<{
-        id: string;
-        firstName: string | null;
-        lastName: string | null;
-        email: string | null;
-        phone: string | null;
-        title: string | null;
-        linkedin: string | null;
-        status: string;
-        companyId: string;
-    }>;
-    _count: { contacts: number };
-}
 
 // ============================================
 // TYPES
 // ============================================
+
+interface Mission {
+    id: string;
+    name: string;
+    client?: { name: string };
+}
 
 interface Callback {
     id: string;
@@ -69,6 +39,7 @@ interface Callback {
         phone: string | null;
         email: string | null;
         company: {
+            id: string;
             name: string;
         };
     } | null;  // Contact can be null for company-only actions
@@ -99,22 +70,36 @@ export default function SDRCallbacksPage() {
     const [rescheduleDateValue, setRescheduleDateValue] = useState("");
     const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false);
 
-    // Drawer for contact/company (same as table view on action page)
-    const [drawerContactId, setDrawerContactId] = useState<string | null>(null);
-    const [drawerCompanyId, setDrawerCompanyId] = useState<string | null>(null);
-    const [drawerContact, setDrawerContact] = useState<DrawerContact | null>(null);
-    const [drawerCompany, setDrawerCompany] = useState<DrawerCompany | null>(null);
-    const [drawerLoading, setDrawerLoading] = useState(false);
+    // Filters: date range + mission
+    const [missions, setMissions] = useState<Mission[]>([]);
+    const [selectedMissionId, setSelectedMissionId] = useState<string | undefined>("");
+    const [dateFrom, setDateFrom] = useState<string>("");
+    const [dateTo, setDateTo] = useState<string>("");
+
+    // Unified drawer (same as table view on action page)
+    const [unifiedDrawerOpen, setUnifiedDrawerOpen] = useState(false);
+    const [unifiedDrawerContactId, setUnifiedDrawerContactId] = useState<string | null>(null);
+    const [unifiedDrawerCompanyId, setUnifiedDrawerCompanyId] = useState<string>("");
+    const [unifiedDrawerMissionId, setUnifiedDrawerMissionId] = useState<string | undefined>();
+    const [unifiedDrawerMissionName, setUnifiedDrawerMissionName] = useState<string | undefined>();
 
     const openDrawerForCallback = (cb: Callback, e?: React.MouseEvent) => {
         if (e) e.stopPropagation();
-        if (cb.contact) {
-            setDrawerCompanyId(null);
-            setDrawerContactId(cb.contact.id);
-        } else if (cb.company) {
-            setDrawerContactId(null);
-            setDrawerCompanyId(cb.company.id);
-        }
+        const companyId = cb.company?.id ?? cb.contact?.company?.id ?? "";
+        if (!companyId) return;
+        setUnifiedDrawerContactId(cb.contact?.id ?? null);
+        setUnifiedDrawerCompanyId(companyId);
+        setUnifiedDrawerMissionId(cb.mission?.id);
+        setUnifiedDrawerMissionName(cb.mission?.name);
+        setUnifiedDrawerOpen(true);
+    };
+
+    const closeUnifiedDrawer = () => {
+        setUnifiedDrawerOpen(false);
+        setUnifiedDrawerContactId(null);
+        setUnifiedDrawerCompanyId("");
+        setUnifiedDrawerMissionId(undefined);
+        setUnifiedDrawerMissionName(undefined);
     };
 
     const openReschedule = (cb: Callback, e?: React.MouseEvent) => {
@@ -150,102 +135,39 @@ export default function SDRCallbacksPage() {
         }
     };
 
-    useEffect(() => {
-        const fetchCallbacks = async () => {
-            try {
-                const res = await fetch("/api/sdr/callbacks");
-                const json = await res.json();
-                if (json.success) {
-                    setCallbacks(json.data);
-                }
-            } catch (err) {
-                console.error("Failed to fetch callbacks:", err);
-            } finally {
-                setIsLoading(false);
+    const fetchCallbacks = useCallback(async () => {
+        try {
+            setIsLoading(true);
+            const params = new URLSearchParams();
+            if (selectedMissionId) params.set("missionId", selectedMissionId);
+            if (dateFrom) params.set("dateFrom", new Date(dateFrom).toISOString());
+            if (dateTo) params.set("dateTo", new Date(dateTo + "T23:59:59.999Z").toISOString());
+            const res = await fetch(`/api/sdr/callbacks?${params.toString()}`);
+            const json = await res.json();
+            if (json.success) {
+                setCallbacks(json.data);
             }
-        };
+        } catch (err) {
+            console.error("Failed to fetch callbacks:", err);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [selectedMissionId, dateFrom, dateTo]);
 
-        fetchCallbacks();
+    useEffect(() => {
+        fetch("/api/sdr/missions")
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && Array.isArray(json.data)) {
+                    setMissions(json.data);
+                }
+            })
+            .catch(() => {});
     }, []);
 
-    // Fetch contact when opening contact drawer
     useEffect(() => {
-        if (!drawerContactId) {
-            setDrawerContact(null);
-            return;
-        }
-        setDrawerLoading(true);
-        fetch(`/api/contacts/${drawerContactId}`)
-            .then((res) => res.json())
-            .then((json) => {
-                if (json.success && json.data) {
-                    const c = json.data;
-                    setDrawerContact({
-                        id: c.id,
-                        firstName: c.firstName,
-                        lastName: c.lastName,
-                        email: c.email,
-                        phone: c.phone,
-                        title: c.title,
-                        linkedin: c.linkedin,
-                        status: c.status ?? "PARTIAL",
-                        companyId: c.company?.id ?? "",
-                        companyName: c.company?.name ?? undefined,
-                    });
-                } else {
-                    setDrawerContact(null);
-                }
-            })
-            .catch(() => setDrawerContact(null))
-            .finally(() => setDrawerLoading(false));
-    }, [drawerContactId]);
-
-    // Fetch company when opening company drawer
-    useEffect(() => {
-        if (!drawerCompanyId) {
-            setDrawerCompany(null);
-            return;
-        }
-        setDrawerLoading(true);
-        fetch(`/api/companies/${drawerCompanyId}`)
-            .then((res) => res.json())
-            .then((json) => {
-                if (json.success && json.data) {
-                    const co = json.data;
-                    setDrawerCompany({
-                        id: co.id,
-                        name: co.name,
-                        industry: co.industry,
-                        country: co.country,
-                        website: co.website,
-                        size: co.size,
-                        status: co.status ?? "PARTIAL",
-                        contacts: (co.contacts ?? []).map((ct: { id: string; firstName: string | null; lastName: string | null; email: string | null; phone: string | null; title: string | null; linkedin: string | null; status: string; companyId: string }) => ({
-                            id: ct.id,
-                            firstName: ct.firstName,
-                            lastName: ct.lastName,
-                            email: ct.email,
-                            phone: ct.phone,
-                            title: ct.title,
-                            linkedin: ct.linkedin,
-                            status: ct.status ?? "PARTIAL",
-                            companyId: ct.companyId,
-                        })),
-                        _count: { contacts: co._count?.contacts ?? co.contacts?.length ?? 0 },
-                    });
-                } else {
-                    setDrawerCompany(null);
-                }
-            })
-            .catch(() => setDrawerCompany(null))
-            .finally(() => setDrawerLoading(false));
-    }, [drawerCompanyId]);
-
-    const handleContactFromCompany = (contact: { id: string }) => {
-        setDrawerCompanyId(null);
-        setDrawerCompany(null);
-        setDrawerContactId(contact.id);
-    };
+        fetchCallbacks();
+    }, [fetchCallbacks]);
 
     if (isLoading) {
         return (
@@ -261,17 +183,60 @@ export default function SDRCallbacksPage() {
     return (
         <div className="space-y-8 animate-fade-in p-2">
             {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-indigo-900">
-                        Rappels en attente
-                    </h1>
-                    <p className="text-slate-500 mt-2 font-medium">
-                        Gérez vos demandes de rappel et optimisez vos conversions
-                    </p>
+            <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between flex-wrap gap-4">
+                    <div>
+                        <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-indigo-900">
+                            Rappels en attente
+                        </h1>
+                        <p className="text-slate-500 mt-2 font-medium">
+                            Gérez vos demandes de rappel et optimisez vos conversions
+                        </p>
+                    </div>
+                    <div className="hidden md:flex bg-amber-50 text-amber-700 px-4 py-2 rounded-full text-sm font-semibold border border-amber-100 shadow-sm">
+                        {callbacks.length} {callbacks.length > 1 ? "rappels" : "rappel"} à traiter
+                    </div>
                 </div>
-                <div className="hidden md:flex bg-amber-50 text-amber-700 px-4 py-2 rounded-full text-sm font-semibold border border-amber-100 shadow-sm">
-                    {callbacks.length} {callbacks.length > 1 ? "rappels" : "rappel"} à traiter
+
+                {/* Filters: date + mission */}
+                <div className="flex flex-wrap items-center gap-3 p-4 rounded-xl bg-slate-50/80 border border-slate-200/60">
+                    <div className="flex items-center gap-2 text-slate-600 font-medium">
+                        <Filter className="w-4 h-4" />
+                        Filtres
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex items-center gap-2">
+                            <label className="text-sm text-slate-600 whitespace-nowrap">Du</label>
+                            <input
+                                type="date"
+                                value={dateFrom}
+                                onChange={(e) => setDateFrom(e.target.value)}
+                                className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <label className="text-sm text-slate-600 whitespace-nowrap">Au</label>
+                            <input
+                                type="date"
+                                value={dateTo}
+                                onChange={(e) => setDateTo(e.target.value)}
+                                className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                        </div>
+                        <div className="flex items-center gap-2 min-w-[200px]">
+                            <label className="text-sm text-slate-600 whitespace-nowrap">Mission</label>
+                            <Select
+                                value={selectedMissionId ?? ""}
+                                onChange={(v) => setSelectedMissionId(v || undefined)}
+                                placeholder="Toutes les missions"
+                                options={[
+                                    { value: "", label: "Toutes les missions" },
+                                    ...missions.map((m) => ({ value: m.id, label: m.name })),
+                                ]}
+                                className="flex-1"
+                            />
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -404,36 +369,16 @@ export default function SDRCallbacksPage() {
                 </div>
             )}
 
-            {/* Contact/Company drawer (same as table view) */}
-            {(drawerContactId || drawerCompanyId) && drawerLoading && (
-                <Drawer
-                    isOpen
-                    onClose={() => { setDrawerContactId(null); setDrawerCompanyId(null); }}
-                    title="Chargement..."
-                >
-                    <div className="flex items-center justify-center py-12">
-                        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
-                    </div>
-                </Drawer>
-            )}
-            {drawerContactId && drawerContact && (
-                <ContactDrawer
-                    isOpen={!!drawerContactId}
-                    onClose={() => { setDrawerContactId(null); setDrawerContact(null); }}
-                    contact={drawerContact}
-                    onUpdate={(updated) => setDrawerContact(updated)}
-                    isManager={false}
-                    companies={[]}
-                />
-            )}
-            {drawerCompanyId && drawerCompany && (
-                <CompanyDrawer
-                    isOpen={!!drawerCompanyId}
-                    onClose={() => { setDrawerCompanyId(null); setDrawerCompany(null); }}
-                    company={drawerCompany}
-                    onUpdate={(updated) => setDrawerCompany(updated)}
-                    onContactClick={handleContactFromCompany}
-                    isManager={false}
+            {/* Unified Action Drawer (same as table view on action page) */}
+            {unifiedDrawerCompanyId && (
+                <UnifiedActionDrawer
+                    isOpen={unifiedDrawerOpen}
+                    onClose={closeUnifiedDrawer}
+                    contactId={unifiedDrawerContactId}
+                    companyId={unifiedDrawerCompanyId}
+                    missionId={unifiedDrawerMissionId}
+                    missionName={unifiedDrawerMissionName}
+                    onActionRecorded={fetchCallbacks}
                 />
             )}
 

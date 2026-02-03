@@ -105,6 +105,12 @@ export function QuickEmailModal({
 
     const editorRef = useRef<HTMLDivElement>(null);
     const modalRef = useRef<HTMLDivElement>(null);
+    const recipientInputRef = useRef<HTMLInputElement>(null);
+    const selectedSuggestionRef = useRef(false);
+
+    // Domain suggestions for recipient email
+    const EMAIL_DOMAINS = ["@gmail.com", "@outlook.com", "@suzaliconseil.com"] as const;
+    const [showDomainSuggestions, setShowDomainSuggestions] = useState(false);
 
     // ============================================
     // EFFECTS
@@ -120,6 +126,7 @@ export function QuickEmailModal({
             setSelectedTemplateId("");
             setSubject("");
             setBodyHtml("");
+            setShowDomainSuggestions(false);
 
             // Set recipient from contact
             if (contact?.email) {
@@ -129,6 +136,15 @@ export function QuickEmailModal({
             }
         }
     }, [isOpen, contact]);
+
+    // Build domain suggestions: show when user typed something and no @ yet
+    const localPart = recipientEmail.includes("@")
+        ? recipientEmail.slice(0, recipientEmail.indexOf("@"))
+        : recipientEmail.trim();
+    const shouldShowSuggestions = showDomainSuggestions && localPart.length > 0;
+    const suggestedEmails = shouldShowSuggestions
+        ? EMAIL_DOMAINS.map((d) => localPart + d)
+        : [];
 
     // Fetch mailboxes
     useEffect(() => {
@@ -260,6 +276,27 @@ export function QuickEmailModal({
             onClose();
         }
     }, [onClose]);
+
+    // On blur: if input has no @, complete with first domain so address is selected (unless user picked a suggestion)
+    const handleRecipientBlur = () => {
+        if (selectedSuggestionRef.current) {
+            selectedSuggestionRef.current = false;
+            setShowDomainSuggestions(false);
+            return;
+        }
+        const value = recipientEmail.trim();
+        if (value && !value.includes("@")) {
+            setRecipientEmail(value + EMAIL_DOMAINS[0]);
+        }
+        setShowDomainSuggestions(false);
+    };
+
+    const handleSelectSuggestion = (fullEmail: string) => {
+        selectedSuggestionRef.current = true;
+        setRecipientEmail(fullEmail);
+        setShowDomainSuggestions(false);
+        recipientInputRef.current?.focus();
+    };
 
     useEffect(() => {
         if (isOpen) {
@@ -405,18 +442,42 @@ export function QuickEmailModal({
                             </div>
 
                             {/* To */}
-                            <div className="space-y-2">
+                            <div className="space-y-2 relative">
                                 <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                                     <User className="w-4 h-4" />
                                     Destinataire
                                 </label>
                                 <input
+                                    ref={recipientInputRef}
                                     type="email"
                                     value={recipientEmail}
                                     onChange={(e) => setRecipientEmail(e.target.value)}
+                                    onFocus={() => setShowDomainSuggestions(true)}
+                                    onBlur={handleRecipientBlur}
                                     placeholder="email@example.com"
                                     className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                                    autoComplete="off"
                                 />
+                                {suggestedEmails.length > 0 && (
+                                    <div
+                                        className="absolute left-0 right-0 top-full mt-1 z-10 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
+                                        onMouseDown={(e) => e.preventDefault()}
+                                    >
+                                        <p className="px-3 py-2 text-xs font-medium text-slate-500 uppercase tracking-wider border-b border-slate-100">
+                                            Suggestions
+                                        </p>
+                                        {suggestedEmails.map((email) => (
+                                            <button
+                                                key={email}
+                                                type="button"
+                                                onMouseDown={() => handleSelectSuggestion(email)}
+                                                className="w-full px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                                            >
+                                                {email}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
 
                             {/* Template Selection */}
