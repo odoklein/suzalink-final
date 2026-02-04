@@ -11,12 +11,15 @@ import {
 import { z } from 'zod';
 
 // ============================================
-// PATCH /api/actions/[id] - Update callback date (reschedule rappel)
+// PATCH /api/actions/[id] - Update callback date (reschedule rappel) or meeting (result + note)
 // ============================================
+
+const meetingResults = ['MEETING_BOOKED', 'MEETING_CANCELLED'] as const;
 
 const updateCallbackSchema = z.object({
     callbackDate: z.union([z.string(), z.date()]).optional().transform((s) => (s ? (typeof s === 'string' ? new Date(s) : s) : undefined)),
-    note: z.string().max(500).optional(),
+    note: z.string().max(2000).optional(),
+    result: z.enum(meetingResults).optional(),
 });
 
 export const PATCH = withErrorHandler(async (
@@ -38,8 +41,16 @@ export const PATCH = withErrorHandler(async (
         throw new NotFoundError('Action introuvable');
     }
 
-    if (action.result !== 'CALLBACK_REQUESTED') {
-        return errorResponse('Seules les actions de type rappel peuvent être modifiées', 400);
+    const isMeetingAction = action.result === 'MEETING_BOOKED' || action.result === 'MEETING_CANCELLED';
+    const isCallbackAction = action.result === 'CALLBACK_REQUESTED';
+
+    if (!isMeetingAction && !isCallbackAction) {
+        return errorResponse('Seules les actions type rappel ou rendez-vous peuvent être modifiées', 400);
+    }
+
+    // Meeting: only result + note; Callback: callbackDate + note
+    if (isMeetingAction && data.result !== undefined && !meetingResults.includes(data.result as any)) {
+        return errorResponse('Statut RDV invalide', 400);
     }
 
     // Access: SDR own actions; BD actions on assigned missions; Manager any
@@ -56,9 +67,10 @@ export const PATCH = withErrorHandler(async (
         }
     }
 
-    const updateData: { callbackDate?: Date; note?: string } = {};
+    const updateData: { callbackDate?: Date; note?: string; result?: typeof meetingResults[number] } = {};
     if (data.callbackDate !== undefined) updateData.callbackDate = data.callbackDate;
     if (data.note !== undefined) updateData.note = data.note;
+    if (isMeetingAction && data.result !== undefined) updateData.result = data.result as typeof meetingResults[number];
 
     if (Object.keys(updateData).length === 0) {
         return errorResponse('Aucune donnée à mettre à jour', 400);

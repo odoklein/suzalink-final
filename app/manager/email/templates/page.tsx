@@ -17,8 +17,43 @@ import {
     Eye,
     Code,
     Type,
+    LayoutTemplate,
 } from "lucide-react";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
+import { Card, CardContent } from "@/components/ui/Card";
+import { SUPPORTED_TEMPLATE_VARIABLES } from "@/lib/email/constants";
+
+// Sample values for preview (no API call)
+const PREVIEW_SAMPLE: Record<string, string> = {
+    firstName: "Jean",
+    lastName: "Dupont",
+    fullName: "Jean Dupont",
+    title: "Directeur commercial",
+    email: "jean.dupont@exemple.fr",
+    phone: "+33 6 12 34 56 78",
+    linkedin: "https://linkedin.com/in/jeandupont",
+    company: "Acme SAS",
+    companyName: "Acme SAS",
+    industry: "Technologie",
+    website: "https://acme.fr",
+    country: "France",
+    companySize: "50-200",
+    currentDate: new Date().toLocaleDateString("fr-FR"),
+    currentDay: new Date().toLocaleDateString("fr-FR", { weekday: "long" }),
+    currentMonth: new Date().toLocaleDateString("fr-FR", { month: "long" }),
+    currentYear: String(new Date().getFullYear()),
+};
+
+function substitutePreview(html: string, subject: string): { subject: string; body: string } {
+    let outSub = subject;
+    let outBody = html;
+    SUPPORTED_TEMPLATE_VARIABLES.forEach(({ name }) => {
+        const val = PREVIEW_SAMPLE[name] ?? "";
+        const regex = new RegExp(`\\{\\{${name}\\}\\}`, "g");
+        outSub = outSub.replace(regex, val);
+        outBody = outBody.replace(regex, val);
+    });
+    return { subject: outSub, body: outBody };
+}
 
 // ============================================
 // TYPES
@@ -34,6 +69,7 @@ interface EmailTemplate {
     isShared: boolean;
     variables: string[];
     useCount: number;
+    lastUsedAt: string | null;
     createdAt: string;
     updatedAt: string;
     createdBy: {
@@ -43,7 +79,7 @@ interface EmailTemplate {
 }
 
 // ============================================
-// TEMPLATE EDITOR MODAL
+// TEMPLATE EDITOR (slide-over: Code + Preview + variable palette)
 // ============================================
 
 interface TemplateEditorProps {
@@ -55,6 +91,7 @@ interface TemplateEditorProps {
 function TemplateEditor({ template, onClose, onSave }: TemplateEditorProps) {
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [activeTab, setActiveTab] = useState<"code" | "preview">("code");
     const [bodyMode, setBodyMode] = useState<"text" | "html">("text");
     const [form, setForm] = useState({
         name: template?.name || "",
@@ -64,7 +101,6 @@ function TemplateEditor({ template, onClose, onSave }: TemplateEditorProps) {
         isShared: template?.isShared || false,
     });
 
-    // Detect HTML mode when editing existing template
     useEffect(() => {
         const html = template?.bodyHtml || "";
         if (html && /<\s*(html|head|body|style|div|table)[\s>]/i.test(html)) {
@@ -81,24 +117,23 @@ function TemplateEditor({ template, onClose, onSave }: TemplateEditorProps) {
         { value: "thank-you", label: "Remerciement" },
     ];
 
+    const insertVariable = (varName: string) => {
+        const token = `{{${varName}}}`;
+        setForm((prev) => ({ ...prev, bodyHtml: prev.bodyHtml + token }));
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsSaving(true);
         setError(null);
-
         try {
-            const url = template 
-                ? `/api/email/templates/${template.id}`
-                : "/api/email/templates";
-            
+            const url = template ? `/api/email/templates/${template.id}` : "/api/email/templates";
             const res = await fetch(url, {
                 method: template ? "PATCH" : "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(form),
             });
-
             const json = await res.json();
-
             if (json.success) {
                 onSave();
                 onClose();
@@ -112,65 +147,51 @@ function TemplateEditor({ template, onClose, onSave }: TemplateEditorProps) {
         }
     };
 
+    const preview = substitutePreview(form.bodyHtml, form.subject);
+
     return (
         <>
             <div className="fixed inset-0 bg-black/50 z-50" onClick={onClose} />
-            <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-2xl">
-                    {/* Header */}
-                    <div className="flex items-center justify-between p-4 border-b border-slate-200">
-                        <h2 className="text-lg font-semibold text-slate-900">
+            <div className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-4xl bg-white shadow-2xl flex flex-col animate-slide-in-right">
+                <form onSubmit={handleSubmit} className="flex flex-col h-full">
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-600 to-violet-600">
+                        <h2 className="text-lg font-semibold text-white">
                             {template ? "Modifier le template" : "Nouveau template"}
                         </h2>
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-                        >
-                            <X className="w-5 h-5 text-slate-500" />
+                        <button type="button" onClick={onClose} className="p-2 rounded-lg hover:bg-white/20 text-white transition-colors">
+                            <X className="w-5 h-5" />
                         </button>
                     </div>
 
-                    {/* Content */}
-                    <div className="p-4 space-y-4">
+                    <div className="flex-1 overflow-y-auto p-6 space-y-4">
                         {error && (
-                            <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
-                                {error}
-                            </div>
+                            <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">{error}</div>
                         )}
 
                         <div className="grid grid-cols-2 gap-4">
                             <div className="col-span-2">
-                                <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                                    Nom du template *
-                                </label>
+                                <label className="block text-sm font-medium text-slate-700 mb-1.5">Nom du template *</label>
                                 <input
                                     type="text"
                                     required
                                     value={form.name}
                                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                     placeholder="Ex: Relance prospect froid"
                                 />
                             </div>
-
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                                    Catégorie
-                                </label>
+                                <label className="block text-sm font-medium text-slate-700 mb-1.5">Catégorie</label>
                                 <select
                                     value={form.category}
                                     onChange={(e) => setForm({ ...form, category: e.target.value })}
-                                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                 >
                                     {categories.map((cat) => (
-                                        <option key={cat.value} value={cat.value}>
-                                            {cat.label}
-                                        </option>
+                                        <option key={cat.value} value={cat.value}>{cat.label}</option>
                                     ))}
                                 </select>
                             </div>
-
                             <div className="flex items-end">
                                 <label className="flex items-center gap-3 cursor-pointer">
                                     <input
@@ -179,87 +200,128 @@ function TemplateEditor({ template, onClose, onSave }: TemplateEditorProps) {
                                         onChange={(e) => setForm({ ...form, isShared: e.target.checked })}
                                         className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                                     />
-                                    <span className="text-sm text-slate-700">
-                                        Partager avec l'équipe
-                                    </span>
+                                    <span className="text-sm text-slate-700">Partager avec l&apos;équipe</span>
                                 </label>
                             </div>
-
                             <div className="col-span-2">
-                                <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                                    Sujet *
-                                </label>
+                                <label className="block text-sm font-medium text-slate-700 mb-1.5">Sujet *</label>
                                 <input
                                     type="text"
                                     required
                                     value={form.subject}
                                     onChange={(e) => setForm({ ...form, subject: e.target.value })}
-                                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                     placeholder="Re: {{firstName}}, suite à notre échange"
                                 />
-                                <p className="mt-1 text-xs text-slate-500">
-                                    Variables: {"{{firstName}}"}, {"{{lastName}}"}, {"{{company}}"}, {"{{title}}"}
-                                </p>
+                            </div>
+                        </div>
+
+                        {/* Variable palette */}
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                            <p className="text-xs font-medium text-slate-600 mb-2">Variables — cliquer pour insérer</p>
+                            <div className="flex flex-wrap gap-1.5">
+                                {SUPPORTED_TEMPLATE_VARIABLES.map((v) => (
+                                    <button
+                                        key={v.name}
+                                        type="button"
+                                        onClick={() => insertVariable(v.name)}
+                                        className="px-2.5 py-1 text-xs font-medium rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-700 transition-colors"
+                                        title={v.description}
+                                    >
+                                        {`{{${v.name}}}`}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Code / Preview tabs */}
+                        <div>
+                            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg mb-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveTab("code")}
+                                    className={cn(
+                                        "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors",
+                                        activeTab === "code" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                                    )}
+                                >
+                                    <Code className="w-4 h-4" />
+                                    Code
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveTab("preview")}
+                                    className={cn(
+                                        "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors",
+                                        activeTab === "preview" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                                    )}
+                                >
+                                    <LayoutTemplate className="w-4 h-4" />
+                                    Aperçu
+                                </button>
                             </div>
 
-                            <div className="col-span-2">
-                                <div className="flex items-center justify-between mb-1.5">
-                                    <label className="block text-sm font-medium text-slate-700">
-                                        Contenu de l&apos;email *
-                                    </label>
-                                    <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+                            {activeTab === "code" && (
+                                <div>
+                                    <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50 mb-2">
                                         <button
                                             type="button"
                                             onClick={() => setBodyMode("text")}
                                             className={cn(
                                                 "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
-                                                bodyMode === "text" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                                                bodyMode === "text" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600"
                                             )}
                                         >
-                                            <Type className="w-3.5 h-3.5" />
-                                            Texte simple
+                                            <Type className="w-3.5 h-3.5" /> Texte
                                         </button>
                                         <button
                                             type="button"
                                             onClick={() => setBodyMode("html")}
                                             className={cn(
                                                 "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
-                                                bodyMode === "html" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                                                bodyMode === "html" ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600"
                                             )}
                                         >
-                                            <Code className="w-3.5 h-3.5" />
-                                            HTML / CSS
+                                            <Code className="w-3.5 h-3.5" /> HTML / CSS
                                         </button>
                                     </div>
+                                    <textarea
+                                        required
+                                        value={form.bodyHtml}
+                                        onChange={(e) => setForm({ ...form, bodyHtml: e.target.value })}
+                                        rows={bodyMode === "html" ? 20 : 14}
+                                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y min-h-[280px]"
+                                        placeholder={bodyMode === "text"
+                                            ? "Bonjour {{firstName}},\n\nJe me permets de vous contacter..."
+                                            : '<style>.title{font-family:Arial;}</style>\n<p class="title">Bonjour {{firstName}},</p>'}
+                                    />
                                 </div>
-                                <p className="text-xs text-slate-500 mb-2">
-                                    {bodyMode === "text" ? (
-                                        <>Utilisez des variables : {"{{firstName}}"}, {"{{lastName}}"}, {"{{company}}"}, {"{{title}}"}</>
-                                    ) : (
-                                        <>Collez un template HTML/CSS complet. Les variables {"{{variable}}"} seront remplacées.</>
-                                    )}
-                                </p>
-                                <textarea
-                                    required
-                                    value={form.bodyHtml}
-                                    onChange={(e) => setForm({ ...form, bodyHtml: e.target.value })}
-                                    rows={bodyMode === "html" ? 18 : 12}
-                                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-y min-h-[200px]"
-                                    placeholder={bodyMode === "text"
-                                        ? "Bonjour {{firstName}},\n\nJe me permets de vous contacter..."
-                                        : '<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial; }\n  </style>\n</head>\n<body>\n  <p>Bonjour {{firstName}},</p>\n  <p>...</p>\n</body>\n</html>'}
-                                />
-                            </div>
+                            )}
+
+                            {activeTab === "preview" && (
+                                <div className="rounded-xl border border-slate-200 bg-white overflow-hidden min-h-[320px]">
+                                    <div className="px-4 py-2 border-b border-slate-200 bg-slate-50 text-xs text-slate-500 font-medium">
+                                        Sujet : {preview.subject || "(vide)"}
+                                    </div>
+                                    <div
+                                        className="p-4 prose prose-slate max-w-none prose-p:my-2 text-sm"
+                                        dangerouslySetInnerHTML={{
+                                            __html: preview.body
+                                                ? preview.body.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+                                                : "<p class='text-slate-400'>Aucun contenu à prévisualiser.</p>",
+                                        }}
+                                    />
+                                </div>
+                            )}
                         </div>
                     </div>
 
-                    {/* Footer */}
-                    <div className="flex items-center justify-end gap-3 p-4 border-t border-slate-200">
+                    <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50">
                         <button
                             type="button"
                             onClick={onClose}
                             disabled={isSaving}
-                            className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                            className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-xl transition-colors"
                         >
                             Annuler
                         </button>
@@ -268,11 +330,7 @@ function TemplateEditor({ template, onClose, onSave }: TemplateEditorProps) {
                             disabled={isSaving}
                             className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-500 disabled:opacity-50 transition-colors"
                         >
-                            {isSaving ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                                <Save className="w-4 h-4" />
-                            )}
+                            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                             {template ? "Mettre à jour" : "Créer"}
                         </button>
                     </div>
@@ -293,6 +351,7 @@ export default function EmailTemplatesPage() {
     const [categoryFilter, setCategoryFilter] = useState<string>("");
     const [editorOpen, setEditorOpen] = useState(false);
     const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null);
+    const [previewTemplate, setPreviewTemplate] = useState<EmailTemplate | null>(null);
 
     const categories = [
         { value: "", label: "Toutes" },
@@ -487,9 +546,9 @@ export default function EmailTemplatesPage() {
                                     <div className="flex items-center gap-2">
                                         {getCategoryBadge(template.category)}
                                         {template.isShared ? (
-                                            <Share2 className="w-3.5 h-3.5 text-slate-400" title="Partagé" />
+                                            <span title="Partagé"><Share2 className="w-3.5 h-3.5 text-slate-400" /></span>
                                         ) : (
-                                            <Lock className="w-3.5 h-3.5 text-slate-400" title="Privé" />
+                                            <span title="Privé"><Lock className="w-3.5 h-3.5 text-slate-400" /></span>
                                         )}
                                     </div>
                                     <div className="flex items-center gap-1">
@@ -535,7 +594,14 @@ export default function EmailTemplatesPage() {
 
                                 <div className="flex items-center justify-between text-xs text-slate-400">
                                     <span>Par {template.createdBy.name}</span>
-                                    <span>{template.useCount} utilisations</span>
+                                    <span>
+                                        {template.useCount} utilisations
+                                        {template.lastUsedAt && (
+                                            <span className="ml-1">
+                                                · Dernière utilisation {new Date(template.lastUsedAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+                                            </span>
+                                        )}
+                                    </span>
                                 </div>
                             </CardContent>
                         </Card>
@@ -543,7 +609,7 @@ export default function EmailTemplatesPage() {
                 </div>
             )}
 
-            {/* Editor Modal */}
+            {/* Editor slide-over */}
             {editorOpen && (
                 <TemplateEditor
                     template={editingTemplate}
@@ -554,6 +620,39 @@ export default function EmailTemplatesPage() {
                     onSave={fetchTemplates}
                 />
             )}
+
+            {/* Preview modal */}
+            {previewTemplate && (() => {
+                const { subject, body } = substitutePreview(previewTemplate.bodyHtml, previewTemplate.subject);
+                return (
+                    <>
+                        <div className="fixed inset-0 bg-black/50 z-50" onClick={() => setPreviewTemplate(null)} />
+                        <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col bg-white rounded-2xl shadow-2xl">
+                            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+                                <h3 className="text-lg font-semibold text-slate-900">Aperçu : {previewTemplate.name}</h3>
+                                <button
+                                    type="button"
+                                    onClick={() => setPreviewTemplate(null)}
+                                    className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                                >
+                                    <X className="w-5 h-5 text-slate-500" />
+                                </button>
+                            </div>
+                            <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 text-sm text-slate-600">
+                                <span className="font-medium">Sujet :</span> {subject || "(vide)"}
+                            </div>
+                            <div
+                                className="flex-1 overflow-y-auto p-6 prose prose-slate max-w-none prose-p:my-2 text-sm"
+                                dangerouslySetInnerHTML={{
+                                    __html: body
+                                        ? body.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+                                        : "<p class='text-slate-400'>Aucun contenu.</p>",
+                                }}
+                            />
+                        </div>
+                    </>
+                );
+            })()}
         </div>
     );
 }

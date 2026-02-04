@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
             to,
             contactId,
             companyId,
+            missionId,
             customSubject,
             customBodyHtml,
             customData
@@ -133,10 +134,10 @@ export async function POST(req: NextRequest) {
         formData.append('bodyHtml', bodyHtml);
         if (bodyText) formData.append('bodyText', bodyText);
 
-        // Link to contact if provided
-        if (contactId) {
-            formData.append('contactId', contactId);
-        }
+        if (contactId) formData.append('contactId', contactId);
+        if (missionId) formData.append('missionId', missionId);
+        formData.append('sentById', session.user.id);
+        if (templateId) formData.append('templateId', templateId);
 
         // Use internal fetch to the send endpoint
         const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';

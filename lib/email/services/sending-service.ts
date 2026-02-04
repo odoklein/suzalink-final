@@ -5,6 +5,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { decrypt } from '@/lib/encryption';
+import { inlineHtmlForEmail } from './inline-styles';
 import {
     getEmailProvider,
     OAuthTokens,
@@ -33,6 +34,11 @@ export interface SendOptions {
     trackingPixelId?: string;
     inReplyTo?: string;
     threadId?: string;
+    /** Outreach / mission context (quick-send from SDR) */
+    contactId?: string;
+    missionId?: string;
+    sentById?: string;
+    templateId?: string;
 }
 
 export interface SendResult {
@@ -91,6 +97,11 @@ export class EmailSendingService {
                 bodyHtml = `${bodyHtml}<br/><br/>${mailbox.signatureHtml}`;
             } else if (mailbox.signature && options.bodyText) {
                 options.bodyText = `${options.bodyText}\n\n${mailbox.signature}`;
+            }
+
+            // Inline CSS for email client compatibility (Gmail, Outlook, etc.)
+            if (bodyHtml) {
+                bodyHtml = inlineHtmlForEmail(bodyHtml);
             }
 
             // Build send params
@@ -219,6 +230,10 @@ export class EmailSendingService {
                     providerMessageId: result.messageId,
                     providerThreadId: result.threadId,
                     sentAt: new Date(),
+                    contactId: options.contactId ?? undefined,
+                    missionId: options.missionId ?? undefined,
+                    sentById: options.sentById ?? undefined,
+                    templateId: options.templateId ?? undefined,
                 },
             });
 

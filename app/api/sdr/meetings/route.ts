@@ -23,10 +23,10 @@ export async function GET(request: NextRequest) {
         const missionId = searchParams.get("missionId");
         const listId = searchParams.get("listId");
 
-        // Build where clause with filters
+        // Build where clause with filters (include MEETING_BOOKED and MEETING_CANCELLED)
         const where: any = {
             sdrId: session.user.id,
-            result: "MEETING_BOOKED",
+            result: { in: ["MEETING_BOOKED", "MEETING_CANCELLED"] },
         };
 
         // Filter by Mission (via Campaign -> Mission)
@@ -109,6 +109,7 @@ export async function GET(request: NextRequest) {
         const transformedMeetings = meetings.map((meeting) => ({
             id: meeting.id,
             createdAt: meeting.createdAt,
+            result: meeting.result,
             note: meeting.note || undefined,
             contact: meeting.contact,
             mission: meeting.campaign?.mission

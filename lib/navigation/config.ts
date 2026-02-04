@@ -153,6 +153,12 @@ export const SDR_NAV: NavSection[] = [
         permission: "pages.email",
       },
       {
+        href: "/sdr/emails/sent",
+        icon: Send,
+        label: "Emails envoyés",
+        permission: "pages.email",
+      },
+      {
         href: "/sdr/callbacks",
         icon: Calendar,
         label: "Rappels",

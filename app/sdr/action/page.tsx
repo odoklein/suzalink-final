@@ -423,14 +423,36 @@ export default function SDRActionPage() {
 
     const queueRowKey = (row: QueueItem) => row.contactId ?? row.companyId;
 
-    // Unified drawer state
+    // Unified drawer state (table view)
     const [unifiedDrawerOpen, setUnifiedDrawerOpen] = useState(false);
     const [unifiedDrawerContactId, setUnifiedDrawerContactId] = useState<string | null>(null);
     const [unifiedDrawerCompanyId, setUnifiedDrawerCompanyId] = useState<string | null>(null);
     const [unifiedDrawerMissionId, setUnifiedDrawerMissionId] = useState<string | undefined>();
     const [unifiedDrawerMissionName, setUnifiedDrawerMissionName] = useState<string | undefined>();
+    const [unifiedDrawerClientBookingUrl, setUnifiedDrawerClientBookingUrl] = useState<string>("");
+    /** Row used to open the drawer (for email modal context when "Envoie mail" is selected in drawer) */
+    const [drawerRow, setDrawerRow] = useState<QueueItem | null>(null);
+
+    // Fetch client booking URL when drawer opens (for MEETING_BOOKED calendar in drawer)
+    useEffect(() => {
+        if (!unifiedDrawerMissionId || !unifiedDrawerOpen) {
+            setUnifiedDrawerClientBookingUrl("");
+            return;
+        }
+        fetch(`/api/missions/${unifiedDrawerMissionId}`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data?.client?.bookingUrl) {
+                    setUnifiedDrawerClientBookingUrl(json.data.client.bookingUrl);
+                } else {
+                    setUnifiedDrawerClientBookingUrl("");
+                }
+            })
+            .catch(() => setUnifiedDrawerClientBookingUrl(""));
+    }, [unifiedDrawerMissionId, unifiedDrawerOpen]);
 
     const openDrawerForRow = (row: QueueItem) => {
+        setDrawerRow(row);
         setUnifiedDrawerContactId(row.contactId || null);
         setUnifiedDrawerCompanyId(row.companyId);
 
@@ -443,10 +465,36 @@ export default function SDRActionPage() {
 
     const closeUnifiedDrawer = () => {
         setUnifiedDrawerOpen(false);
+        setDrawerRow(null);
         setUnifiedDrawerContactId(null);
         setUnifiedDrawerCompanyId(null);
         setUnifiedDrawerMissionId(undefined);
         setUnifiedDrawerMissionName(undefined);
+        setUnifiedDrawerClientBookingUrl("");
+    };
+
+    const openEmailModalFromDrawer = () => {
+        if (drawerRow) {
+            setEmailModalContact(drawerRow.contact ? {
+                id: drawerRow.contact.id,
+                firstName: drawerRow.contact.firstName,
+                lastName: drawerRow.contact.lastName,
+                email: drawerRow.contact.email,
+                title: drawerRow.contact.title,
+                company: drawerRow.company ? { id: drawerRow.company.id, name: drawerRow.company.name } : undefined,
+            } : null);
+            setEmailModalCompany(drawerRow.company ? {
+                id: drawerRow.company.id,
+                name: drawerRow.company.name,
+                phone: drawerRow.company.phone ?? undefined,
+            } : null);
+        } else {
+            setEmailModalContact(null);
+            setEmailModalCompany(null);
+        }
+        setEmailModalMissionId(unifiedDrawerMissionId ?? null);
+        setEmailModalMissionName(unifiedDrawerMissionName ?? null);
+        setShowQuickEmailModal(true);
     };
 
     // Keep legacy close functions for backwards compatibility
@@ -592,8 +640,8 @@ export default function SDRActionPage() {
                 company: currentAction.company ? { id: currentAction.company.id, name: currentAction.company.name } : undefined,
             } : null);
             setEmailModalCompany(!contact && currentAction.company ? { id: currentAction.company.id, name: currentAction.company.name, phone: currentAction.company.phone } : null);
-            setEmailModalMissionId(selectedMissionId);
-            setEmailModalMissionName(currentAction.missionName ?? undefined);
+            setEmailModalMissionId(selectedMissionId ?? null);
+            setEmailModalMissionName(currentAction.missionName ?? null);
             setPendingEmailAction({ cardMode: true, result: selectedResult });
             setShowQuickEmailModal(true);
             return;
@@ -802,7 +850,7 @@ export default function SDRActionPage() {
                                         onClick={() => setViewMode("card")}
                                         className={cn(
                                             "px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2",
-                                            viewMode === "card"
+                                            (viewMode as "card" | "table") === "card"
                                                 ? "bg-white text-slate-900 shadow-lg"
                                                 : "text-white/70 hover:text-white hover:bg-white/10"
                                         )}
@@ -815,7 +863,7 @@ export default function SDRActionPage() {
                                         onClick={() => setViewMode("table")}
                                         className={cn(
                                             "px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2",
-                                            viewMode === "table"
+                                            (viewMode as "card" | "table") === "table"
                                                 ? "bg-white text-slate-900 shadow-lg"
                                                 : "text-white/70 hover:text-white hover:bg-white/10"
                                         )}
@@ -1026,6 +1074,8 @@ export default function SDRActionPage() {
                             companyId={unifiedDrawerCompanyId}
                             missionId={unifiedDrawerMissionId}
                             missionName={unifiedDrawerMissionName}
+                            clientBookingUrl={unifiedDrawerClientBookingUrl || undefined}
+                            onOpenEmailModal={openEmailModalFromDrawer}
                             onActionRecorded={() => {
                                 // Refresh queue items after action recorded
                                 setQueueLoading(true);
@@ -1102,7 +1152,7 @@ export default function SDRActionPage() {
                                         onClick={() => setViewMode("card")}
                                         className={cn(
                                             "px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2",
-                                            viewMode === "card"
+                                            (viewMode as "card" | "table") === "card"
                                                 ? "bg-white text-slate-900 shadow-lg"
                                                 : "text-white/70 hover:text-white hover:bg-white/10"
                                         )}
@@ -1115,7 +1165,7 @@ export default function SDRActionPage() {
                                         onClick={() => setViewMode("table")}
                                         className={cn(
                                             "px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2",
-                                            viewMode === "table"
+                                            (viewMode as "card" | "table") === "table"
                                                 ? "bg-white text-slate-900 shadow-lg"
                                                 : "text-white/70 hover:text-white hover:bg-white/10"
                                         )}
@@ -1125,7 +1175,7 @@ export default function SDRActionPage() {
                                     </button>
                                 </div>
 
-                                <Select
+                                    <Select
                                     variant="header-dark"
                                     value={selectedMissionId || ""}
                                     onChange={(id) => {
@@ -1214,7 +1264,7 @@ export default function SDRActionPage() {
                                     onClick={() => setViewMode("card")}
                                     className={cn(
                                         "px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2",
-                                        viewMode === "card"
+                                        (viewMode as "card" | "table") === "card"
                                             ? "bg-white text-slate-900 shadow-lg"
                                             : "text-white/70 hover:text-white hover:bg-white/10"
                                     )}
@@ -1227,7 +1277,7 @@ export default function SDRActionPage() {
                                     onClick={() => setViewMode("table")}
                                     className={cn(
                                         "px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2",
-                                        viewMode === "table"
+                                        (viewMode as "card" | "table") === "table"
                                             ? "bg-white text-slate-900 shadow-lg"
                                             : "text-white/70 hover:text-white hover:bg-white/10"
                                     )}

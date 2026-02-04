@@ -18,6 +18,7 @@ import {
     Globe,
     Linkedin,
     ArrowRight,
+    Save,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -25,9 +26,12 @@ import { cn } from "@/lib/utils";
 // TYPES
 // ============================================
 
+type MeetingResult = "MEETING_BOOKED" | "MEETING_CANCELLED";
+
 interface Meeting {
     id: string;
     createdAt: string;
+    result?: MeetingResult;
     note?: string;
     description?: string;
     contact: {
@@ -175,6 +179,53 @@ export default function SDRMeetingsPage() {
 
     const hasActiveFilters = missionId || listId;
     const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+    const [editNote, setEditNote] = useState("");
+    const [editResult, setEditResult] = useState<MeetingResult>("MEETING_BOOKED");
+    const [saving, setSaving] = useState(false);
+    const [savingError, setSavingError] = useState<string | null>(null);
+
+    // Sync edit state when modal opens
+    useEffect(() => {
+        if (selectedMeeting) {
+            setEditNote(selectedMeeting.note ?? "");
+            setEditResult((selectedMeeting.result as MeetingResult) || "MEETING_BOOKED");
+            setSavingError(null);
+        }
+    }, [selectedMeeting]);
+
+    const handleSaveMeeting = async () => {
+        if (!selectedMeeting) return;
+        setSaving(true);
+        setSavingError(null);
+        try {
+            const res = await fetch(`/api/actions/${selectedMeeting.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ result: editResult, note: editNote || undefined }),
+            });
+            const json = await res.json();
+            if (!json.success) {
+                setSavingError(json.error || "Erreur lors de l'enregistrement");
+                return;
+            }
+            setMeetings((prev) =>
+                prev.map((m) =>
+                    m.id === selectedMeeting.id
+                        ? { ...m, result: editResult, note: editNote || undefined }
+                        : m
+                )
+            );
+            setSelectedMeeting((prev) =>
+                prev && prev.id === selectedMeeting.id
+                    ? { ...prev, result: editResult, note: editNote || undefined }
+                    : prev
+            );
+        } catch (err) {
+            setSavingError("Erreur réseau");
+        } finally {
+            setSaving(false);
+        }
+    };
 
     if (isLoading) {
         return (
@@ -333,6 +384,11 @@ export default function SDRMeetingsPage() {
                                         </div>
 
                                         <div className="flex flex-wrap items-center gap-2">
+                                            {meeting.result === "MEETING_CANCELLED" ? (
+                                                <Badge className="bg-red-50 text-red-700 border-red-200">Annulé</Badge>
+                                            ) : (
+                                                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">Confirmé</Badge>
+                                            )}
                                             {meeting.mission && (
                                                 <Badge className="bg-gradient-to-r from-emerald-50 to-teal-50 text-teal-700 border-teal-100 hover:from-emerald-100 hover:to-teal-100">
                                                     Mission: {meeting.mission.name}
@@ -402,9 +458,17 @@ export default function SDRMeetingsPage() {
 
                             <div className="md:col-span-2 bg-slate-50 rounded-2xl p-5 border border-slate-100 flex flex-col justify-between">
                                 <div className="space-y-4">
-                                    <div className="flex items-center justify-between">
+                                    <div className="flex items-center justify-between flex-wrap gap-2">
                                         <p className="text-slate-500 text-sm font-bold uppercase tracking-wide">Contexte</p>
-                                        <Badge variant="outline" className="bg-white">RDV Confirmé</Badge>
+                                        <Select
+                                            value={editResult}
+                                            onChange={(v) => setEditResult(v as MeetingResult)}
+                                            options={[
+                                                { value: "MEETING_BOOKED", label: "Confirmé" },
+                                                { value: "MEETING_CANCELLED", label: "Annulé" },
+                                            ]}
+                                            className="min-w-[140px] border border-slate-200 rounded-xl bg-white"
+                                        />
                                     </div>
                                     <div className="flex flex-wrap gap-2">
                                         {selectedMeeting.mission && (
@@ -500,20 +564,32 @@ export default function SDRMeetingsPage() {
                             </div>
                         </div>
 
-                        {/* Bottom: Notes */}
-                        {selectedMeeting.note && (
-                            <div className="space-y-3">
-                                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide">Note de prise de RDV</h3>
-                                <div className="bg-amber-50/50 border border-amber-100 rounded-xl p-5 relative overflow-hidden">
-                                    <div className="absolute top-0 right-0 p-4 opacity-10">
-                                        <Calendar className="w-24 h-24 text-amber-500" />
-                                    </div>
-                                    <p className="relative z-10 text-slate-700 italic leading-relaxed text-lg">
-                                        "{selectedMeeting.note}"
-                                    </p>
-                                </div>
+                        {/* Bottom: Notes (inline editable) */}
+                        <div className="space-y-3">
+                            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide">Note de prise de RDV</h3>
+                            <div className="bg-amber-50/50 border border-amber-100 rounded-xl p-5 relative overflow-hidden">
+                                <textarea
+                                    value={editNote}
+                                    onChange={(e) => setEditNote(e.target.value)}
+                                    placeholder="Ajouter ou modifier une note..."
+                                    className="w-full min-h-[100px] bg-transparent border-0 focus:ring-0 focus:outline-none resize-y text-slate-700 italic leading-relaxed text-lg placeholder:text-slate-400"
+                                    rows={3}
+                                />
                             </div>
+                        </div>
+
+                        {savingError && (
+                            <p className="text-sm text-red-600 bg-red-50 px-4 py-2 rounded-xl">{savingError}</p>
                         )}
+                        <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+                            <Button variant="ghost" onClick={() => setSelectedMeeting(null)}>
+                                Fermer
+                            </Button>
+                            <Button onClick={handleSaveMeeting} disabled={saving} className="gap-2">
+                                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                Enregistrer
+                            </Button>
+                        </div>
                     </div>
                 </Modal>
             )}

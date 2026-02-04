@@ -30,6 +30,10 @@ export async function POST(req: NextRequest) {
         const bodyHtml = formData.get('bodyHtml') as string | null;
         const bodyText = formData.get('bodyText') as string | null;
         const threadId = formData.get('threadId') as string | null;
+        const contactId = formData.get('contactId') as string | null;
+        const missionId = formData.get('missionId') as string | null;
+        const sentByIdParam = formData.get('sentById') as string | null;
+        const templateId = formData.get('templateId') as string | null;
 
         if (!mailboxId) {
             return NextResponse.json(
@@ -90,6 +94,9 @@ export async function POST(req: NextRequest) {
             }
         }
 
+        // Outreach context: use sentById from request or current user when contact/mission is set
+        const sentById = sentByIdParam || ((contactId || missionId) ? session.user.id : undefined);
+
         // Send email
         const result = await emailSendingService.sendEmail(mailboxId, {
             to,
@@ -100,6 +107,10 @@ export async function POST(req: NextRequest) {
             bodyText: bodyText || undefined,
             attachments: attachments.length > 0 ? attachments : undefined,
             threadId: threadId || undefined,
+            contactId: contactId || undefined,
+            missionId: missionId || undefined,
+            sentById: sentById || undefined,
+            templateId: templateId || undefined,
         });
 
         if (!result.success) {

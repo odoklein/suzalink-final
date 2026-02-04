@@ -47,6 +47,7 @@ enum ActionResult {
   INTERESTED
   CALLBACK_REQUESTED
   MEETING_BOOKED
+  MEETING_CANCELLED
   DISQUALIFIED
   ENVOIE_MAIL
 }
@@ -239,6 +240,7 @@ model User {
   createdSequences     EmailSequence[]     @relation("SequenceCreator")
   emailAuditLogs       EmailAuditLog[]
   emailTemplates       EmailTemplate[]     @relation("TemplateCreator")
+  sentEmails           Email[]             @relation("SentEmails")
   
   // Permissions
   userPermissions  UserPermission[]
@@ -408,6 +410,7 @@ model Mission {
   
   // Email Hub relations
   emailThreads  EmailThread[]
+  sentEmails    Email[]
   
   // Internal Communication Module
   commsChannel  CommsChannel?
@@ -508,6 +511,7 @@ model Contact {
   // Email Hub relations
   emailThreads         EmailThread[]
   sequenceEnrollments  EmailSequenceEnrollment[]
+  sentEmails           Email[]
   
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -1174,6 +1178,16 @@ model Email {
   sequenceEnrollmentId String?
   sequenceEnrollment EmailSequenceEnrollment? @relation(fields: [sequenceEnrollmentId], references: [id])
   
+  // Outreach / mission context (quick-send from SDR)
+  contactId     String?
+  contact       Contact?     @relation(fields: [contactId], references: [id])
+  missionId     String?
+  mission       Mission?     @relation(fields: [missionId], references: [id])
+  sentById      String?
+  sentBy        User?        @relation("SentEmails", fields: [sentById], references: [id])
+  templateId    String?
+  template      EmailTemplate? @relation(fields: [templateId], references: [id])
+  
   // Provider refs
   providerMessageId String?
   providerThreadId  String?
@@ -1195,6 +1209,9 @@ model Email {
   @@index([receivedAt])
   @@index([providerMessageId])
   @@index([sequenceEnrollmentId])
+  @@index([contactId])
+  @@index([missionId])
+  @@index([sentById])
   @@unique([mailboxId, providerMessageId])  // Prevent duplicate ingestion
 }
 
@@ -1438,6 +1455,7 @@ model EmailTemplate {
   
   // Mission assignments
   missionTemplates  MissionEmailTemplate[]
+  sentEmails        Email[]
   
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

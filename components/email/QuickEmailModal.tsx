@@ -263,6 +263,7 @@ export function QuickEmailModal({
                     to: [{ email: effectiveRecipient }],
                     contactId: contact?.id,
                     companyId: company?.id || contact?.company?.id,
+                    missionId: missionId ?? undefined,
                     customSubject: subject,
                     customBodyHtml: bodyHtml,
                 }),

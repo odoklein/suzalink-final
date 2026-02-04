@@ -28,7 +28,9 @@ import {
     Pencil,
     Save,
     X,
+    Calendar,
 } from "lucide-react";
+import { BookingModal } from "@/components/sdr/BookingModal";
 import { cn } from "@/lib/utils";
 
 // ============================================
@@ -67,7 +69,11 @@ interface UnifiedActionDrawerProps {
     companyId: string;
     missionId?: string;
     missionName?: string;
+    /** Client booking URL (Calendly etc.) for MEETING_BOOKED - when set, drawer shows "Planifier un RDV" and calendar modal */
+    clientBookingUrl?: string;
     onActionRecorded?: () => void;
+    /** When user selects "Envoie mail" in the drawer, call this to open the email sending modal (table view) */
+    onOpenEmailModal?: () => void;
 }
 
 // ============================================
@@ -91,7 +97,9 @@ export function UnifiedActionDrawer({
     companyId,
     missionId,
     missionName,
+    clientBookingUrl,
     onActionRecorded,
+    onOpenEmailModal,
 }: UnifiedActionDrawerProps) {
     const { success, error: showError } = useToast();
 
@@ -116,6 +124,8 @@ export function UnifiedActionDrawer({
     const [newActionNote, setNewActionNote] = useState("");
     const [newActionSaving, setNewActionSaving] = useState(false);
     const [newCallbackDateValue, setNewCallbackDateValue] = useState("");
+
+    const [showBookingModal, setShowBookingModal] = useState(false);
 
     // Inline editing states
     const [isEditingContact, setIsEditingContact] = useState(false);
@@ -937,7 +947,12 @@ export function UnifiedActionDrawer({
                                     placeholder="Sélectionner un résultat..."
                                     options={Object.entries(ACTION_RESULT_LABELS).map(([value, label]) => ({ value, label }))}
                                     value={newActionResult}
-                                    onChange={setNewActionResult}
+                                    onChange={(value) => {
+                                        setNewActionResult(value);
+                                        if (value === "ENVOIE_MAIL") {
+                                            onOpenEmailModal?.();
+                                        }
+                                    }}
                                 />
 
                                 {/* Callback Date */}
@@ -975,6 +990,24 @@ export function UnifiedActionDrawer({
                                     />
                                     <p className="text-xs text-slate-400 mt-1 text-right">{newActionNote.length}/500</p>
                                 </div>
+
+                                {/* MEETING_BOOKED: show calendar button when client has booking URL */}
+                                {newActionResult === "MEETING_BOOKED" && clientBookingUrl && contactId && contact && (
+                                    <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3 space-y-2">
+                                        <p className="text-sm text-slate-700">
+                                            Ouvrez le calendrier du client pour planifier un rendez-vous. Le RDV sera enregistré automatiquement.
+                                        </p>
+                                        <Button
+                                            type="button"
+                                            variant="secondary"
+                                            onClick={() => setShowBookingModal(true)}
+                                            className="gap-2 w-full"
+                                        >
+                                            <Calendar className="w-4 h-4" />
+                                            Planifier un RDV
+                                        </Button>
+                                    </div>
+                                )}
 
                                 {/* Submit Button */}
                                 <Button
@@ -1049,6 +1082,33 @@ export function UnifiedActionDrawer({
                         )}
                     </div>
                 </div>
+            )}
+
+            {/* Booking modal (MEETING_BOOKED) */}
+            {contactId && contact && clientBookingUrl && (
+                <BookingModal
+                    isOpen={showBookingModal}
+                    onClose={() => setShowBookingModal(false)}
+                    bookingUrl={clientBookingUrl}
+                    contactId={contactId}
+                    contactName={`${contact.firstName || ""} ${contact.lastName || ""}`.trim() || "Contact"}
+                    onBookingSuccess={() => {
+                        setShowBookingModal(false);
+                        setNewActionResult("");
+                        setNewActionNote("");
+                        onActionRecorded?.();
+                        setActionsLoading(true);
+                        fetch(`/api/actions?contactId=${contactId}&limit=10`)
+                            .then((res) => res.json())
+                            .then((json) => {
+                                if (json.success && Array.isArray(json.data)) {
+                                    setActions(json.data);
+                                }
+                            })
+                            .catch(() => {})
+                            .finally(() => setActionsLoading(false));
+                    }}
+                />
             )}
         </Drawer>
     );
