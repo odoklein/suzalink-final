@@ -29,8 +29,11 @@ import {
     Save,
     X,
     Calendar,
+    Plus,
+    Trash2,
 } from "lucide-react";
 import { BookingModal } from "@/components/sdr/BookingModal";
+import { ContactDrawer } from "./ContactDrawer";
 import { cn } from "@/lib/utils";
 
 // ============================================
@@ -43,6 +46,8 @@ interface Contact {
     lastName: string | null;
     email: string | null;
     phone: string | null;
+    additionalPhones?: string[] | null;
+    additionalEmails?: string[] | null;
     title: string | null;
     linkedin: string | null;
     status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
@@ -127,6 +132,7 @@ export function UnifiedActionDrawer({
     const [isImprovingNote, setIsImprovingNote] = useState(false);
 
     const [showBookingModal, setShowBookingModal] = useState(false);
+    const [showAddContact, setShowAddContact] = useState(false);
 
     // Inline editing states
     const [isEditingContact, setIsEditingContact] = useState(false);
@@ -339,10 +345,15 @@ export function UnifiedActionDrawer({
         if (!contactId || !editContactData) return;
         setSavingContact(true);
         try {
+            const payload = {
+                ...editContactData,
+                additionalPhones: (editContactData.additionalPhones ?? []).filter(Boolean),
+                additionalEmails: (editContactData.additionalEmails ?? []).filter(Boolean),
+            };
             const res = await fetch(`/api/contacts/${contactId}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(editContactData),
+                body: JSON.stringify(payload),
             });
             const json = await res.json();
             if (json.success) {
@@ -567,12 +578,16 @@ export function UnifiedActionDrawer({
                                             size="sm"
                                             variant="ghost"
                                             onClick={() => {
+                                                const extraPhones = contact.additionalPhones && Array.isArray(contact.additionalPhones) ? contact.additionalPhones : [];
+                                                const extraEmails = contact.additionalEmails && Array.isArray(contact.additionalEmails) ? contact.additionalEmails : [];
                                                 setEditContactData({
                                                     firstName: contact.firstName,
                                                     lastName: contact.lastName,
                                                     title: contact.title,
                                                     email: contact.email,
                                                     phone: contact.phone,
+                                                    additionalPhones: extraPhones,
+                                                    additionalEmails: extraEmails,
                                                     linkedin: contact.linkedin
                                                 });
                                                 setIsEditingContact(true);
@@ -651,6 +666,144 @@ export function UnifiedActionDrawer({
                                     </div>
                                 )}
 
+                                {/* Additional phone numbers */}
+                                {(isEditingContact ? (editContactData.additionalPhones?.length ?? 0) > 0 : (contact.additionalPhones && Array.isArray(contact.additionalPhones) && contact.additionalPhones.filter(Boolean).length > 0)) && (
+                                    <div className="p-3 bg-white rounded-xl border border-slate-100 space-y-2">
+                                        <p className="text-xs text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                                            <Phone className="w-3.5 h-3.5 text-emerald-500" />
+                                            Autres numéros
+                                        </p>
+                                        {isEditingContact ? (
+                                            <>
+                                                {(editContactData.additionalPhones ?? []).map((num, idx) => (
+                                                    <div key={idx} className="flex items-center gap-2">
+                                                        <input
+                                                            type="text"
+                                                            value={num}
+                                                            onChange={(e) => {
+                                                                const next = [...(editContactData.additionalPhones ?? [])];
+                                                                next[idx] = e.target.value;
+                                                                setEditContactData({ ...editContactData, additionalPhones: next });
+                                                            }}
+                                                            placeholder="Numéro"
+                                                            className="flex-1 px-2 py-1 text-sm border border-slate-300 rounded-md"
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setEditContactData({
+                                                                ...editContactData,
+                                                                additionalPhones: (editContactData.additionalPhones ?? []).filter((_, i) => i !== idx),
+                                                            })}
+                                                            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                                <Button type="button" variant="outline" size="sm" onClick={() => setEditContactData({
+                                                    ...editContactData,
+                                                    additionalPhones: [...(editContactData.additionalPhones ?? []), ""],
+                                                })} className="gap-2">
+                                                    <Plus className="w-4 h-4" />
+                                                    Ajouter un numéro
+                                                </Button>
+                                            </>
+                                        ) : (
+                                            <div className="flex flex-wrap gap-2">
+                                                {(contact.additionalPhones && Array.isArray(contact.additionalPhones) ? contact.additionalPhones.filter(Boolean) : []).map((num, idx) => (
+                                                    <div key={idx} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-100 text-sm">
+                                                        <a href={`tel:${num}`} className="text-emerald-700 hover:underline font-medium">{num}</a>
+                                                        <button onClick={() => copyToClipboard(num, "Numéro")} className="p-1 text-emerald-500 hover:bg-emerald-100 rounded-lg">
+                                                            <Copy className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                {isEditingContact && (editContactData.additionalPhones?.length ?? 0) === 0 && (
+                                    <div className="p-3 bg-white rounded-xl border border-slate-100">
+                                        <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Autres numéros</p>
+                                        <Button type="button" variant="outline" size="sm" onClick={() => setEditContactData({
+                                            ...editContactData,
+                                            additionalPhones: [...(editContactData.additionalPhones ?? []), ""],
+                                        })} className="gap-2">
+                                            <Plus className="w-4 h-4" />
+                                            Ajouter un numéro
+                                        </Button>
+                                    </div>
+                                )}
+
+                                {/* Additional emails */}
+                                {(isEditingContact ? (editContactData.additionalEmails?.length ?? 0) > 0 : (contact.additionalEmails && Array.isArray(contact.additionalEmails) && contact.additionalEmails.filter(Boolean).length > 0)) && (
+                                    <div className="p-3 bg-white rounded-xl border border-slate-100 space-y-2">
+                                        <p className="text-xs text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                                            <Mail className="w-3.5 h-3.5 text-indigo-500" />
+                                            Autres emails
+                                        </p>
+                                        {isEditingContact ? (
+                                            <>
+                                                {(editContactData.additionalEmails ?? []).map((em, idx) => (
+                                                    <div key={idx} className="flex items-center gap-2">
+                                                        <input
+                                                            type="email"
+                                                            value={em}
+                                                            onChange={(e) => {
+                                                                const next = [...(editContactData.additionalEmails ?? [])];
+                                                                next[idx] = e.target.value;
+                                                                setEditContactData({ ...editContactData, additionalEmails: next });
+                                                            }}
+                                                            placeholder="Email"
+                                                            className="flex-1 px-2 py-1 text-sm border border-slate-300 rounded-md"
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setEditContactData({
+                                                                ...editContactData,
+                                                                additionalEmails: (editContactData.additionalEmails ?? []).filter((_, i) => i !== idx),
+                                                            })}
+                                                            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                                <Button type="button" variant="outline" size="sm" onClick={() => setEditContactData({
+                                                    ...editContactData,
+                                                    additionalEmails: [...(editContactData.additionalEmails ?? []), ""],
+                                                })} className="gap-2">
+                                                    <Plus className="w-4 h-4" />
+                                                    Ajouter un email
+                                                </Button>
+                                            </>
+                                        ) : (
+                                            <div className="flex flex-wrap gap-2">
+                                                {(contact.additionalEmails && Array.isArray(contact.additionalEmails) ? contact.additionalEmails.filter(Boolean) : []).map((em, idx) => (
+                                                    <div key={idx} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-50 border border-indigo-100 text-sm">
+                                                        <a href={`mailto:${em}`} className="text-indigo-700 hover:underline truncate max-w-[160px]">{em}</a>
+                                                        <button onClick={() => copyToClipboard(em, "Email")} className="p-1 text-indigo-500 hover:bg-indigo-100 rounded-lg shrink-0">
+                                                            <Copy className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                {isEditingContact && (editContactData.additionalEmails?.length ?? 0) === 0 && (
+                                    <div className="p-3 bg-white rounded-xl border border-slate-100">
+                                        <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Autres emails</p>
+                                        <Button type="button" variant="outline" size="sm" onClick={() => setEditContactData({
+                                            ...editContactData,
+                                            additionalEmails: [...(editContactData.additionalEmails ?? []), ""],
+                                        })} className="gap-2">
+                                            <Plus className="w-4 h-4" />
+                                            Ajouter un email
+                                        </Button>
+                                    </div>
+                                )}
+
                                 {(contact.linkedin || isEditingContact) && (
                                     <div className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-100">
                                         <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
@@ -690,7 +843,9 @@ export function UnifiedActionDrawer({
                                     </div>
                                 )}
 
-                                {!isEditingContact && !contact.phone && !contact.email && !contact.linkedin && (
+                                {!isEditingContact && !contact.phone && !contact.email && !contact.linkedin &&
+                                    !(contact.additionalPhones && contact.additionalPhones.filter(Boolean).length > 0) &&
+                                    !(contact.additionalEmails && contact.additionalEmails.filter(Boolean).length > 0) && (
                                     <div className="text-center py-6 text-slate-400">
                                         <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
                                         <p className="text-sm">Aucune information de contact</p>
@@ -703,6 +858,30 @@ export function UnifiedActionDrawer({
                     {/* Company Tab Content */}
                     {(activeTab === "company" || !contact) && company && (
                         <div className="bg-gradient-to-br from-slate-50 to-white rounded-2xl border border-slate-200/60 p-5 space-y-4">
+                            {/* When no contact (company-only row): allow adding a contact */}
+                            {!contact && (
+                                <div className="rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/50 p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center">
+                                            <User className="w-6 h-6 text-indigo-600" />
+                                        </div>
+                                        <div>
+                                            <p className="font-medium text-slate-900">Aucun contact pour cette société</p>
+                                            <p className="text-sm text-slate-500">Ajoutez un contact pour enregistrer des actions et suivre les échanges.</p>
+                                        </div>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="primary"
+                                        onClick={() => setShowAddContact(true)}
+                                        className="gap-2 shrink-0"
+                                    >
+                                        <Plus className="w-4 h-4" />
+                                        Ajouter un contact
+                                    </Button>
+                                </div>
+                            )}
+
                             {/* Company Header */}
                             <div className="flex items-start justify-between gap-4">
                                 <div className="flex items-start gap-4 flex-1">
@@ -1124,6 +1303,33 @@ export function UnifiedActionDrawer({
                         )}
                     </div>
                 </div>
+            )}
+
+            {/* Add contact (when drawer opened with company only) */}
+            {company && (
+                <ContactDrawer
+                    isOpen={showAddContact}
+                    onClose={() => setShowAddContact(false)}
+                    contact={null}
+                    isCreating={true}
+                    companies={[{ id: company.id, name: company.name }]}
+                    isManager={true}
+                    onCreate={async (newContact) => {
+                        setShowAddContact(false);
+                        setContact(newContact as Contact);
+                        setActiveTab("contact");
+                        onActionRecorded?.();
+                        try {
+                            const res = await fetch(`/api/companies/${companyId}`);
+                            const json = await res.json();
+                            if (json.success && json.data) {
+                                setCompany(json.data);
+                            }
+                        } catch {
+                            // keep current company state
+                        }
+                    }}
+                />
             )}
 
             {/* Booking modal (MEETING_BOOKED) */}

@@ -32,17 +32,17 @@ const CHANNEL_OPTIONS: {
 }[] = [
         {
             type: "DIRECT",
-            label: "Message direct",
+            label: "Message direct à un SDR",
             icon: MessageCircle,
-            description: "Envoyer un message privé",
-            roles: ["MANAGER", "SDR", "BUSINESS_DEVELOPER", "DEVELOPER"],
+            description: "Contacter un SDR de vos missions",
+            roles: ["MANAGER", "SDR", "BUSINESS_DEVELOPER", "DEVELOPER", "CLIENT"],
         },
         {
             type: "MISSION",
             label: "Discussion mission",
             icon: Target,
-            description: "Tous les assignés verront ce message",
-            roles: ["MANAGER", "SDR", "BUSINESS_DEVELOPER"],
+            description: "Tous les assignés à la mission verront ce message",
+            roles: ["MANAGER", "SDR", "BUSINESS_DEVELOPER", "CLIENT"],
         },
         {
             type: "CLIENT",
@@ -116,8 +116,59 @@ export function NewThreadModal({
         }
     }, [defaultChannelType, defaultAnchorId]);
 
-    // Search for anchors when query changes
+    // CLIENT: load missions or contactable SDRs when entering recipient step (no search)
     useEffect(() => {
+        if (!isOpen || userRole !== "CLIENT" || step !== "recipient" || !channelType) {
+            return;
+        }
+        if (channelType !== "MISSION" && channelType !== "DIRECT") {
+            setSearchResults([]);
+            return;
+        }
+
+        let cancelled = false;
+        setIsSearching(true);
+        (async () => {
+            try {
+                if (channelType === "MISSION") {
+                    const res = await fetch("/api/missions?isActive=true");
+                    if (!res.ok || cancelled) return;
+                    const json = await res.json();
+                    const list = Array.isArray(json.data) ? json.data : [];
+                    const items: SelectableItem[] = list.map((m: { id: string; name: string }) => ({
+                        id: m.id,
+                        name: m.name,
+                        subtitle: undefined,
+                    }));
+                    if (!cancelled) setSearchResults(items);
+                } else {
+                    const res = await fetch("/api/client/contactable-sdrs");
+                    if (!res.ok || cancelled) return;
+                    const json = await res.json();
+                    const list = json.sdrs || [];
+                    const items: SelectableItem[] = list.map((s: { id: string; name: string }) => ({
+                        id: s.id,
+                        name: s.name,
+                        subtitle: "SDR",
+                    }));
+                    if (!cancelled) setSearchResults(items);
+                }
+            } catch (e) {
+                if (!cancelled) setSearchResults([]);
+            } finally {
+                if (!cancelled) setIsSearching(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen, userRole, step, channelType]);
+
+    // Search for anchors when query changes (non-CLIENT or CLIENT with search filter)
+    useEffect(() => {
+        if (userRole === "CLIENT" && (channelType === "MISSION" || channelType === "DIRECT")) {
+            return;
+        }
         if (!searchQuery || !channelType) {
             setSearchResults([]);
             return;
@@ -205,7 +256,7 @@ export function NewThreadModal({
 
         const debounce = setTimeout(searchAnchors, 300);
         return () => clearTimeout(debounce);
-    }, [searchQuery, channelType]);
+    }, [searchQuery, channelType, userRole]);
 
     const handleSelectType = (type: CommsChannelType) => {
         setChannelType(type);
@@ -338,17 +389,19 @@ export function NewThreadModal({
                 {/* Step 2: Select recipient */}
                 {step === "recipient" && (
                     <div>
-                        {/* Search input */}
-                        <div className="relative mb-4">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 z-10" />
-                            <Input
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder={getRecipientPlaceholder()}
-                                className="pl-10 h-11 bg-white border-slate-200 text-slate-900 placeholder:text-slate-500"
-                                autoFocus
-                            />
-                        </div>
+                        {/* Search input (hidden for CLIENT: they see only their missions / SDRs) */}
+                        {userRole !== "CLIENT" && (
+                            <div className="relative mb-4">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 z-10" />
+                                <Input
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    placeholder={getRecipientPlaceholder()}
+                                    className="pl-10 h-11 bg-white border-slate-200 text-slate-900 placeholder:text-slate-500"
+                                    autoFocus
+                                />
+                            </div>
+                        )}
 
                         {/* Results */}
                         <div className="max-h-72 overflow-y-auto">
@@ -357,17 +410,30 @@ export function NewThreadModal({
                                     <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />
                                 </div>
                             )}
-                            {!isSearching && searchResults.length === 0 && searchQuery && (
+                            {!isSearching && searchResults.length === 0 && searchQuery && userRole !== "CLIENT" && (
                                 <p className="text-sm text-slate-500 text-center py-8">
                                     Aucun résultat pour "{searchQuery}"
                                 </p>
                             )}
-                            {!isSearching && searchResults.length === 0 && !searchQuery && (
+                            {!isSearching && searchResults.length === 0 && (userRole === "CLIENT" || !searchQuery) && (
                                 <div className="text-center py-8">
-                                    <Search className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                                    <p className="text-sm text-slate-500">
-                                        Commencez à taper pour rechercher
-                                    </p>
+                                    {userRole === "CLIENT" ? (
+                                        <>
+                                            <Target className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                                            <p className="text-sm text-slate-500">
+                                                {channelType === "MISSION"
+                                                    ? "Aucune mission en cours."
+                                                    : "Aucun SDR assigné à vos missions."}
+                                            </p>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Search className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                                            <p className="text-sm text-slate-500">
+                                                Commencez à taper pour rechercher
+                                            </p>
+                                        </>
+                                    )}
                                 </div>
                             )}
                             {!isSearching && searchResults.length > 0 && (

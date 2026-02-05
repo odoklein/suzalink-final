@@ -19,6 +19,8 @@ const updateContactSchema = z.object({
     title: z.string().optional().nullable(),
     email: z.string().email().optional().nullable(),
     phone: z.string().optional().nullable(),
+    additionalPhones: z.array(z.string()).optional().nullable(),
+    additionalEmails: z.array(z.string().email()).optional().nullable(),
     linkedin: z.string().optional().nullable(),
 });
 
@@ -156,6 +158,8 @@ export const PUT = withErrorHandler(async (
         data: {
             ...mergedData,
             status,
+            ...(data.additionalPhones !== undefined && { additionalPhones: data.additionalPhones }),
+            ...(data.additionalEmails !== undefined && { additionalEmails: data.additionalEmails }),
         },
         include: {
             company: {

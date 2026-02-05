@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { Card, Badge, Button } from "@/components/ui";
 import {
     Target,
@@ -16,6 +17,7 @@ import {
     Loader2,
     RefreshCw,
     Sparkles,
+    ArrowRight,
 } from "lucide-react";
 
 // ============================================
@@ -56,13 +58,13 @@ interface Mission {
     id: string;
     name: string;
     isActive: boolean;
-    _count: { sdrAssignments: number };
+    _count?: { sdrAssignments: number };
 }
 
-const URGENCY_LABELS = {
-    SHORT: { label: "Court terme", color: "text-red-400 bg-red-500/15" },
-    MEDIUM: { label: "Moyen terme", color: "text-amber-400 bg-amber-500/15" },
-    LONG: { label: "Long terme", color: "text-emerald-400 bg-emerald-500/15" },
+const URGENCY_LABELS: Record<string, { label: string; class: string }> = {
+    SHORT: { label: "Court terme", class: "text-rose-700 bg-rose-100" },
+    MEDIUM: { label: "Moyen terme", class: "text-amber-700 bg-amber-100" },
+    LONG: { label: "Long terme", class: "text-emerald-700 bg-emerald-100" },
 };
 
 export default function ClientPortal() {
@@ -70,13 +72,11 @@ export default function ClientPortal() {
     const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
     const [missions, setMissions] = useState<Mission[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [isRefreshing, setIsRefreshing] = useState(false);
 
-    // ============================================
-    // FETCH DATA
-    // ============================================
-
-    const fetchData = async () => {
-        setIsLoading(true);
+    const fetchData = async (refresh = false) => {
+        if (refresh) setIsRefreshing(true);
+        else setIsLoading(true);
         try {
             const [statsRes, oppsRes, missionsRes] = await Promise.all([
                 fetch("/api/stats?period=month"),
@@ -91,12 +91,13 @@ export default function ClientPortal() {
             ]);
 
             if (statsJson.success) setStats(statsJson.data);
-            if (oppsJson.success) setOpportunities(oppsJson.data);
-            if (missionsJson.success) setMissions(missionsJson.data);
+            if (oppsJson.success) setOpportunities(Array.isArray(oppsJson.data) ? oppsJson.data : []);
+            if (missionsJson.success) setMissions(Array.isArray(missionsJson.data) ? missionsJson.data : []);
         } catch (error) {
             console.error("Failed to fetch data:", error);
         } finally {
             setIsLoading(false);
+            setIsRefreshing(false);
         }
     };
 
@@ -104,37 +105,47 @@ export default function ClientPortal() {
         fetchData();
     }, []);
 
-    // ============================================
-    // STATS CARDS
-    // ============================================
-
     const CLIENT_STATS = [
-        { label: "Missions en cours", value: stats?.activeMissions || 0, icon: Target },
-        { label: "Entreprises contactées", value: stats?.totalActions || 0, icon: Phone },
-        { label: "Personnes intéressées", value: stats?.resultBreakdown?.INTERESTED || 0, icon: MessageSquare },
-        { label: "RDV pris pour vous", value: stats?.meetingsBooked || 0, icon: Calendar },
+        { label: "Missions en cours", value: stats?.activeMissions ?? 0, icon: Target },
+        { label: "Entreprises contactées", value: stats?.totalActions ?? 0, icon: Phone },
+        { label: "Personnes intéressées", value: stats?.resultBreakdown?.INTERESTED ?? 0, icon: MessageSquare },
+        { label: "RDV pris pour vous", value: stats?.meetingsBooked ?? 0, icon: Calendar },
     ];
 
-    // ============================================
-    // FORMAT DATE
-    // ============================================
-
-    const formatDate = (dateString: string) => {
-        return new Date(dateString).toLocaleDateString("fr-FR", {
+    const formatDate = (dateString: string) =>
+        new Date(dateString).toLocaleDateString("fr-FR", {
             day: "numeric",
             month: "short",
             year: "numeric",
         });
-    };
 
-    // ============================================
-    // LOADING STATE
-    // ============================================
+    const exportOpportunitiesCsv = () => {
+        if (opportunities.length === 0) return;
+        const headers = ["Entreprise", "Contact", "Titre", "Besoin", "Urgence", "Transmis", "Date"];
+        const rows = opportunities.map((o) => [
+            o.company.name,
+            [o.contact.firstName, o.contact.lastName].filter(Boolean).join(" ") || "-",
+            o.contact.title || "-",
+            (o.needSummary || "").replace(/"/g, '""'),
+            URGENCY_LABELS[o.urgency]?.label ?? o.urgency,
+            o.handedOff ? "Oui" : "Non",
+            formatDate(o.handedOffAt || o.createdAt),
+        ]);
+        const csv = [headers.join(","), ...rows.map((r) => r.map((c) => `"${c}"`).join(","))].join("\n");
+        const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `opportunites-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
 
     if (isLoading && !stats) {
         return (
-            <div className="flex items-center justify-center py-20">
-                <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
+            <div className="flex flex-col items-center justify-center py-24 gap-4">
+                <Loader2 className="w-10 h-10 text-indigo-500 animate-spin" />
+                <p className="text-slate-500 text-sm">Chargement du tableau de bord…</p>
             </div>
         );
     }
@@ -142,30 +153,36 @@ export default function ClientPortal() {
     return (
         <div className="space-y-8">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-white">Bienvenue chez Suzalink</h1>
-                    <p className="text-neutral-500 mt-1">
-                        Voici l'avancement de vos missions
+                    <h1 className="text-2xl font-bold text-slate-900">Bienvenue sur votre tableau de bord</h1>
+                    <p className="text-slate-500 mt-1">
+                        Suivi de vos missions et des contacts qualifiés
                     </p>
                 </div>
-                <Button variant="ghost" size="sm" onClick={fetchData} className="gap-2">
-                    <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+                <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => fetchData(true)}
+                    disabled={isRefreshing}
+                    className="gap-2"
+                >
+                    <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`} />
                     Actualiser
                 </Button>
             </div>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 {CLIENT_STATS.map((stat) => (
-                    <Card key={stat.label}>
+                    <Card key={stat.label} className="border-slate-200 bg-white shadow-sm">
                         <div className="flex items-start justify-between">
                             <div>
-                                <p className="text-sm text-neutral-500">{stat.label}</p>
-                                <p className="text-3xl font-bold text-white mt-1">{stat.value}</p>
+                                <p className="text-sm font-medium text-slate-500">{stat.label}</p>
+                                <p className="text-2xl font-bold text-slate-900 mt-1">{stat.value}</p>
                             </div>
-                            <div className="w-10 h-10 rounded-xl bg-indigo-500/15 flex items-center justify-center">
-                                <stat.icon className="w-5 h-5 text-indigo-400" />
+                            <div className="w-11 h-11 rounded-xl bg-indigo-50 flex items-center justify-center">
+                                <stat.icon className="w-5 h-5 text-indigo-600" />
                             </div>
                         </div>
                     </Card>
@@ -173,145 +190,155 @@ export default function ClientPortal() {
             </div>
 
             {/* Main Content */}
-            <div className="grid grid-cols-3 gap-6">
-                {/* Opportunities - Main Focus */}
-                <div className="col-span-2 space-y-4">
-                    <div className="flex items-center justify-between">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Opportunities */}
+                <div className="lg:col-span-2 space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="flex items-center gap-3">
-                            <h2 className="text-lg font-semibold text-white">
+                            <h2 className="text-lg font-semibold text-slate-900">
                                 Contacts qualifiés pour vous
                             </h2>
                             <Badge variant="primary">{opportunities.length}</Badge>
                         </div>
-                        <Button variant="secondary" size="sm" className="gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={exportOpportunitiesCsv}
+                            disabled={opportunities.length === 0}
+                            className="gap-2"
+                        >
                             <Download className="w-4 h-4" />
-                            Télécharger
+                            Exporter CSV
                         </Button>
                     </div>
 
                     {opportunities.length === 0 ? (
-                        <Card>
-                            <div className="text-center py-8">
-                                <Sparkles className="w-12 h-12 text-neutral-600 mx-auto mb-3" />
-                                <p className="text-neutral-400">Pas encore de contacts pour le moment</p>
-                                <p className="text-sm text-neutral-500 mt-1">
-                                    Les personnes intéressées apparaîtront ici
+                        <Card className="border-slate-200 bg-white">
+                            <div className="text-center py-12">
+                                <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
+                                    <Sparkles className="w-7 h-7 text-slate-400" />
+                                </div>
+                                <p className="font-medium text-slate-700">Aucun contact qualifié pour le moment</p>
+                                <p className="text-sm text-slate-500 mt-1">
+                                    Les personnes intéressées par vos offres apparaîtront ici dès qu’elles seront identifiées.
                                 </p>
                             </div>
                         </Card>
                     ) : (
-                        opportunities.map((opp) => (
-                            <Card key={opp.id} className="hover:border-neutral-700 transition-colors">
-                                <div className="flex items-start gap-4">
-                                    {/* Company Icon */}
-                                    <div className="w-12 h-12 rounded-xl bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
-                                        <Building2 className="w-6 h-6 text-emerald-400" />
-                                    </div>
-
-                                    {/* Content */}
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-3 flex-wrap">
-                                            <h3 className="font-semibold text-white">{opp.company.name}</h3>
-                                            <span
-                                                className={`text-xs px-2 py-1 rounded-full ${URGENCY_LABELS[opp.urgency].color}`}
-                                            >
-                                                {URGENCY_LABELS[opp.urgency].label}
-                                            </span>
-                                            {opp.handedOff && (
-                                                <Badge variant="success">Transmis</Badge>
-                                            )}
+                        <div className="space-y-4">
+                            {opportunities.map((opp) => (
+                                <Card
+                                    key={opp.id}
+                                    className="border-slate-200 bg-white hover:border-indigo-200 hover:shadow-md transition-all"
+                                >
+                                    <div className="flex items-start gap-4">
+                                        <div className="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                                            <Building2 className="w-6 h-6 text-emerald-600" />
                                         </div>
-
-                                        {/* Contact */}
-                                        <div className="flex items-center gap-2 mt-2 text-sm text-neutral-400">
-                                            <User className="w-4 h-4" />
-                                            <span>
-                                                {opp.contact.firstName} {opp.contact.lastName}
-                                            </span>
-                                            {opp.contact.title && (
-                                                <>
-                                                    <span className="text-neutral-600">·</span>
-                                                    <span>{opp.contact.title}</span>
-                                                </>
-                                            )}
-                                        </div>
-
-                                        {/* Need Summary */}
-                                        <p className="text-sm text-neutral-300 mt-3 leading-relaxed">
-                                            {opp.needSummary}
-                                        </p>
-
-                                        {/* Footer */}
-                                        <div className="flex items-center justify-between mt-4 pt-4 border-t border-neutral-800">
-                                            <div className="flex items-center gap-2 text-sm text-neutral-500">
-                                                <Clock className="w-4 h-4" />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <h3 className="font-semibold text-slate-900">{opp.company.name}</h3>
+                                                <span
+                                                    className={`text-xs font-medium px-2 py-0.5 rounded-full ${URGENCY_LABELS[opp.urgency]?.class ?? "bg-slate-100 text-slate-600"}`}
+                                                >
+                                                    {URGENCY_LABELS[opp.urgency]?.label ?? opp.urgency}
+                                                </span>
+                                                {opp.handedOff && (
+                                                    <Badge variant="success">Transmis</Badge>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center gap-2 mt-1.5 text-sm text-slate-500">
+                                                <User className="w-4 h-4 flex-shrink-0" />
                                                 <span>
+                                                    {[opp.contact.firstName, opp.contact.lastName].filter(Boolean).join(" ") || "—"}
+                                                    {opp.contact.title && ` · ${opp.contact.title}`}
+                                                </span>
+                                            </div>
+                                            <p className="text-sm text-slate-600 mt-3 leading-relaxed line-clamp-2">
+                                                {opp.needSummary}
+                                            </p>
+                                            <div className="flex flex-wrap items-center justify-between mt-4 pt-4 border-t border-slate-100 gap-2">
+                                                <div className="flex items-center gap-1.5 text-sm text-slate-500">
+                                                    <Clock className="w-4 h-4" />
                                                     {opp.handedOffAt
                                                         ? `Transmis le ${formatDate(opp.handedOffAt)}`
                                                         : `Créé le ${formatDate(opp.createdAt)}`}
-                                                </span>
-                                            </div>
-                                            {(opp.estimatedMin || opp.estimatedMax) && (
-                                                <div className="text-sm">
-                                                    <span className="text-neutral-500">Valeur estimée: </span>
-                                                    <span className="text-white font-medium">
-                                                        {opp.estimatedMin?.toLocaleString() || "?"}€ -{" "}
-                                                        {opp.estimatedMax?.toLocaleString() || "?"}€
-                                                    </span>
                                                 </div>
-                                            )}
+                                                {(opp.estimatedMin != null || opp.estimatedMax != null) && (
+                                                    <span className="text-sm font-medium text-slate-700">
+                                                        {[opp.estimatedMin, opp.estimatedMax].filter(Boolean).map((v) => `${v?.toLocaleString()}€`).join(" – ")}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            </Card>
-                        ))
+                                </Card>
+                            ))}
+                        </div>
                     )}
                 </div>
 
-                {/* Missions Summary */}
+                {/* Missions + CTA */}
                 <div className="space-y-4">
-                    <h2 className="text-lg font-semibold text-white">Vos missions</h2>
-
+                    <h2 className="text-lg font-semibold text-slate-900">Vos missions</h2>
                     {missions.length === 0 ? (
-                        <Card>
-                            <div className="text-center py-6">
-                                <Target className="w-10 h-10 text-neutral-600 mx-auto mb-2" />
-                                <p className="text-neutral-400 text-sm">Pas de mission en cours</p>
+                        <Card className="border-slate-200 bg-white">
+                            <div className="text-center py-8">
+                                <Target className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                                <p className="text-sm text-slate-500">Aucune mission en cours</p>
                             </div>
                         </Card>
                     ) : (
-                        missions.map((mission) => (
-                            <Card key={mission.id}>
-                                <div className="flex items-center gap-2 mb-3">
-                                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                                    <span className="font-medium text-white">{mission.name}</span>
-                                </div>
-
-                                <div className="flex items-center justify-between text-sm">
-                                    <span className="text-neutral-500">
-                                        Équipe dédiée
-                                    </span>
-                                    <Badge variant={mission.isActive ? "success" : "default"}>
-                                        {mission.isActive ? "En cours" : "Pause"}
-                                    </Badge>
-                                </div>
-                            </Card>
-                        ))
+                        <div className="space-y-3">
+                            {missions.map((mission) => (
+                                <Card key={mission.id} className="border-slate-200 bg-white">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-9 h-9 rounded-lg bg-indigo-50 flex items-center justify-center">
+                                            <CheckCircle2 className="w-4 h-4 text-indigo-600" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="font-medium text-slate-900 truncate">{mission.name}</p>
+                                            <p className="text-xs text-slate-500">
+                                                Équipe dédiée
+                                                {mission._count?.sdrAssignments != null && ` · ${mission._count.sdrAssignments} SDR(s)`}
+                                            </p>
+                                        </div>
+                                        <Badge variant={mission.isActive ? "success" : "default"}>
+                                            {mission.isActive ? "En cours" : "Pause"}
+                                        </Badge>
+                                    </div>
+                                </Card>
+                            ))}
+                        </div>
                     )}
+
+                    <Link href="/client/contact">
+                        <Card className="border-indigo-200 bg-indigo-50/50 hover:bg-indigo-50 hover:border-indigo-300 transition-all cursor-pointer group">
+                            <div className="flex items-center gap-4">
+                                <div className="w-11 h-11 rounded-xl bg-indigo-100 flex items-center justify-center group-hover:bg-indigo-200 transition-colors">
+                                    <MessageSquare className="w-5 h-5 text-indigo-600" />
+                                </div>
+                                <div className="flex-1">
+                                    <p className="font-semibold text-indigo-900">Contacter l’équipe</p>
+                                    <p className="text-sm text-indigo-700">Échanger avec les SDR de vos missions</p>
+                                </div>
+                                <ArrowRight className="w-5 h-5 text-indigo-500 group-hover:translate-x-1 transition-transform" />
+                            </div>
+                        </Card>
+                    </Link>
                 </div>
             </div>
 
             {/* Info Notice */}
-            <Card className="border-neutral-800 bg-neutral-900/50">
+            <Card className="border-slate-200 bg-slate-50/80">
                 <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-500/15 flex items-center justify-center flex-shrink-0">
-                        <TrendingUp className="w-5 h-5 text-indigo-400" />
+                    <div className="w-11 h-11 rounded-xl bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                        <TrendingUp className="w-5 h-5 text-indigo-600" />
                     </div>
                     <div>
-                        <h3 className="font-medium text-white">Toujours à jour</h3>
-                        <p className="text-sm text-neutral-400 mt-1">
-                            Vos données sont mises à jour automatiquement.
-                            Les contacts intéressants vous sont transmis dès qu'ils sont identifiés.
+                        <h3 className="font-medium text-slate-900">Données à jour</h3>
+                        <p className="text-sm text-slate-600 mt-1">
+                            Les indicateurs et contacts sont mis à jour automatiquement. Les opportunités vous sont transmises dès qu’elles sont qualifiées.
                         </p>
                     </div>
                 </div>

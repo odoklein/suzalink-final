@@ -21,6 +21,8 @@ const createContactSchema = z.object({
     title: z.string().optional(),
     email: z.string().email().optional(),
     phone: z.string().optional(),
+    additionalPhones: z.array(z.string()).optional(),
+    additionalEmails: z.array(z.string().email()).optional(),
     linkedin: z.string().url().optional(),
 });
 
@@ -100,6 +102,8 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
         data: {
             ...data,
             status,
+            ...(data.additionalPhones && { additionalPhones: data.additionalPhones }),
+            ...(data.additionalEmails && { additionalEmails: data.additionalEmails }),
         },
         include: { company: true },
     });

@@ -502,6 +502,8 @@ model Contact {
   title         String?
   email         String?
   phone         String?
+  additionalPhones Json?  // ["+33 6 12 34 56 78", ...]
+  additionalEmails  Json? // ["other@example.com", ...]
   linkedin      String?
   customData    Json?     // Store custom fields from CSV imports
   status        CompletenessStatus @default(INCOMPLETE)

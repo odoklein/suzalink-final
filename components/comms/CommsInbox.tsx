@@ -39,6 +39,8 @@ import type {
 
 interface CommsInboxProps {
     className?: string;
+    /** When set (e.g. for client portal), only these channel types are shown in filters and user can only create threads in these contexts */
+    restrictToChannelTypes?: CommsChannelType[];
 }
 
 const FILTER_OPTIONS: {
@@ -55,7 +57,7 @@ const FILTER_OPTIONS: {
         { type: "BROADCAST", label: "Annonces", icon: Megaphone },
     ];
 
-export function CommsInbox({ className }: CommsInboxProps) {
+export function CommsInbox({ className, restrictToChannelTypes }: CommsInboxProps) {
     const { data: session } = useSession();
     const searchParams = useSearchParams();
     const [threads, setThreads] = useState<CommsThreadListItem[]>([]);
@@ -535,7 +537,10 @@ export function CommsInbox({ className }: CommsInboxProps) {
 
                     {/* Filter chips - inspo style */}
                     <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                        {FILTER_OPTIONS.map((opt) => (
+                        {(restrictToChannelTypes
+                            ? FILTER_OPTIONS.filter((o) => o.type === "all" || restrictToChannelTypes.includes(o.type as CommsChannelType))
+                            : FILTER_OPTIONS
+                        ).map((opt) => (
                             <button
                                 key={opt.type}
                                 onClick={() => handleFilterChange(opt.type)}

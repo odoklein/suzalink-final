@@ -162,6 +162,12 @@ export default function SDRListDetailPage({ params }: { params: Promise<{ id: st
         setEditContact({ ...contact, companyName: editCompany?.name ?? undefined });
     };
 
+    const handleContactCreated = (contact: Contact & { companyName?: string }) => {
+        setEditCompany(null);
+        setEditContact({ ...contact, companyName: contact.companyName ?? editCompany?.name });
+        fetchList();
+    };
+
 
     // ============================================
     // COLUMNS
@@ -352,13 +358,14 @@ export default function SDRListDetailPage({ params }: { params: Promise<{ id: st
                 companies={companies.map((c) => ({ id: c.id, name: c.name }))}
             />
 
-            {/* Company drawer — view and edit */}
+            {/* Company drawer — view and edit; SDR can add contacts from here (company-only lists) */}
             <CompanyDrawer
                 isOpen={!!editCompany}
                 onClose={() => setEditCompany(null)}
                 company={editCompany}
                 onUpdate={() => fetchList()}
                 onContactClick={handleContactFromCompanyDrawer}
+                onContactCreated={handleContactCreated}
                 isManager={true}
                 listId={listId || undefined}
             />

@@ -14,7 +14,7 @@ function getCommsLinkForRole(role: UserRole): string {
         case "MANAGER": return "/manager/comms";
         case "SDR": return "/sdr/comms";
         case "BUSINESS_DEVELOPER": return "/bd/comms";
-        case "CLIENT": return "/client/comms";
+        case "CLIENT": return "/client/contact";
         case "DEVELOPER": return "/developer/comms";
         default: return "/sdr/comms";
     }
@@ -1200,15 +1200,37 @@ export async function canAccessChannel(
                 });
                 return (mission?.client?.bdAssignments?.length ?? 0) > 0;
             }
+            // Clients can access missions of their organization
+            if (userRole === "CLIENT") {
+                const mission = await prisma.mission.findUnique({
+                    where: { id: anchorId },
+                    include: {
+                        client: {
+                            include: {
+                                users: { where: { id: userId }, select: { id: true } },
+                            },
+                        },
+                    },
+                });
+                return (mission?.client?.users?.length ?? 0) > 0;
+            }
             return false;
 
         case "CLIENT":
-            // Only BDs with client in portfolio or Managers
+            // BDs with client in portfolio
             if (userRole === "BUSINESS_DEVELOPER") {
                 const bdClient = await prisma.businessDeveloperClient.findFirst({
                     where: { bdUserId: userId, clientId: anchorId },
                 });
                 return !!bdClient;
+            }
+            // Client users can access their own organization's channel
+            if (userRole === "CLIENT") {
+                const user = await prisma.user.findUnique({
+                    where: { id: userId },
+                    select: { clientId: true },
+                });
+                return user?.clientId === anchorId;
             }
             return false;
 

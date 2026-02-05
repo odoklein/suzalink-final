@@ -23,9 +23,11 @@ import {
     Phone,
     Linkedin,
     Loader2,
+    Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { QuickEmailModal } from "@/components/email/QuickEmailModal";
+import { ContactDrawer } from "./ContactDrawer";
 
 // ============================================
 // TYPES
@@ -66,6 +68,8 @@ interface CompanyDrawerProps {
     onUpdate?: (company: Company) => void;
     onCreate?: (company: Company) => void;
     onContactClick?: (contact: Contact) => void;
+    /** When a new contact is created from this drawer (e.g. "Add contact"), call with the new contact so parent can open it */
+    onContactCreated?: (contact: Contact & { companyName?: string }) => void;
     isManager?: boolean;
     listId?: string;
     isCreating?: boolean;
@@ -92,6 +96,7 @@ export function CompanyDrawer({
     onUpdate,
     onCreate,
     onContactClick,
+    onContactCreated,
     isManager = false,
     listId,
     isCreating = false,
@@ -120,6 +125,7 @@ export function CompanyDrawer({
     const [newCallbackDateValue, setNewCallbackDateValue] = useState("");
     const [showQuickEmailModal, setShowQuickEmailModal] = useState(false);
     const [missionName, setMissionName] = useState<string>("");
+    const [showAddContact, setShowAddContact] = useState(false);
 
     const effectiveMissionId = company?.missionId ?? resolvedMissionId ?? undefined;
 
@@ -608,10 +614,23 @@ export function CompanyDrawer({
                 {/* Contacts List */}
                 {!isEditing && !isCreating && company && (
                     <DrawerSection title={`Contacts (${company.contacts.length})`}>
+                        <div className="flex justify-end mb-3">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setShowAddContact(true)}
+                                className="gap-2"
+                            >
+                                <Plus className="w-4 h-4" />
+                                Ajouter un contact
+                            </Button>
+                        </div>
                         {company.contacts.length === 0 ? (
                             <div className="text-center py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
                                 <Users className="w-10 h-10 text-slate-300 mx-auto mb-2" />
                                 <p className="text-sm text-slate-500">Aucun contact</p>
+                                <p className="text-xs text-slate-400 mt-1">Utilisez le bouton ci-dessus pour en ajouter un</p>
                             </div>
                         ) : (
                             <div className="space-y-2">
@@ -842,6 +861,24 @@ export function CompanyDrawer({
                             </div>
                         )}
                     </DrawerSection>
+                )}
+
+                {/* Add contact sub-drawer (when viewing a company, SDR can add a contact) */}
+                {company && (
+                    <ContactDrawer
+                        isOpen={showAddContact}
+                        onClose={() => setShowAddContact(false)}
+                        contact={null}
+                        isCreating={true}
+                        companies={[{ id: company.id, name: company.name }]}
+                        listId={listId}
+                        isManager={isManager}
+                        onCreate={(newContact) => {
+                            onUpdate?.();
+                            onContactCreated?.({ ...newContact, companyName: company.name });
+                            setShowAddContact(false);
+                        }}
+                    />
                 )}
             </div>
         </Drawer>

@@ -22,6 +22,8 @@ import {
     PhoneCall,
     Loader2,
     Calendar,
+    Plus,
+    Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BookingModal } from "@/components/sdr/BookingModal";
@@ -37,6 +39,8 @@ interface Contact {
     lastName: string | null;
     email: string | null;
     phone: string | null;
+    additionalPhones?: string[] | null;
+    additionalEmails?: string[] | null;
     title: string | null;
     linkedin: string | null;
     status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
@@ -91,6 +95,8 @@ export function ContactDrawer({
         lastName: "",
         email: "",
         phone: "",
+        additionalPhones: [] as string[],
+        additionalEmails: [] as string[],
         title: "",
         linkedin: "",
     });
@@ -218,6 +224,8 @@ export function ContactDrawer({
                 lastName: "",
                 email: "",
                 phone: "",
+                additionalPhones: [],
+                additionalEmails: [],
                 title: "",
                 linkedin: "",
             });
@@ -227,11 +235,15 @@ export function ContactDrawer({
             const isNewContact = lastContactIdRef.current !== contact.id;
             lastContactIdRef.current = contact.id;
             if (isNewContact) {
+                const extraPhones = contact.additionalPhones && Array.isArray(contact.additionalPhones) ? contact.additionalPhones : [];
+                const extraEmails = contact.additionalEmails && Array.isArray(contact.additionalEmails) ? contact.additionalEmails : [];
                 setFormData({
                     firstName: contact.firstName || "",
                     lastName: contact.lastName || "",
                     email: contact.email || "",
                     phone: contact.phone || "",
+                    additionalPhones: extraPhones,
+                    additionalEmails: extraEmails,
                     title: contact.title || "",
                     linkedin: contact.linkedin || "",
                 });
@@ -266,6 +278,8 @@ export function ContactDrawer({
                         lastName: formData.lastName || undefined,
                         email: formData.email || undefined,
                         phone: formData.phone || undefined,
+                        additionalPhones: formData.additionalPhones?.filter(Boolean).length ? formData.additionalPhones.filter(Boolean) : undefined,
+                        additionalEmails: formData.additionalEmails?.filter(Boolean).length ? formData.additionalEmails.filter(Boolean) : undefined,
                         title: formData.title || undefined,
                         linkedin: formData.linkedin || undefined,
                     }),
@@ -299,10 +313,15 @@ export function ContactDrawer({
 
             setIsSaving(true);
             try {
+                const payload = {
+                    ...formData,
+                    additionalPhones: formData.additionalPhones?.filter(Boolean) ?? [],
+                    additionalEmails: formData.additionalEmails?.filter(Boolean) ?? [],
+                };
                 const res = await fetch(`/api/contacts/${contact.id}`, {
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(formData),
+                    body: JSON.stringify(payload),
                 });
 
                 const json = await res.json();
@@ -311,7 +330,12 @@ export function ContactDrawer({
                     success("Contact mis à jour", `${formData.firstName} ${formData.lastName} a été mis à jour`);
                     setIsEditing(false);
                     if (onUpdate) {
-                        onUpdate({ ...contact, ...formData });
+                        onUpdate({
+                            ...contact,
+                            ...formData,
+                            additionalPhones: formData.additionalPhones,
+                            additionalEmails: formData.additionalEmails,
+                        });
                     }
                 } else {
                     showError("Erreur", json.error || "Impossible de mettre à jour");
@@ -584,12 +608,89 @@ export function ContactDrawer({
                                 onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                                 icon={<Phone className="w-4 h-4 text-slate-400" />}
                             />
+                            {/* Additional phone numbers */}
+                            <div className="space-y-2">
+                                <label className="block text-sm font-medium text-slate-700">Autres numéros</label>
+                                {formData.additionalPhones.map((num, idx) => (
+                                    <div key={idx} className="flex items-center gap-2">
+                                        <Input
+                                            value={num}
+                                            onChange={(e) => {
+                                                const next = [...formData.additionalPhones];
+                                                next[idx] = e.target.value;
+                                                setFormData(prev => ({ ...prev, additionalPhones: next }));
+                                            }}
+                                            icon={<Phone className="w-4 h-4 text-slate-400" />}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setFormData(prev => ({
+                                                ...prev,
+                                                additionalPhones: prev.additionalPhones.filter((_, i) => i !== idx),
+                                            }))}
+                                            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                            aria-label="Supprimer"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                ))}
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setFormData(prev => ({ ...prev, additionalPhones: [...prev.additionalPhones, ""] }))}
+                                    className="gap-2"
+                                >
+                                    <Plus className="w-4 h-4" />
+                                    Ajouter un numéro
+                                </Button>
+                            </div>
                             <Input
                                 label="LinkedIn"
                                 value={formData.linkedin}
                                 onChange={(e) => setFormData(prev => ({ ...prev, linkedin: e.target.value }))}
                                 icon={<Linkedin className="w-4 h-4 text-slate-400" />}
                             />
+                            {/* Additional emails */}
+                            <div className="space-y-2">
+                                <label className="block text-sm font-medium text-slate-700">Autres emails</label>
+                                {formData.additionalEmails.map((em, idx) => (
+                                    <div key={idx} className="flex items-center gap-2">
+                                        <Input
+                                            type="email"
+                                            value={em}
+                                            onChange={(e) => {
+                                                const next = [...formData.additionalEmails];
+                                                next[idx] = e.target.value;
+                                                setFormData(prev => ({ ...prev, additionalEmails: next }));
+                                            }}
+                                            icon={<Mail className="w-4 h-4 text-slate-400" />}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setFormData(prev => ({
+                                                ...prev,
+                                                additionalEmails: prev.additionalEmails.filter((_, i) => i !== idx),
+                                            }))}
+                                            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                            aria-label="Supprimer"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                ))}
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setFormData(prev => ({ ...prev, additionalEmails: [...prev.additionalEmails, ""] }))}
+                                    className="gap-2"
+                                >
+                                    <Plus className="w-4 h-4" />
+                                    Ajouter un email
+                                </Button>
+                            </div>
                         </div>
                     ) : contact ? (
                         <div className="space-y-4">
@@ -682,6 +783,66 @@ export function ContactDrawer({
                                 }
                                 icon={<Phone className="w-5 h-5 text-emerald-500" />}
                             />
+                            {(() => {
+                                const extraPhones = contact.additionalPhones && Array.isArray(contact.additionalPhones) ? contact.additionalPhones.filter(Boolean) : [];
+                                return extraPhones.length > 0 ? (
+                                    <div className="space-y-2">
+                                        <p className="text-xs font-medium text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                                            <Phone className="w-3.5 h-3.5 text-emerald-500" />
+                                            Autres numéros
+                                        </p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {extraPhones.map((num, idx) => (
+                                                <div
+                                                    key={idx}
+                                                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-100 text-sm"
+                                                >
+                                                    <a href={`tel:${num}`} className="text-emerald-700 hover:underline font-medium">
+                                                        {num}
+                                                    </a>
+                                                    <button
+                                                        onClick={() => copyToClipboard(num, "Numéro")}
+                                                        className="p-1 text-emerald-500 hover:bg-emerald-100 rounded-lg transition-colors"
+                                                        aria-label="Copier"
+                                                    >
+                                                        <Copy className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : null;
+                            })()}
+                            {(() => {
+                                const extraEmails = contact.additionalEmails && Array.isArray(contact.additionalEmails) ? contact.additionalEmails.filter(Boolean) : [];
+                                return extraEmails.length > 0 ? (
+                                    <div className="space-y-2">
+                                        <p className="text-xs font-medium text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                                            <Mail className="w-3.5 h-3.5 text-indigo-500" />
+                                            Autres emails
+                                        </p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {extraEmails.map((em, idx) => (
+                                                <div
+                                                    key={idx}
+                                                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-50 border border-indigo-100 text-sm"
+                                                >
+                                                    <a href={`mailto:${em}`} className="text-indigo-700 hover:underline truncate max-w-[180px]">
+                                                        {em}
+                                                    </a>
+                                                    <button
+                                                        onClick={() => copyToClipboard(em, "Email")}
+                                                        className="p-1 text-indigo-500 hover:bg-indigo-100 rounded-lg transition-colors shrink-0"
+                                                        aria-label="Copier"
+                                                    >
+                                                        <Copy className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : null;
+                            })()}
                             <DrawerField
                                 label="LinkedIn"
                                 value={

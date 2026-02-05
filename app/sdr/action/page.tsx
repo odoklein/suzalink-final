@@ -106,6 +106,8 @@ interface DrawerContact {
     lastName: string | null;
     email: string | null;
     phone: string | null;
+    additionalPhones?: string[] | null;
+    additionalEmails?: string[] | null;
     title: string | null;
     linkedin: string | null;
     status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
@@ -365,6 +367,8 @@ export default function SDRActionPage() {
                         lastName: c.lastName,
                         email: c.email,
                         phone: c.phone,
+                        additionalPhones: c.additionalPhones ?? undefined,
+                        additionalEmails: c.additionalEmails ?? undefined,
                         title: c.title,
                         linkedin: c.linkedin,
                         status: c.status ?? "PARTIAL",
