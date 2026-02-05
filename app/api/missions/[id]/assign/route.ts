@@ -101,9 +101,16 @@ export const DELETE = withErrorHandler(async (request: NextRequest, { params }: 
         return errorResponse('Assignation non trouvée', 404);
     }
 
-    await prisma.sDRAssignment.delete({
-        where: { id: assignment.id },
-    });
+    await prisma.$transaction([
+        prisma.sDRAssignment.delete({
+            where: { id: assignment.id },
+        }),
+        // Clear team lead if the removed user was the team lead
+        prisma.mission.updateMany({
+            where: { id, teamLeadSdrId: sdrId },
+            data: { teamLeadSdrId: null },
+        }),
+    ]);
 
     return successResponse({ message: 'SDR retiré de la mission' });
 });

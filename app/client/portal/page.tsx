@@ -22,6 +22,7 @@ import {
     Video,
     BarChart3,
     Zap,
+    FileDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -60,10 +61,17 @@ interface Opportunity {
     };
 }
 
+interface MissionList {
+    id: string;
+    name: string;
+    type?: string;
+}
+
 interface Mission {
     id: string;
     name: string;
     isActive: boolean;
+    lists?: MissionList[];
     _count?: { sdrAssignments: number };
 }
 
@@ -190,6 +198,42 @@ export default function ClientPortal() {
         a.download = `opportunites-${new Date().toISOString().slice(0, 10)}.csv`;
         a.click();
         URL.revokeObjectURL(url);
+    };
+
+    const exportMissionCsv = async (missionId: string) => {
+        try {
+            const res = await fetch(`/api/client/missions/${missionId}/export`);
+            if (!res.ok) throw new Error("Export échoué");
+            const blob = await res.blob();
+            const disposition = res.headers.get("Content-Disposition");
+            const filename = disposition?.match(/filename="(.+)"/)?.[1] ?? `mission-${missionId}.csv`;
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error("Export mission:", err);
+        }
+    };
+
+    const exportListCsv = async (listId: string, listName: string) => {
+        try {
+            const res = await fetch(`/api/lists/${listId}/export`);
+            if (!res.ok) throw new Error("Export échoué");
+            const blob = await res.blob();
+            const disposition = res.headers.get("Content-Disposition");
+            const filename = disposition?.match(/filename="(.+)"/)?.[1] ?? `${listName.replace(/[^a-z0-9]/gi, "_")}.csv`;
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error("Export liste:", err);
+        }
     };
 
     if (isLoading && !stats) {
@@ -418,9 +462,9 @@ export default function ClientPortal() {
                         ) : (
                             <div className="space-y-3">
                                 {missions.map((mission) => (
-                                    <Card key={mission.id} className="border-slate-200 bg-white">
+                                    <Card key={mission.id} className="border-slate-200 bg-white overflow-hidden">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center">
+                                            <div className="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
                                                 <CheckCircle2 className="w-4 h-4 text-indigo-600" />
                                             </div>
                                             <div className="flex-1 min-w-0">
@@ -433,6 +477,32 @@ export default function ClientPortal() {
                                             <Badge variant={mission.isActive ? "success" : "default"}>
                                                 {mission.isActive ? "En cours" : "Pause"}
                                             </Badge>
+                                        </div>
+                                        {/* Export options */}
+                                        <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+                                            <div className="flex flex-wrap gap-2">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => exportMissionCsv(mission.id)}
+                                                    className="gap-1.5 text-xs h-8"
+                                                >
+                                                    <FileDown className="w-3.5 h-3.5" />
+                                                    Exporter la mission (CSV)
+                                                </Button>
+                                                {(mission.lists ?? []).map((list) => (
+                                                    <Button
+                                                        key={list.id}
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => exportListCsv(list.id, list.name)}
+                                                        className="gap-1.5 text-xs h-8"
+                                                    >
+                                                        <Download className="w-3.5 h-3.5" />
+                                                        {list.name}
+                                                    </Button>
+                                                ))}
+                                            </div>
                                         </div>
                                     </Card>
                                 ))}

@@ -4,8 +4,8 @@ import React, { useEffect, useState, useMemo } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import {
-    Zap,
     LogOut,
     ChevronLeft,
     ChevronRight,
@@ -275,7 +275,7 @@ export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
                 className={cn(
                     // Base styles - Fixed positioning
                     "sidebar-container fixed top-0 left-0 h-screen z-50",
-                    "bg-gradient-to-b from-slate-900 to-slate-800",
+                    "bg-[#051423]",
                     "flex flex-col border-r border-white/5 shadow-xl",
                     // Width transitions
                     "transition-all duration-300 ease-in-out",
@@ -290,35 +290,31 @@ export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
                     "h-16 flex items-center gap-3 px-4 border-b border-white/5",
                     isCollapsed && "lg:justify-center lg:px-0"
                 )}>
-                    {/* Logo */}
-                    <div className={cn(
-                        "w-9 h-9 rounded-lg bg-gradient-to-br flex items-center justify-center shadow-lg flex-shrink-0",
-                        roleConfig?.gradient || "from-indigo-500 to-indigo-600",
-                        roleConfig?.color === "indigo" && "shadow-indigo-500/25",
-                        roleConfig?.color === "emerald" && "shadow-emerald-500/25",
-                        roleConfig?.color === "blue" && "shadow-blue-500/25"
+                    {/* Logo - full when expanded, favicon when collapsed on desktop */}
+                    <Link href="/" className={cn(
+                        "flex items-center min-w-0 flex-shrink-0",
+                        isCollapsed && "lg:justify-center lg:w-full"
                     )}>
-                        <Zap className="w-5 h-5 text-white" />
-                    </div>
-                    
-                    {/* Brand text */}
-                    <div className={cn(
-                        "flex items-center gap-2 transition-all duration-300",
-                        isCollapsed ? "lg:hidden" : ""
-                    )}>
-                        <span className="font-semibold text-white tracking-tight">Suzalink</span>
-                        {roleConfig && (
-                            <span className={cn(
-                                "text-xs font-medium px-2 py-0.5 rounded-full border",
-                                roleConfig.color === "indigo" && "text-indigo-400 bg-indigo-500/10 border-indigo-500/20",
-                                roleConfig.color === "emerald" && "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
-                                roleConfig.color === "blue" && "text-blue-400 bg-blue-500/10 border-blue-500/20",
-                                roleConfig.color === "slate" && "text-slate-400 bg-slate-500/10 border-slate-500/20"
-                            )}>
-                                {roleConfig.label}
-                            </span>
+                        {isCollapsed && !isMobileOpen ? (
+                            <Image
+                                src="/favicon.png"
+                                alt="Suzalink"
+                                width={36}
+                                height={36}
+                                className="h-9 w-9 object-contain lg:mx-auto"
+                                priority
+                            />
+                        ) : (
+                            <Image
+                                src="/logowithsidebar.png"
+                                alt="Suzalink"
+                                width={140}
+                                height={36}
+                                className="h-9 w-auto object-contain object-left"
+                                priority
+                            />
                         )}
-                    </div>
+                    </Link>
 
                     {/* Mobile close button */}
                     <button

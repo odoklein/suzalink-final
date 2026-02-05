@@ -49,14 +49,6 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     // Build filters
     const filters: any = { page, limit };
 
-    // SDR and BD can only see their own actions
-    if (session.user.role === 'SDR' || session.user.role === 'BUSINESS_DEVELOPER') {
-        filters.sdrId = session.user.id;
-    } else {
-        const sdrId = searchParams.get('sdrId');
-        if (sdrId) filters.sdrId = sdrId;
-    }
-
     const missionId = searchParams.get('missionId');
     const result = searchParams.get('result');
     const from = searchParams.get('from');
@@ -65,6 +57,19 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     const companyId = searchParams.get('companyId');
 
     if (missionId) filters.missionId = missionId;
+
+    // SDR and BD: own actions only, unless they are team lead for this mission (then show all team actions)
+    if (session.user.role === 'SDR' || session.user.role === 'BUSINESS_DEVELOPER') {
+        const isTeamLeadForMission = missionId
+            ? await actionService.isTeamLeadForMission(session.user.id, missionId)
+            : false;
+        if (!isTeamLeadForMission) {
+            filters.sdrId = session.user.id;
+        }
+    } else {
+        const sdrId = searchParams.get('sdrId');
+        if (sdrId) filters.sdrId = sdrId;
+    }
     if (result) filters.result = result;
     if (from) filters.from = new Date(from);
     if (to) filters.to = new Date(to);

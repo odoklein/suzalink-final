@@ -219,6 +219,7 @@ model User {
   clientOnboardingDismissedPermanently Boolean @default(false)  // Client portal: hide onboarding forever
   actions       Action[]  @relation("SDRActions")
   assignedMissions SDRAssignment[]
+  missionsAsTeamLead Mission[]  @relation("MissionTeamLead")
   uploadedFiles File[]
   googleDriveSyncs GoogleDriveSync[]
   
@@ -408,6 +409,10 @@ model Mission {
   scheduleBlocks ScheduleBlock[]
   folders       Folder[]
   files         File[]
+
+  // Team lead: this SDR can see all rappels and notes of teammates in this mission
+  teamLeadSdrId String?
+  teamLeadSdr   User?     @relation("MissionTeamLead", fields: [teamLeadSdrId], references: [id], onDelete: SetNull)
   
   // Email Hub relations
   emailThreads  EmailThread[]

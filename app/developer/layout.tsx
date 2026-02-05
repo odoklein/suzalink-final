@@ -62,7 +62,7 @@ export default function DeveloperLayout({ children }: { children: React.ReactNod
     return (
         <div className="min-h-screen bg-slate-100 flex">
             {/* Premium Sidebar */}
-            <aside className="w-64 bg-gradient-to-b from-slate-900 to-slate-800 flex flex-col shadow-xl">
+            <aside className="w-64 bg-[#051423] flex flex-col shadow-xl">
                 {/* Premium Brand Header */}
                 <div className="h-16 flex items-center gap-3 px-5 border-b border-white/5">
                     <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/25">

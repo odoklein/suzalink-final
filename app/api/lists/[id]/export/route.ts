@@ -15,9 +15,12 @@ export async function GET(
     try {
         const session = await getServerSession(authOptions);
 
-        // Allow MANAGER and ADMIN to export
-        // If SDRs need to export, add "SDR" to this list or use checking permission logic
-        if (!session || !["MANAGER", "ADMIN"].includes(session.user?.role as string)) {
+        if (!session?.user?.id) {
+            return new NextResponse("Unauthorized", { status: 401 });
+        }
+
+        const allowedRoles = ["MANAGER", "ADMIN", "CLIENT"];
+        if (!allowedRoles.includes(session.user?.role as string)) {
             return new NextResponse("Unauthorized", { status: 401 });
         }
 
@@ -25,53 +28,101 @@ export async function GET(
 
         const list = await prisma.list.findUnique({
             where: { id },
-            select: { name: true }
+            include: { mission: { select: { clientId: true } } },
         });
 
         if (!list) {
             return new NextResponse("List not found", { status: 404 });
         }
 
+        // CLIENT can only export lists from missions belonging to their client
+        if (session.user.role === "CLIENT") {
+            const clientId = (session.user as { clientId?: string })?.clientId;
+            if (!clientId || list.mission.clientId !== clientId) {
+                return new NextResponse("Unauthorized", { status: 403 });
+            }
+        }
+
         const companies = await prisma.company.findMany({
             where: { listId: id },
             include: {
-                contacts: true,
+                contacts: {
+                    include: {
+                        opportunities: { take: 1 },
+                        actions: {
+                            orderBy: { createdAt: "desc" },
+                            take: 1,
+                            select: { note: true, result: true, createdAt: true },
+                        },
+                    },
+                },
             },
+            orderBy: { name: "asc" },
         });
 
-        // Generate CSV
-        const headers = ["Company", "Industry", "Country", "Website", "Contact Name", "Email", "Phone", "Title", "Status"];
-        const rows: string[] = [headers.join(",")];
+        const escape = (v: string | number | boolean | null | undefined) =>
+            `"${(v ?? "").toString().replace(/"/g, '""')}"`;
+
+        const headers = [
+            "Entreprise", "Industrie", "Pays", "Site web", "Taille", "Tél. société",
+            "Statut entreprise",
+            "Contact", "Prénom", "Nom", "Titre", "Email", "Téléphone", "LinkedIn",
+            "Emails additionnels", "Téléphones additionnels",
+            "Statut contact",
+            "Opportunité", "Besoin opportunité", "Note opportunité", "Urgence", "Est. min (€)", "Est. max (€)", "Transmis",
+            "Résultat dernière action", "Note dernière action", "Date dernière action",
+        ];
+        const rows: string[] = [headers.map((h) => escape(h)).join(",")];
 
         for (const company of companies) {
-            const companyData = [
-                `"${(company.name || "").replace(/"/g, '""')}"`,
-                `"${(company.industry || "").replace(/"/g, '""')}"`,
-                `"${(company.country || "").replace(/"/g, '""')}"`,
-                `"${(company.website || "").replace(/"/g, '""')}"`,
+            const companyBase = [
+                escape(company.name),
+                escape(company.industry),
+                escape(company.country),
+                escape(company.website),
+                escape(company.size),
+                escape(company.phone),
+                escape(company.status),
             ];
 
             if (company.contacts.length === 0) {
-                rows.push([
-                    ...companyData,
-                    "", "", "", "",
-                    `"${company.status}"`
-                ].join(","));
+                const emptyContact = Array(20).fill("").join(",");
+                rows.push([...companyBase, emptyContact].join(","));
             } else {
                 for (const contact of company.contacts) {
+                    const opp = contact.opportunities[0];
+                    const lastAction = contact.actions[0];
+                    const addPhones = Array.isArray(contact.additionalPhones) ? (contact.additionalPhones as string[]).join("; ") : "";
+                    const addEmails = Array.isArray(contact.additionalEmails) ? (contact.additionalEmails as string[]).join("; ") : "";
+                    const contactName = [contact.firstName, contact.lastName].filter(Boolean).join(" ").trim() || "-";
                     rows.push([
-                        ...companyData,
-                        `"${((contact.firstName || "") + " " + (contact.lastName || "")).trim().replace(/"/g, '""')}"`,
-                        `"${(contact.email || "").replace(/"/g, '""')}"`,
-                        `"${(contact.phone || "").replace(/"/g, '""')}"`,
-                        `"${(contact.title || "").replace(/"/g, '""')}"`,
-                        `"${contact.status}"`
+                        ...companyBase,
+                        escape(contactName),
+                        escape(contact.firstName),
+                        escape(contact.lastName),
+                        escape(contact.title),
+                        escape(contact.email),
+                        escape(contact.phone),
+                        escape(contact.linkedin),
+                        escape(addEmails),
+                        escape(addPhones),
+                        escape(contact.status),
+                        escape(opp ? "Oui" : ""),
+                        escape(opp?.needSummary ?? ""),
+                        escape(opp?.notes ?? ""),
+                        escape(opp?.urgency ?? ""),
+                        escape(opp?.estimatedMin ?? ""),
+                        escape(opp?.estimatedMax ?? ""),
+                        escape(opp?.handedOff ? "Oui" : ""),
+                        escape(lastAction?.result ?? ""),
+                        escape(lastAction?.note ?? ""),
+                        escape(lastAction?.createdAt ? new Date(lastAction.createdAt).toLocaleString("fr-FR") : ""),
                     ].join(","));
                 }
             }
         }
 
-        const csv = rows.join("\n");
+        const csv = "\ufeff" + rows.join("\n");
         const filename = `${list.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_export.csv`;
 
         return new NextResponse(csv, {

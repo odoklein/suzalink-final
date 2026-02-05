@@ -45,6 +45,8 @@ interface Mission {
         id: string;
         name: string;
     };
+    teamLeadSdrId?: string | null;
+    teamLeadSdr?: { id: string; name: string; email: string } | null;
     sdrAssignments: Array<{
         id: string;
         sdr: {
@@ -148,6 +150,10 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
     const [isAddingTemplate, setIsAddingTemplate] = useState(false);
     const [removingTemplateId, setRemovingTemplateId] = useState<string | null>(null);
 
+    // Team lead: SDR who can see all teammates' rappels and notes in this mission
+    const [teamLeadSdrId, setTeamLeadSdrId] = useState<string>("");
+    const [isSavingTeamLead, setIsSavingTeamLead] = useState(false);
+
     // ============================================
     // FETCH MISSION
     // ============================================
@@ -159,7 +165,9 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
             const json = await res.json();
 
             if (json.success) {
-                setMission(json.data);
+                const m = json.data;
+                setMission(m);
+                setTeamLeadSdrId(m?.teamLeadSdrId ?? "");
             } else {
                 showError("Erreur", json.error || "Mission non trouvée");
                 router.push("/manager/missions");
@@ -470,6 +478,30 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
         }
     };
 
+    const handleTeamLeadChange = async (newTeamLeadSdrId: string) => {
+        if (!mission) return;
+        setIsSavingTeamLead(true);
+        try {
+            const res = await fetch(`/api/missions/${mission.id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ teamLeadSdrId: newTeamLeadSdrId || null }),
+            });
+            const json = await res.json();
+            if (json.success) {
+                setTeamLeadSdrId(newTeamLeadSdrId);
+                setMission((prev) => prev ? { ...prev, teamLeadSdrId: newTeamLeadSdrId || null, teamLeadSdr: json.data?.teamLeadSdr ?? prev.teamLeadSdr } : null);
+                success("Responsable d'équipe", newTeamLeadSdrId ? "Mis à jour : il pourra voir tous les rappels et notes de l'équipe." : "Aucun responsable.");
+            } else {
+                showError("Erreur", json.error);
+            }
+        } catch (err) {
+            showError("Erreur", "Impossible de enregistrer le responsable d'équipe");
+        } finally {
+            setIsSavingTeamLead(false);
+        }
+    };
+
     // ============================================
     // LOADING STATE
     // ============================================
@@ -617,6 +649,37 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
                                 → {mission.endDate ? new Date(mission.endDate).toLocaleDateString("fr-FR") : "En cours"}
                             </p>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Team lead: who can see all teammates' rappels and notes */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm border-l-4 border-l-amber-500">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
+                            <Eye className="w-5 h-5 text-amber-600" />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-semibold text-slate-900">Responsable d&apos;équipe</h2>
+                            <p className="text-sm text-slate-500">Voit tous les rappels et notes des membres de la mission</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2 min-w-[220px]">
+                        <Select
+                            placeholder="Aucun"
+                            value={teamLeadSdrId}
+                            onChange={(v) => handleTeamLeadChange(v)}
+                            disabled={isSavingTeamLead || (mission.sdrAssignments.length === 0)}
+                            options={[
+                                { value: "", label: "Aucun" },
+                                ...mission.sdrAssignments.map((a) => ({
+                                    value: a.sdr.id,
+                                    label: `${a.sdr.name}${a.sdr.role === "BUSINESS_DEVELOPER" ? " (BD)" : ""}`,
+                                })),
+                            ]}
+                        />
+                        {isSavingTeamLead && <Loader2 className="w-4 h-4 animate-spin text-slate-400 shrink-0" />}
                     </div>
                 </div>
             </div>

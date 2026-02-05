@@ -21,6 +21,7 @@ const updateMissionSchema = z.object({
     startDate: z.string().transform((s) => new Date(s)).optional(),
     endDate: z.string().transform((s) => new Date(s)).optional(),
     isActive: z.boolean().optional(),
+    teamLeadSdrId: z.string().nullable().optional(),
 });
 
 const assignSdrSchema = z.object({
@@ -51,6 +52,7 @@ export const GET = withErrorHandler(async (
             sdrAssignments: {
                 include: { sdr: { select: { id: true, name: true, email: true, role: true } } },
             },
+            teamLeadSdr: { select: { id: true, name: true, email: true } },
             _count: {
                 select: {
                     sdrAssignments: true,
@@ -131,11 +133,24 @@ export const PUT = withErrorHandler(async (
     const { id } = await params;
     const data = await validateRequest(request, updateMissionSchema);
 
+    // If setting teamLeadSdrId, ensure they are assigned to this mission
+    if (data.teamLeadSdrId !== undefined) {
+        if (data.teamLeadSdrId) {
+            const assigned = await prisma.sDRAssignment.findUnique({
+                where: { missionId_sdrId: { missionId: id, sdrId: data.teamLeadSdrId } },
+            });
+            if (!assigned) {
+                return errorResponse('Le responsable d\'équipe doit être assigné à la mission', 400);
+            }
+        }
+    }
+
     const mission = await prisma.mission.update({
         where: { id },
         data,
         include: {
             client: { select: { id: true, name: true } },
+            teamLeadSdr: { select: { id: true, name: true, email: true } },
         },
     });
 

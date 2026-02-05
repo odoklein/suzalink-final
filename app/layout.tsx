@@ -16,6 +16,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Suzalink | Sales Execution Platform",
   description: "Outil interne d'exécution commerciale pour Suzali Conseil",
+  icons: {
+    icon: "/favicon.png",
+  },
 };
 
 export default function RootLayout({

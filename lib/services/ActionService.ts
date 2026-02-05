@@ -178,6 +178,17 @@ export class ActionService {
     }
 
     // ============================================
+    // TEAM LEAD HELPERS
+    // ============================================
+    async isTeamLeadForMission(userId: string, missionId: string): Promise<boolean> {
+        const mission = await prisma.mission.findUnique({
+            where: { id: missionId },
+            select: { teamLeadSdrId: true },
+        });
+        return mission?.teamLeadSdrId === userId;
+    }
+
+    // ============================================
     // GET ACTIONS WITH FILTERS
     // ============================================
     async getActions(filters: {

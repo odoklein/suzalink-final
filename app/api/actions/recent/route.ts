@@ -23,9 +23,43 @@ export async function GET(request: NextRequest) {
         const offset = parseInt(searchParams.get("offset") || "0") || 0;
         const userId = searchParams.get("userId");
 
+        const userRole = (session.user as { role?: string }).role;
+        const isSdrOrBd = userRole === "SDR" || userRole === "BUSINESS_DEVELOPER";
+
+        let assignedMissionIds: string[] = [];
+        let teamLeadMissionIds: string[] = [];
+        if (isSdrOrBd && !userId) {
+            const [assignments, teamLeadMissions] = await Promise.all([
+                prisma.sDRAssignment.findMany({
+                    where: { sdrId: session.user.id },
+                    select: { missionId: true },
+                }),
+                prisma.mission.findMany({
+                    where: { teamLeadSdrId: session.user.id },
+                    select: { id: true },
+                }),
+            ]);
+            assignedMissionIds = assignments.map((a) => a.missionId);
+            teamLeadMissionIds = teamLeadMissions.map((m) => m.id);
+        }
+
+        // SDR/BD: restrict to own actions + teammates' actions in missions where they are team lead
+        let actionWhere: { sdrId?: string; campaign?: { missionId?: string | { in: string[] } }; OR?: unknown[] } | undefined;
+        if (userId) {
+            actionWhere = { sdrId: userId };
+        } else if (isSdrOrBd) {
+            actionWhere = {
+                campaign: { missionId: { in: assignedMissionIds } },
+                OR: [
+                    { sdrId: session.user.id },
+                    ...(teamLeadMissionIds.length > 0 ? [{ campaign: { missionId: { in: teamLeadMissionIds } } }] : []),
+                ],
+            };
+        }
+
         // Fetch recent actions with user and campaign info
         const recentActions = await prisma.action.findMany({
-            where: userId ? { sdrId: userId } : undefined,
+            where: actionWhere,
             skip: offset,
             take: limit,
             orderBy: { createdAt: "desc" },
@@ -61,12 +95,16 @@ export async function GET(request: NextRequest) {
         });
 
         // Fetch recent schedule block status changes (only when not filtering by user)
+        const blockWhere: { status: { in: string[] }; missionId?: { in: string[] } } = {
+            status: { in: ["IN_PROGRESS", "COMPLETED"] },
+        };
+        if (isSdrOrBd && !userId && assignedMissionIds.length > 0) {
+            blockWhere.missionId = { in: assignedMissionIds };
+        }
         const recentBlocks = userId ? [] : await prisma.scheduleBlock.findMany({
             take: limit,
             orderBy: { updatedAt: "desc" },
-            where: {
-                status: { in: ["IN_PROGRESS", "COMPLETED"] },
-            },
+            where: blockWhere,
             include: {
                 sdr: {
                     select: {
