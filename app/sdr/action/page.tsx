@@ -443,7 +443,8 @@ export default function SDRActionPage() {
         params.set("missionId", selectedMissionId);
         if (selectedListId) params.set("listId", selectedListId);
         params.set("limit", "100");
-        fetch(`/api/sdr/action-queue?${params.toString()}`)
+        params.set("_t", String(Date.now())); // cache-bust so we get fresh data after drawer updates
+        fetch(`/api/sdr/action-queue?${params.toString()}`, { cache: "no-store" })
             .then((res) => res.json())
             .then((json) => {
                 if (json.success && json.data?.items) {
@@ -469,6 +470,17 @@ export default function SDRActionPage() {
     const [unifiedDrawerClientBookingUrl, setUnifiedDrawerClientBookingUrl] = useState<string>("");
     /** Row used to open the drawer (for email modal context when "Envoie mail" is selected in drawer) */
     const [drawerRow, setDrawerRow] = useState<QueueItem | null>(null);
+    const prevUnifiedDrawerOpenRef = useRef(false);
+
+    // When drawer closes, refresh queue so table shows updated/removed contacts (runs after state commit)
+    useEffect(() => {
+        const wasOpen = prevUnifiedDrawerOpenRef.current;
+        prevUnifiedDrawerOpenRef.current = unifiedDrawerOpen;
+        if (wasOpen && !unifiedDrawerOpen && viewMode === "table") {
+            const id = setTimeout(() => refreshQueue(), 80);
+            return () => clearTimeout(id);
+        }
+    }, [unifiedDrawerOpen, viewMode, refreshQueue]);
 
     // Fetch client booking URL when drawer opens (for MEETING_BOOKED calendar in drawer)
     useEffect(() => {
@@ -508,8 +520,6 @@ export default function SDRActionPage() {
         setUnifiedDrawerMissionId(undefined);
         setUnifiedDrawerMissionName(undefined);
         setUnifiedDrawerClientBookingUrl("");
-        // Refresh queue when closing drawer so we always see latest data (e.g. after updating status)
-        if (viewMode === "table") refreshQueue();
     };
 
     const openEmailModalFromDrawer = () => {
@@ -1130,6 +1140,29 @@ export default function SDRActionPage() {
                             onOpenEmailModal={openEmailModalFromDrawer}
                             onActionRecorded={() => {
                                 // Mark this row as recently updated for table highlight
+                                const rowKey = unifiedDrawerContactId ?? unifiedDrawerCompanyId ?? "";
+                                if (rowKey) {
+                                    setRecentlyUpdatedRowKeys((prev) => new Set([...prev, rowKey]));
+                                    if (recentlyUpdatedTimeoutRef.current) clearTimeout(recentlyUpdatedTimeoutRef.current);
+                                    recentlyUpdatedTimeoutRef.current = setTimeout(() => {
+                                        setRecentlyUpdatedRowKeys((prev) => {
+                                            const next = new Set(prev);
+                                            next.delete(rowKey);
+                                            return next;
+                                        });
+                                        recentlyUpdatedTimeoutRef.current = null;
+                                    }, 5000);
+                                }
+                                refreshQueue();
+                            }}
+                            onValidateAndNext={() => {
+                                if (!drawerRow) return;
+                                const key = queueRowKey(drawerRow);
+                                const idx = filteredQueueItems.findIndex((row) => queueRowKey(row) === key);
+                                if (idx >= 0 && idx < filteredQueueItems.length - 1) {
+                                    const nextRow = filteredQueueItems[idx + 1];
+                                    openDrawerForRow(nextRow);
+                                }
                                 const rowKey = unifiedDrawerContactId ?? unifiedDrawerCompanyId ?? "";
                                 if (rowKey) {
                                     setRecentlyUpdatedRowKeys((prev) => new Set([...prev, rowKey]));

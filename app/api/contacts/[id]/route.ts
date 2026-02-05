@@ -10,18 +10,24 @@ import {
 import { z } from 'zod';
 
 // ============================================
-// SCHEMAS
+// SCHEMAS — all fields optional; empty string treated as null (partial updates, no "fill all" requirement)
 // ============================================
 
+// Empty string → null so "clear field" works; undefined means "omit / leave unchanged"
+const emptyStringToNull = (v: unknown): unknown => (v === "" ? null : v);
+
 const updateContactSchema = z.object({
-    firstName: z.string().optional().nullable(),
-    lastName: z.string().optional().nullable(),
-    title: z.string().optional().nullable(),
-    email: z.string().email().optional().nullable(),
-    phone: z.string().optional().nullable(),
+    firstName: z.preprocess(emptyStringToNull, z.string().optional().nullable()),
+    lastName: z.preprocess(emptyStringToNull, z.string().optional().nullable()),
+    title: z.preprocess(emptyStringToNull, z.string().optional().nullable()),
+    email: z.preprocess(emptyStringToNull, z.string().email().optional().nullable()),
+    phone: z.preprocess(emptyStringToNull, z.string().optional().nullable()),
     additionalPhones: z.array(z.string()).optional().nullable(),
-    additionalEmails: z.array(z.string().email()).optional().nullable(),
-    linkedin: z.string().optional().nullable(),
+    additionalEmails: z.preprocess(
+        (arr) => (Array.isArray(arr) ? arr.filter((s) => typeof s === "string" && s.trim() !== "") : arr),
+        z.array(z.string().email()).optional().nullable()
+    ),
+    linkedin: z.preprocess(emptyStringToNull, z.string().optional().nullable()),
 });
 
 // ============================================

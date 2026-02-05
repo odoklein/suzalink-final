@@ -216,6 +216,7 @@ model User {
   isActive      Boolean   @default(true)  // For banning/disabling users
   clientId      String?
   client        Client?   @relation(fields: [clientId], references: [id])
+  clientOnboardingDismissedPermanently Boolean @default(false)  // Client portal: hide onboarding forever
   actions       Action[]  @relation("SDRActions")
   assignedMissions SDRAssignment[]
   uploadedFiles File[]

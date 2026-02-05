@@ -125,28 +125,26 @@ export async function POST(req: NextRequest) {
             bodyText = processed.bodyText;
         }
 
-        // Forward to the existing send email endpoint
-        // This uses the established email sending infrastructure
-        const formData = new FormData();
-        formData.append('mailboxId', mailboxId);
-        formData.append('to', JSON.stringify(to));
-        formData.append('subject', subject);
-        formData.append('bodyHtml', bodyHtml);
-        if (bodyText) formData.append('bodyText', bodyText);
-
-        if (contactId) formData.append('contactId', contactId);
-        if (missionId) formData.append('missionId', missionId);
-        formData.append('sentById', session.user.id);
-        if (templateId) formData.append('templateId', templateId);
-
-        // Use internal fetch to the send endpoint
+        // Forward to the existing send email endpoint (JSON to avoid FormData boundary issues in server-side fetch)
         const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
+        const sendPayload = {
+            mailboxId,
+            to: to.map((e: { email?: string } | string) => (typeof e === 'string' ? { email: e } : { email: e.email })),
+            subject,
+            bodyHtml,
+            bodyText: bodyText || undefined,
+            contactId: contactId || undefined,
+            missionId: missionId || undefined,
+            sentById: session.user.id,
+            templateId: templateId || undefined,
+        };
         const sendResponse = await fetch(`${baseUrl}/api/email/send`, {
             method: 'POST',
-            body: formData,
             headers: {
+                'Content-Type': 'application/json',
                 cookie: req.headers.get('cookie') || ''
-            }
+            },
+            body: JSON.stringify(sendPayload),
         });
 
         const sendResult = await sendResponse.json();

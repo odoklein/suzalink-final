@@ -94,12 +94,16 @@ export default function UsersPage() {
     // Selected user
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
     
+    // Clients list (for CLIENT role)
+    const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
+
     // Form state
     const [formData, setFormData] = useState({
         name: "",
         email: "",
         password: "",
         role: "SDR",
+        clientId: "",
     });
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
     const [formLoading, setFormLoading] = useState(false);
@@ -139,6 +143,23 @@ export default function UsersPage() {
     useEffect(() => {
         fetchUsers();
     }, [fetchUsers]);
+
+    // Fetch clients for CLIENT role dropdown
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch("/api/clients");
+                const json = await res.json();
+                if (cancelled || !json.success) return;
+                const list = json.data?.clients ?? json.data ?? [];
+                setClients(Array.isArray(list) ? list : []);
+            } catch {
+                // ignore
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
 
     // ============================================
     // FETCH PERMISSIONS
@@ -186,13 +207,26 @@ export default function UsersPage() {
             setFormErrors({ email: "Email requis" });
             return;
         }
+        if (formData.role === "CLIENT" && !formData.clientId?.trim()) {
+            setFormErrors({ clientId: "Sélectionnez un client pour un utilisateur portail client" });
+            return;
+        }
 
         try {
             setFormLoading(true);
+            const payload: Record<string, unknown> = {
+                name: formData.name,
+                email: formData.email,
+                password: formData.password || undefined,
+                role: formData.role,
+            };
+            if (formData.role === "CLIENT" && formData.clientId) {
+                payload.clientId = formData.clientId;
+            }
             const res = await fetch("/api/users", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(formData),
+                body: JSON.stringify(payload),
             });
             const json = await res.json();
 
@@ -237,6 +271,11 @@ export default function UsersPage() {
             };
             if (formData.password) {
                 updateData.password = formData.password;
+            }
+            if (formData.role === "CLIENT") {
+                updateData.clientId = formData.clientId?.trim() || null;
+            } else {
+                updateData.clientId = null;
             }
 
             const res = await fetch(`/api/users/${selectedUser.id}`, {
@@ -365,7 +404,7 @@ export default function UsersPage() {
     // ============================================
 
     const resetForm = () => {
-        setFormData({ name: "", email: "", password: "", role: "SDR" });
+        setFormData({ name: "", email: "", password: "", role: "SDR", clientId: "" });
         setFormErrors({});
         setSelectedUser(null);
     };
@@ -377,6 +416,7 @@ export default function UsersPage() {
             email: user.email,
             password: "",
             role: user.role,
+            clientId: user.client?.id ?? "",
         });
         setShowEditModal(true);
     };
@@ -479,6 +519,9 @@ export default function UsersPage() {
                                     Statut
                                 </th>
                                 <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                                    Client
+                                </th>
+                                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                                     Missions
                                 </th>
                                 <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -492,7 +535,7 @@ export default function UsersPage() {
                         <tbody className="divide-y divide-slate-200">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={6} className="px-6 py-12 text-center">
+                                    <td colSpan={7} className="px-6 py-12 text-center">
                                         <div className="flex items-center justify-center gap-2">
                                             <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
                                             <span className="text-slate-500">Chargement...</span>
@@ -501,7 +544,7 @@ export default function UsersPage() {
                                 </tr>
                             ) : users.length === 0 ? (
                                 <tr>
-                                    <td colSpan={6} className="px-6 py-12 text-center">
+                                    <td colSpan={7} className="px-6 py-12 text-center">
                                         <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                                         <p className="text-slate-500">Aucun utilisateur trouvé</p>
                                     </td>
@@ -539,6 +582,13 @@ export default function UsersPage() {
                                                     <UserX className="w-4 h-4" />
                                                     <span className="text-sm font-medium">Inactif</span>
                                                 </span>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            {user.role === "CLIENT" && user.client ? (
+                                                <span className="text-slate-700">{user.client.name}</span>
+                                            ) : (
+                                                <span className="text-slate-400">—</span>
                                             )}
                                         </td>
                                         <td className="px-6 py-4">
@@ -660,7 +710,7 @@ export default function UsersPage() {
                         <label className="block text-sm font-medium text-slate-700">Rôle</label>
                         <select
                             value={formData.role}
-                            onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                            onChange={(e) => setFormData({ ...formData, role: e.target.value, clientId: e.target.value === "CLIENT" ? formData.clientId : "" })}
                             className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm transition-all duration-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
                         >
                             <option value="SDR">SDR</option>
@@ -670,6 +720,23 @@ export default function UsersPage() {
                             <option value="CLIENT">Client</option>
                         </select>
                     </div>
+
+                    {formData.role === "CLIENT" && (
+                        <div className="space-y-1.5">
+                            <label className="block text-sm font-medium text-slate-700">Client <span className="text-red-500">*</span></label>
+                            <select
+                                value={formData.clientId}
+                                onChange={(e) => setFormData({ ...formData, clientId: e.target.value })}
+                                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm transition-all duration-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                            >
+                                <option value="">Sélectionner un client</option>
+                                {clients.map((c) => (
+                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                            </select>
+                            {formErrors.clientId && <p className="text-red-500 text-xs mt-1">{formErrors.clientId}</p>}
+                        </div>
+                    )}
                 </div>
 
                 <ModalFooter>
@@ -746,7 +813,7 @@ export default function UsersPage() {
                         <label className="block text-sm font-medium text-slate-700">Rôle</label>
                         <select
                             value={formData.role}
-                            onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                            onChange={(e) => setFormData({ ...formData, role: e.target.value, clientId: e.target.value === "CLIENT" ? formData.clientId : "" })}
                             className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm transition-all duration-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
                         >
                             <option value="SDR">SDR</option>
@@ -756,6 +823,23 @@ export default function UsersPage() {
                             <option value="CLIENT">Client</option>
                         </select>
                     </div>
+
+                    {formData.role === "CLIENT" && (
+                        <div className="space-y-1.5">
+                            <label className="block text-sm font-medium text-slate-700">Client</label>
+                            <select
+                                value={formData.clientId}
+                                onChange={(e) => setFormData({ ...formData, clientId: e.target.value })}
+                                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm transition-all duration-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                            >
+                                <option value="">Aucun client</option>
+                                {clients.map((c) => (
+                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                            </select>
+                            <p className="text-xs text-slate-500">Lien vers le client pour l’accès portail client.</p>
+                        </div>
+                    )}
                 </div>
 
                 <ModalFooter>

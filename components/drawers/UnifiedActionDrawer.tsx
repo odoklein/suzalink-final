@@ -79,6 +79,8 @@ interface UnifiedActionDrawerProps {
     onActionRecorded?: () => void;
     /** When user selects "Envoie mail" in the drawer, call this to open the email sending modal (table view) */
     onOpenEmailModal?: () => void;
+    /** When provided (e.g. table view), enables "Valider et suivant" to record action and open next item in drawer */
+    onValidateAndNext?: () => void;
 }
 
 // ============================================
@@ -105,6 +107,7 @@ export function UnifiedActionDrawer({
     clientBookingUrl,
     onActionRecorded,
     onOpenEmailModal,
+    onValidateAndNext,
 }: UnifiedActionDrawerProps) {
     const { success, error: showError } = useToast();
 
@@ -272,8 +275,8 @@ export function UnifiedActionDrawer({
         }
     };
 
-    // Record action
-    const handleAddAction = async () => {
+    // Record action (andNext: when true and onValidateAndNext provided, call it after success to open next in table view)
+    const handleAddAction = async (andNext?: boolean) => {
         const campaignId = campaigns[0]?.id;
         if (!campaignId) {
             showError("Erreur", "Aucune campagne disponible pour cette mission");
@@ -329,6 +332,9 @@ export function UnifiedActionDrawer({
                     ...prev,
                 ]);
                 onActionRecorded?.();
+                if (andNext && onValidateAndNext) {
+                    onValidateAndNext();
+                }
             } else {
                 showError("Erreur", json.error || "Impossible d'enregistrer l'action");
             }
@@ -1230,22 +1236,41 @@ export function UnifiedActionDrawer({
                                     </div>
                                 )}
 
-                                {/* Submit Button */}
-                                <Button
-                                    type="button"
-                                    variant="primary"
-                                    onClick={handleAddAction}
-                                    disabled={
-                                        newActionSaving ||
-                                        !newActionResult ||
-                                        (["INTERESTED", "CALLBACK_REQUESTED"].includes(newActionResult) && !newActionNote.trim())
-                                    }
-                                    isLoading={newActionSaving}
-                                    className="w-full gap-2"
-                                >
-                                    <Sparkles className="w-4 h-4" />
-                                    Enregistrer l'action
-                                </Button>
+                                {/* Submit Buttons */}
+                                <div className="flex flex-col sm:flex-row gap-2">
+                                    <Button
+                                        type="button"
+                                        variant="primary"
+                                        onClick={() => handleAddAction(false)}
+                                        disabled={
+                                            newActionSaving ||
+                                            !newActionResult ||
+                                            (["INTERESTED", "CALLBACK_REQUESTED"].includes(newActionResult) && !newActionNote.trim())
+                                        }
+                                        isLoading={newActionSaving}
+                                        className={cn("gap-2", onValidateAndNext ? "flex-1" : "w-full")}
+                                    >
+                                        <Sparkles className="w-4 h-4" />
+                                        Enregistrer l'action
+                                    </Button>
+                                    {onValidateAndNext && (
+                                        <Button
+                                            type="button"
+                                            variant="secondary"
+                                            onClick={() => handleAddAction(true)}
+                                            disabled={
+                                                newActionSaving ||
+                                                !newActionResult ||
+                                                (["INTERESTED", "CALLBACK_REQUESTED"].includes(newActionResult) && !newActionNote.trim())
+                                            }
+                                            isLoading={newActionSaving}
+                                            className="gap-2 flex-1"
+                                        >
+                                            <ChevronRight className="w-4 h-4" />
+                                            Valider et suivant
+                                        </Button>
+                                    )}
+                                </div>
                             </div>
                         )}
                     </div>

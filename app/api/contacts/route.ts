@@ -11,19 +11,24 @@ import {
 import { z } from 'zod';
 
 // ============================================
-// SCHEMAS
+// SCHEMAS — only companyId required; empty strings treated as omitted (no "fill all" requirement)
 // ============================================
+
+const emptyStringToUndefined = <T>(v: unknown): T | undefined => (v === "" || v === null ? undefined : v as T);
 
 const createContactSchema = z.object({
     companyId: z.string().min(1, 'Entreprise requise'),
-    firstName: z.string().optional(),
-    lastName: z.string().optional(),
-    title: z.string().optional(),
-    email: z.string().email().optional(),
-    phone: z.string().optional(),
+    firstName: z.preprocess(emptyStringToUndefined, z.string().optional()),
+    lastName: z.preprocess(emptyStringToUndefined, z.string().optional()),
+    title: z.preprocess(emptyStringToUndefined, z.string().optional()),
+    email: z.preprocess(emptyStringToUndefined, z.string().email().optional()),
+    phone: z.preprocess(emptyStringToUndefined, z.string().optional()),
     additionalPhones: z.array(z.string()).optional(),
-    additionalEmails: z.array(z.string().email()).optional(),
-    linkedin: z.string().url().optional(),
+    additionalEmails: z.preprocess(
+        (arr) => (Array.isArray(arr) ? arr.filter((s) => typeof s === "string" && s.trim() !== "") : arr),
+        z.array(z.string().email()).optional()
+    ),
+    linkedin: z.preprocess(emptyStringToUndefined, z.string().url().optional()),
 });
 
 const updateContactSchema = createContactSchema.partial();

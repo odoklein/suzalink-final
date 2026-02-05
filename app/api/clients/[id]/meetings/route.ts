@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import {
     successResponse,
-    errorResponse,
     requireRole,
     withErrorHandler,
     NotFoundError,
+    AuthError,
 } from '@/lib/api-utils';
 
 // ============================================
@@ -17,8 +17,15 @@ export const GET = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER', 'CLIENT']);
+    const session = await requireRole(['MANAGER', 'CLIENT']);
     const { id: clientId } = await params;
+
+    // CLIENT users can only access their own client's meetings
+    if (session.user.role === 'CLIENT') {
+        if (session.user.clientId !== clientId) {
+            throw new AuthError('Accès non autorisé', 403);
+        }
+    }
 
     // Verify client exists
     const client = await prisma.client.findUnique({

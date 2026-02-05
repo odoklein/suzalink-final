@@ -19,21 +19,72 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // Parse form data (supports attachments)
-        const formData = await req.formData();
-        
-        const mailboxId = formData.get('mailboxId') as string;
-        const toJson = formData.get('to') as string;
-        const ccJson = formData.get('cc') as string | null;
-        const bccJson = formData.get('bcc') as string | null;
-        const subject = formData.get('subject') as string;
-        const bodyHtml = formData.get('bodyHtml') as string | null;
-        const bodyText = formData.get('bodyText') as string | null;
-        const threadId = formData.get('threadId') as string | null;
-        const contactId = formData.get('contactId') as string | null;
-        const missionId = formData.get('missionId') as string | null;
-        const sentByIdParam = formData.get('sentById') as string | null;
-        const templateId = formData.get('templateId') as string | null;
+        const contentType = req.headers.get('content-type') || '';
+        let mailboxId: string;
+        let to: { email: string }[];
+        let cc: { email: string }[] = [];
+        let bcc: { email: string }[] = [];
+        let subject: string;
+        let bodyHtml: string | null;
+        let bodyText: string | null = null;
+        let threadId: string | null = null;
+        let contactId: string | null = null;
+        let missionId: string | null = null;
+        let sentByIdParam: string | null = null;
+        let templateId: string | null = null;
+        const attachments: { filename: string; content: Buffer; mimeType: string }[] = [];
+
+        const normalizeRecipients = (arr: unknown): { email: string }[] =>
+            (Array.isArray(arr) ? arr : []).map((t: unknown) =>
+                typeof t === 'string' ? { email: t } : (t as { email: string })
+            );
+
+        if (contentType.includes('application/json')) {
+            // JSON body (e.g. from quick-send internal call) — no attachments
+            const body = await req.json();
+            mailboxId = body.mailboxId;
+            to = normalizeRecipients(body.to);
+            cc = normalizeRecipients(body.cc);
+            bcc = normalizeRecipients(body.bcc);
+            subject = body.subject ?? '';
+            bodyHtml = body.bodyHtml ?? null;
+            bodyText = body.bodyText ?? null;
+            threadId = body.threadId ?? null;
+            contactId = body.contactId ?? null;
+            missionId = body.missionId ?? null;
+            sentByIdParam = body.sentById ?? null;
+            templateId = body.templateId ?? null;
+        } else {
+            // FormData (e.g. from EmailComposer with attachments)
+            const formData = await req.formData();
+            mailboxId = formData.get('mailboxId') as string;
+            const toJson = formData.get('to') as string;
+            const ccJson = formData.get('cc') as string | null;
+            const bccJson = formData.get('bcc') as string | null;
+            subject = formData.get('subject') as string;
+            bodyHtml = formData.get('bodyHtml') as string | null;
+            bodyText = formData.get('bodyText') as string | null;
+            threadId = formData.get('threadId') as string | null;
+            contactId = formData.get('contactId') as string | null;
+            missionId = formData.get('missionId') as string | null;
+            sentByIdParam = formData.get('sentById') as string | null;
+            templateId = formData.get('templateId') as string | null;
+
+            to = toJson ? JSON.parse(toJson) : [];
+            cc = ccJson ? JSON.parse(ccJson) : [];
+            bcc = bccJson ? JSON.parse(bccJson) : [];
+
+            for (const [key, value] of formData.entries()) {
+                if (key.startsWith('attachment_') && value instanceof File) {
+                    const arrayBuffer = await value.arrayBuffer();
+                    attachments.push({
+                        filename: value.name,
+                        content: Buffer.from(arrayBuffer),
+                        mimeType: value.type,
+                    });
+                }
+            }
+        }
 
         if (!mailboxId) {
             return NextResponse.json(
@@ -41,11 +92,6 @@ export async function POST(req: NextRequest) {
                 { status: 400 }
             );
         }
-
-        // Parse recipients
-        const to = toJson ? JSON.parse(toJson) : [];
-        const cc = ccJson ? JSON.parse(ccJson) : [];
-        const bcc = bccJson ? JSON.parse(bccJson) : [];
 
         if (to.length === 0) {
             return NextResponse.json(
@@ -79,19 +125,6 @@ export async function POST(req: NextRequest) {
                 { success: false, error: 'Permission d\'envoi non autorisée' },
                 { status: 403 }
             );
-        }
-
-        // Process attachments
-        const attachments: { filename: string; content: Buffer; mimeType: string }[] = [];
-        for (const [key, value] of formData.entries()) {
-            if (key.startsWith('attachment_') && value instanceof File) {
-                const arrayBuffer = await value.arrayBuffer();
-                attachments.push({
-                    filename: value.name,
-                    content: Buffer.from(arrayBuffer),
-                    mimeType: value.type,
-                });
-            }
         }
 
         // Outreach context: use sentById from request or current user when contact/mission is set

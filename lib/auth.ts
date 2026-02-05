@@ -13,6 +13,7 @@ declare module "next-auth" {
         role: UserRole;
         isActive: boolean;
         clientId?: string | null;
+        clientOnboardingDismissedPermanently?: boolean;
     }
     interface Session {
         user: User;
@@ -25,6 +26,7 @@ declare module "next-auth/jwt" {
         role: UserRole;
         isActive: boolean;
         clientId?: string | null;
+        clientOnboardingDismissedPermanently?: boolean;
     }
 }
 
@@ -70,6 +72,7 @@ export const authOptions: NextAuthOptions = {
                     role: user.role,
                     isActive: user.isActive ?? true, // Default to true for existing users
                     clientId: user.clientId,
+                    clientOnboardingDismissedPermanently: user.clientOnboardingDismissedPermanently ?? false,
                 };
             },
         }),
@@ -81,6 +84,7 @@ export const authOptions: NextAuthOptions = {
                 token.role = user.role;
                 token.isActive = user.isActive;
                 token.clientId = user.clientId;
+                token.clientOnboardingDismissedPermanently = user.clientOnboardingDismissedPermanently ?? false;
             }
             return token;
         },
@@ -90,6 +94,16 @@ export const authOptions: NextAuthOptions = {
                 session.user.role = token.role;
                 session.user.isActive = token.isActive;
                 session.user.clientId = token.clientId;
+                // For CLIENT users, fetch fresh onboarding preference so update() reflects DB changes
+                if (token.role === "CLIENT") {
+                    const u = await prisma.user.findUnique({
+                        where: { id: token.id },
+                        select: { clientOnboardingDismissedPermanently: true },
+                    });
+                    session.user.clientOnboardingDismissedPermanently = u?.clientOnboardingDismissedPermanently ?? false;
+                } else {
+                    session.user.clientOnboardingDismissedPermanently = token.clientOnboardingDismissedPermanently ?? false;
+                }
             }
             return session;
         },
