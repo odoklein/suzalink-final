@@ -19,6 +19,7 @@ import {
     Linkedin,
     ArrowRight,
     Save,
+    RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -183,6 +184,7 @@ export default function SDRMeetingsPage() {
     const [editResult, setEditResult] = useState<MeetingResult>("MEETING_BOOKED");
     const [saving, setSaving] = useState(false);
     const [savingError, setSavingError] = useState<string | null>(null);
+    const [remettreSubmitting, setRemettreSubmitting] = useState(false);
 
     // Sync edit state when modal opens
     useEffect(() => {
@@ -224,6 +226,43 @@ export default function SDRMeetingsPage() {
             setSavingError("Erreur réseau");
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleRemettreEnProspection = async () => {
+        if (!selectedMeeting) return;
+        setRemettreSubmitting(true);
+        setSavingError(null);
+        try {
+            const note = editNote.trim() || "RDV annulé, contact remis en prospection";
+            const res = await fetch(`/api/actions/${selectedMeeting.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ result: "MEETING_CANCELLED", note }),
+            });
+            const json = await res.json();
+            if (!json.success) {
+                setSavingError(json.error || "Erreur");
+                return;
+            }
+            setMeetings((prev) =>
+                prev.map((m) =>
+                    m.id === selectedMeeting.id
+                        ? { ...m, result: "MEETING_CANCELLED" as const, note }
+                        : m
+                )
+            );
+            setSelectedMeeting((prev) =>
+                prev && prev.id === selectedMeeting.id
+                    ? { ...prev, result: "MEETING_CANCELLED", note }
+                    : prev
+            );
+            setEditResult("MEETING_CANCELLED");
+            setEditNote(note);
+        } catch (err) {
+            setSavingError("Erreur réseau");
+        } finally {
+            setRemettreSubmitting(false);
         }
     };
 
@@ -459,7 +498,7 @@ export default function SDRMeetingsPage() {
                             <div className="md:col-span-2 bg-slate-50 rounded-2xl p-5 border border-slate-100 flex flex-col justify-between">
                                 <div className="space-y-4">
                                     <div className="flex items-center justify-between flex-wrap gap-2">
-                                        <p className="text-slate-500 text-sm font-bold uppercase tracking-wide">Contexte</p>
+                                        <p className="text-slate-500 text-sm font-bold uppercase tracking-wide">Statut du RDV</p>
                                         <Select
                                             value={editResult}
                                             onChange={(v) => setEditResult(v as MeetingResult)}
@@ -470,6 +509,28 @@ export default function SDRMeetingsPage() {
                                             className="min-w-[140px] border border-slate-200 rounded-xl bg-white"
                                         />
                                     </div>
+                                    {editResult === "MEETING_CANCELLED" && (
+                                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
+                                            Le contact redevient disponible dans la file de prospection (Actions).
+                                        </p>
+                                    )}
+                                    {editResult === "MEETING_BOOKED" && (
+                                        <Button
+                                            type="button"
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={handleRemettreEnProspection}
+                                            disabled={saving || remettreSubmitting}
+                                            className="mt-3 gap-2 border-amber-200 text-amber-700 hover:bg-amber-50"
+                                        >
+                                            {remettreSubmitting ? (
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                            ) : (
+                                                <RotateCcw className="w-4 h-4" />
+                                            )}
+                                            Remettre en prospection
+                                        </Button>
+                                    )}
                                     <div className="flex flex-wrap gap-2">
                                         {selectedMeeting.mission && (
                                             <div className="px-3 py-1.5 bg-white rounded-lg border border-slate-200 shadow-sm flex items-center gap-2">

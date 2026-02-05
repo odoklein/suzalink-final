@@ -121,6 +121,7 @@ export async function GET(request: Request) {
                             select: {
                                 id: true,
                                 name: true,
+                                channel: true,
                                 client: {
                                     select: {
                                         name: true
@@ -142,6 +143,8 @@ export async function GET(request: Request) {
         // DISQUALIFIED, or another CALLBACK_REQUESTED) to avoid stale callbacks.
         type CallbackItem = {
             id: string;
+            campaignId: string;
+            channel: string;
             createdAt: Date;
             callbackDate: Date | null;
             note: string | null;
@@ -175,6 +178,8 @@ export async function GET(request: Request) {
 
             const item: CallbackItem = {
                 id: action.id,
+                campaignId: action.campaignId,
+                channel: (action.campaign?.mission as { channel?: string })?.channel ?? "CALL",
                 createdAt: action.createdAt,
                 callbackDate: action.callbackDate,
                 note: action.note,

@@ -12,9 +12,14 @@ import {
     CheckCircle2,
     CalendarClock,
     Filter,
+    Calendar,
+    Mail,
+    Sparkles,
+    XCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { formatCallbackDateTime } from "@/lib/utils/parseDateFromNote";
+import { ACTION_RESULT_LABELS, type ActionResult } from "@/lib/types";
 
 // ============================================
 // TYPES
@@ -28,8 +33,10 @@ interface Mission {
 
 interface Callback {
     id: string;
+    campaignId: string;
+    channel: string;
     createdAt: string;
-    callbackDate?: string | null;  // Parsed callback date from note
+    callbackDate?: string | null;
     note?: string;
     contact: {
         id: string;
@@ -69,6 +76,12 @@ export default function SDRCallbacksPage() {
     const [rescheduleCallback, setRescheduleCallback] = useState<Callback | null>(null);
     const [rescheduleDateValue, setRescheduleDateValue] = useState("");
     const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false);
+
+    // Outcome after rappel: record result (RDV, Intéressé, Mail, etc.)
+    const [outcomeCallback, setOutcomeCallback] = useState<Callback | null>(null);
+    const [outcomeResult, setOutcomeResult] = useState<ActionResult | null>(null);
+    const [outcomeNote, setOutcomeNote] = useState("");
+    const [outcomeSubmitting, setOutcomeSubmitting] = useState(false);
 
     // Filters: date range + mission
     const [missions, setMissions] = useState<Mission[]>([]);
@@ -132,6 +145,46 @@ export default function SDRCallbacksPage() {
             console.error("Reschedule failed:", err);
         } finally {
             setRescheduleSubmitting(false);
+        }
+    };
+
+    const openOutcome = (cb: Callback, result: ActionResult, e?: React.MouseEvent) => {
+        if (e) e.stopPropagation();
+        setOutcomeCallback(cb);
+        setOutcomeResult(result);
+        setOutcomeNote("");
+    };
+
+    const submitOutcome = async () => {
+        if (!outcomeCallback || !outcomeResult) return;
+        const noteRequired = outcomeResult === "INTERESTED" || outcomeResult === "CALLBACK_REQUESTED";
+        if (noteRequired && !outcomeNote.trim()) return;
+        setOutcomeSubmitting(true);
+        try {
+            const res = await fetch("/api/actions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contactId: outcomeCallback.contact?.id ?? undefined,
+                    companyId: outcomeCallback.contact ? undefined : outcomeCallback.company?.id,
+                    campaignId: outcomeCallback.campaignId,
+                    channel: outcomeCallback.channel === "EMAIL" ? "EMAIL" : outcomeCallback.channel === "LINKEDIN" ? "LINKEDIN" : "CALL",
+                    result: outcomeResult,
+                    note: outcomeNote.trim() || (outcomeResult === "MEETING_BOOKED" ? "RDV pris suite au rappel" : undefined),
+                    callbackDate: outcomeResult === "CALLBACK_REQUESTED" ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : undefined,
+                }),
+            });
+            const json = await res.json();
+            if (json.success) {
+                setCallbacks((prev) => prev.filter((c) => c.id !== outcomeCallback.id));
+                setOutcomeCallback(null);
+                setOutcomeResult(null);
+                setOutcomeNote("");
+            }
+        } catch (err) {
+            console.error("Outcome failed:", err);
+        } finally {
+            setOutcomeSubmitting(false);
         }
     };
 
@@ -335,7 +388,7 @@ export default function SDRCallbacksPage() {
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-3 pl-4 md:pl-0 border-t md:border-t-0 border-slate-50 pt-4 md:pt-0" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex flex-col gap-3 pl-4 md:pl-0 border-t md:border-t-0 border-slate-50 pt-4 md:pt-0" onClick={(e) => e.stopPropagation()}>
                                     {(callback.contact?.phone || callback.company?.phone) && (
                                         <div className="hidden lg:block text-right mr-2">
                                             <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">Contact</p>
@@ -343,9 +396,59 @@ export default function SDRCallbacksPage() {
                                         </div>
                                     )}
 
-                                    <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Suite à donner</p>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="gap-1.5 border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                            onClick={(e) => openOutcome(callback, "MEETING_BOOKED", e)}
+                                        >
+                                            <Calendar className="w-3.5 h-3.5" />
+                                            RDV pris
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="gap-1.5 border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                                            onClick={(e) => openOutcome(callback, "INTERESTED", e)}
+                                        >
+                                            <Sparkles className="w-3.5 h-3.5" />
+                                            Intéressé
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="gap-1.5 border border-blue-200 text-blue-700 hover:bg-blue-50"
+                                            onClick={(e) => openOutcome(callback, "ENVOIE_MAIL", e)}
+                                        >
+                                            <Mail className="w-3.5 h-3.5" />
+                                            Mail
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="gap-1.5 border border-slate-200 text-slate-600 hover:bg-slate-50"
+                                            onClick={(e) => openOutcome(callback, "NO_RESPONSE", e)}
+                                        >
+                                            <XCircle className="w-3.5 h-3.5" />
+                                            Pas de réponse
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="gap-1.5 border border-red-200 text-red-600 hover:bg-red-50"
+                                            onClick={(e) => openOutcome(callback, "DISQUALIFIED", e)}
+                                        >
+                                            <XCircle className="w-3.5 h-3.5" />
+                                            Disqualifié
+                                        </Button>
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100">
                                         <Button
                                             variant="secondary"
+                                            size="sm"
                                             className="gap-2 border-amber-200 text-amber-700 hover:bg-amber-50"
                                             onClick={(e) => openReschedule(callback, e)}
                                         >
@@ -354,6 +457,7 @@ export default function SDRCallbacksPage() {
                                         </Button>
                                         <Link href="/sdr/action" className="w-full md:w-auto">
                                             <Button
+                                                size="sm"
                                                 className="w-full md:w-auto bg-slate-900 hover:bg-indigo-600 text-white shadow-md hover:shadow-indigo-200 transition-all duration-300 gap-2"
                                             >
                                                 <Phone className="w-4 h-4" />
@@ -381,6 +485,50 @@ export default function SDRCallbacksPage() {
                     onActionRecorded={fetchCallbacks}
                 />
             )}
+
+            {/* Outcome modal (RDV pris, Intéressé, Mail, etc.) */}
+            <Modal
+                isOpen={!!outcomeCallback && !!outcomeResult}
+                onClose={() => { setOutcomeCallback(null); setOutcomeResult(null); setOutcomeNote(""); }}
+                title={outcomeResult ? `Résultat du rappel — ${ACTION_RESULT_LABELS[outcomeResult]}` : ""}
+                description={outcomeCallback ? (outcomeCallback.contact ? `${outcomeCallback.contact.firstName ?? ""} ${outcomeCallback.contact.lastName ?? ""}`.trim() || outcomeCallback.company?.name : outcomeCallback.company?.name) ?? "" : ""}
+                size="sm"
+            >
+                {outcomeCallback && outcomeResult && (
+                    <div className="space-y-4">
+                        {outcomeResult === "INTERESTED" && (
+                            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                                Une note est requise pour &quot;Intéressé&quot;.
+                            </p>
+                        )}
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">{outcomeResult === "INTERESTED" ? "Note *" : "Note (optionnel)"}</label>
+                            <textarea
+                                value={outcomeNote}
+                                onChange={(e) => setOutcomeNote(e.target.value)}
+                                placeholder="Ex: RDV confirmé jeudi 14h, Intéressé par la démo..."
+                                rows={3}
+                                maxLength={500}
+                                className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                            />
+                            <p className="text-xs text-slate-400 mt-1 text-right">{outcomeNote.length}/500</p>
+                        </div>
+                        <ModalFooter>
+                            <Button variant="ghost" onClick={() => { setOutcomeCallback(null); setOutcomeResult(null); setOutcomeNote(""); }}>
+                                Annuler
+                            </Button>
+                            <Button
+                                variant="primary"
+                                onClick={submitOutcome}
+                                disabled={outcomeSubmitting || (outcomeResult === "INTERESTED" && !outcomeNote.trim())}
+                                isLoading={outcomeSubmitting}
+                            >
+                                Enregistrer
+                            </Button>
+                        </ModalFooter>
+                    </div>
+                )}
+            </Modal>
 
             {/* Reschedule modal */}
             <Modal

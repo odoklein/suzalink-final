@@ -166,14 +166,14 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                     WHEN COALESCE(lac.result, lac2.result) = 'CALLBACK_REQUESTED' THEN 1
                     WHEN COALESCE(lac.result, lac2.result) = 'INTERESTED' THEN 2
                     WHEN COALESCE(lac.result, lac2.result) IS NULL THEN 3
-                    WHEN COALESCE(lac.result, lac2.result) = 'NO_RESPONSE' THEN 4
+                    WHEN COALESCE(lac.result, lac2.result) IN ('NO_RESPONSE', 'MEETING_CANCELLED') THEN 4
                     ELSE 5
                 END as priority,
                 CASE
                     WHEN COALESCE(lac.result, lac2.result) = 'CALLBACK_REQUESTED' THEN 'CALLBACK'
                     WHEN COALESCE(lac.result, lac2.result) = 'INTERESTED' THEN 'FOLLOW_UP'
                     WHEN COALESCE(lac.result, lac2.result) IS NULL THEN 'NEW'
-                    WHEN COALESCE(lac.result, lac2.result) = 'NO_RESPONSE' THEN 'RETRY'
+                    WHEN COALESCE(lac.result, lac2.result) IN ('NO_RESPONSE', 'MEETING_CANCELLED') THEN 'RETRY'
                     WHEN COALESCE(lac.result, lac2.result) IN ('MEETING_BOOKED', 'ENVOIE_MAIL', 'DISQUALIFIED', 'BAD_CONTACT') THEN 'SKIP'
                     ELSE 'SKIP'
                 END as priority_label
