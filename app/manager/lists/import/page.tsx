@@ -64,6 +64,25 @@ const CONTACT_FIELDS = [
 
 const ALL_FIELDS = [...COMPANY_FIELDS, ...CONTACT_FIELDS];
 
+// Count lines in file by streaming (avoids loading full file; used for progress %)
+async function countFileLines(file: File): Promise<number> {
+    const stream = file.stream();
+    const reader = stream.getReader();
+    const dec = new TextDecoder();
+    let count = 0;
+    let buffer = "";
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += dec.decode(value, { stream: true });
+        const parts = buffer.split(/\r?\n/);
+        buffer = parts.pop() ?? "";
+        count += parts.length;
+    }
+    if (buffer.trim()) count++;
+    return Math.max(0, count - 1);
+}
+
 // ============================================
 // CSV IMPORT PAGE
 // ============================================
@@ -104,6 +123,8 @@ export default function ImportListPage() {
         contacts: number;
         errors: number;
     } | null>(null);
+
+    const [importProgress, setImportProgress] = useState<number | null>(null);
 
     // ============================================
     // FETCH MISSIONS
@@ -352,69 +373,80 @@ export default function ImportListPage() {
         if (!file) return;
 
         setIsImporting(true);
+        setImportProgress(0);
 
         try {
-            // Read the entire CSV file
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                const text = e.target?.result as string;
-                const lines = text.split('\n').filter(line => line.trim());
+            const totalRows = await countFileLines(file);
+            const formData = new FormData();
+            formData.append("file", file);
+            formData.append("missionId", missionId);
+            formData.append("listName", listName);
+            formData.append("mappings", JSON.stringify(mappings));
+            formData.append("importType", importType);
+            if (totalRows > 0) formData.append("totalRows", String(totalRows));
 
-                // FIXED: Detect delimiter first, then parse headers properly
-                const delimiter = detectDelimiter(lines[0]);
-                const headers = parseCSVLine(lines[0], delimiter).map(h => h.replace(/^"|"$/g, ''));
+            const res = await fetch("/api/lists/import", {
+                method: "POST",
+                body: formData,
+            });
 
-                // Parse all data rows with advanced parsing
-                const csvData = lines.slice(1).map(line => {
-                    const values = parseCSVLine(line, delimiter).map(v => v.replace(/^"|"$/g, ''));
-                    const row: Record<string, string> = {};
-                    headers.forEach((header, i) => {
-                        row[header] = values[i] || "";
-                    });
-                    return row;
-                });
+            if (!res.ok || !res.body) {
+                const json = await res.json().catch(() => ({}));
+                showError("Erreur", (json as { error?: string }).error || "L'import a échoué");
+                return;
+            }
 
-                // Send to API
-                const res = await fetch('/api/lists/import', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        missionId,
-                        listName,
-                        mappings,
-                        csvData,
-                        importType, // Pass import type to API
-                    }),
-                });
+            const reader = res.body.getReader();
+            const dec = new TextDecoder();
+            let buffer = "";
+            let doneData: { companiesCreated: number; contactsCreated: number; errors: number } | null = null;
+            let errorMsg: string | null = null;
 
-                const json = await res.json();
-
-                if (json.success) {
-                    setImportResult({
-                        companies: json.data.companiesCreated,
-                        contacts: json.data.contactsCreated,
-                        errors: json.data.errors,
-                    });
-
-                    setStep(5);
-                    success("Import réussi", `${json.data.companiesCreated} sociétés et ${json.data.contactsCreated} contacts importés`);
-                } else {
-                    showError("Erreur", json.error || "L'import a échoué");
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += dec.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() ?? "";
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed) continue;
+                    try {
+                        const msg = JSON.parse(trimmed) as {
+                            type: string;
+                            percent?: number;
+                            data?: { companiesCreated: number; contactsCreated: number; errors: number };
+                            error?: string;
+                        };
+                        if (msg.type === "progress" && msg.percent != null) setImportProgress(msg.percent);
+                        if (msg.type === "done" && msg.data) doneData = msg.data;
+                        if (msg.type === "error" && msg.error) errorMsg = msg.error;
+                    } catch {
+                        // ignore malformed lines
+                    }
                 }
+            }
 
-                setIsImporting(false);
-            };
-
-            reader.onerror = () => {
-                showError("Erreur", "Impossible de lire le fichier");
-                setIsImporting(false);
-            };
-
-            reader.readAsText(file);
+            if (errorMsg) {
+                showError("Erreur", errorMsg);
+            } else if (doneData) {
+                setImportProgress(100);
+                setImportResult({
+                    companies: doneData.companiesCreated,
+                    contacts: doneData.contactsCreated,
+                    errors: doneData.errors,
+                });
+                setStep(5);
+                success("Import réussi", `${doneData.companiesCreated} sociétés et ${doneData.contactsCreated} contacts importés`);
+            } else {
+                showError("Erreur", "Réponse invalide");
+            }
         } catch (err) {
             console.error("Import failed:", err);
             showError("Erreur", "L'import a échoué");
+        } finally {
             setIsImporting(false);
+            setImportProgress(null);
         }
     };
 
@@ -754,29 +786,39 @@ export default function ImportListPage() {
                             </ul>
                         </div>
 
-                        <div className="flex justify-between">
-                            <Button variant="ghost" onClick={() => setStep(3)} className="gap-2">
-                                <ArrowLeft className="w-4 h-4" />
-                                Retour
-                            </Button>
-                            <Button
-                                variant="success"
-                                onClick={handleImport}
-                                disabled={isImporting}
-                                className="gap-2"
-                            >
-                                {isImporting ? (
-                                    <>
-                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                        Import en cours...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Upload className="w-4 h-4" />
-                                        Lancer l&apos;import
-                                    </>
-                                )}
-                            </Button>
+                        <div className="flex flex-col gap-3">
+                            {isImporting && importProgress != null && (
+                                <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
+                                    <div
+                                        className="h-full bg-emerald-500 transition-all duration-300"
+                                        style={{ width: `${importProgress}%` }}
+                                    />
+                                </div>
+                            )}
+                            <div className="flex justify-between">
+                                <Button variant="ghost" onClick={() => setStep(3)} className="gap-2" disabled={isImporting}>
+                                    <ArrowLeft className="w-4 h-4" />
+                                    Retour
+                                </Button>
+                                <Button
+                                    variant="success"
+                                    onClick={handleImport}
+                                    disabled={isImporting}
+                                    className="gap-2"
+                                >
+                                    {isImporting ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                            {importProgress != null ? `Import… ${importProgress}%` : "Import en cours…"}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Upload className="w-4 h-4" />
+                                            Lancer l&apos;import
+                                        </>
+                                    )}
+                                </Button>
+                            </div>
                         </div>
                     </div>
                 </Card>

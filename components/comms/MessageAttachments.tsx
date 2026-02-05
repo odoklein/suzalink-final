@@ -1,10 +1,10 @@
 "use client";
 
 // ============================================
-// MessageAttachments – drag-and-drop file list for composer
+// MessageAttachments – icon by default; expand on click or drag (Slack/Linear style)
 // ============================================
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { cn } from "@/lib/utils";
 import { Paperclip, X, FileText, Image } from "lucide-react";
@@ -37,10 +37,13 @@ export function MessageAttachments({
     disabled,
     className,
 }: MessageAttachmentsProps) {
+    const [expanded, setExpanded] = useState(false);
+
     const onDrop = useCallback(
         (accepted: File[]) => {
             const next = [...files, ...accepted].slice(0, MAX_FILES);
             onChange(next);
+            if (next.length > 0) setExpanded(true);
         },
         [files, onChange]
     );
@@ -51,7 +54,8 @@ export function MessageAttachments({
         maxSize: MAX_SIZE,
         maxFiles: MAX_FILES - files.length,
         accept: ACCEPT,
-        noClick: files.length >= MAX_FILES,
+        noClick: false,
+        onDragEnter: () => setExpanded(true),
     });
 
     const remove = (index: number) => {
@@ -60,6 +64,8 @@ export function MessageAttachments({
     };
 
     const isImage = (f: File) => f.type.startsWith("image/");
+
+    const showDropZone = expanded || files.length > 0 || isDragActive;
 
     return (
         <div className={cn("space-y-2", className)}>
@@ -96,24 +102,52 @@ export function MessageAttachments({
                 </div>
             )}
             {files.length < MAX_FILES && (
-                <div
-                    {...getRootProps()}
-                    className={cn(
-                        "flex items-center gap-2 rounded-xl border border-dashed px-3 py-2 text-sm cursor-pointer transition-colors",
-                        isDragActive
-                            ? "border-indigo-400 bg-indigo-50"
-                            : "border-slate-200 hover:border-slate-300 hover:bg-slate-50",
-                        disabled && "opacity-50 pointer-events-none"
+                <>
+                    {showDropZone ? (
+                        <div
+                            {...getRootProps()}
+                            className={cn(
+                                "flex items-center gap-2 rounded-xl border border-dashed px-3 py-2 text-sm cursor-pointer transition-colors",
+                                isDragActive
+                                    ? "border-indigo-400 bg-indigo-50 dark:bg-indigo-900/20"
+                                    : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800/50",
+                                disabled && "opacity-50 pointer-events-none"
+                            )}
+                        >
+                            <input {...getInputProps()} />
+                            <Paperclip className="h-4 w-4 text-slate-400 shrink-0" />
+                            <span className="text-slate-500 dark:text-slate-400">
+                                {isDragActive
+                                    ? "Déposer les fichiers…"
+                                    : "Glisser des fichiers ou cliquer (max 5, 15 Mo)"}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpanded(false);
+                                }}
+                                className="ml-auto p-1 text-slate-400 hover:text-slate-600 rounded"
+                                aria-label="Réduire"
+                            >
+                                <X className="h-3.5 w-3.5" />
+                            </button>
+                        </div>
+                    ) : (
+                        <div
+                            {...getRootProps()}
+                            className={cn(
+                                "inline-flex items-center justify-center w-9 h-9 rounded-lg cursor-pointer transition-colors",
+                                "text-slate-400 hover:text-indigo-600 hover:bg-indigo-500/10",
+                                disabled && "opacity-50 pointer-events-none"
+                            )}
+                            title="Joindre des fichiers (max 5, 15 Mo)"
+                        >
+                            <input {...getInputProps()} />
+                            <Paperclip className="h-4 w-4" />
+                        </div>
                     )}
-                >
-                    <input {...getInputProps()} />
-                    <Paperclip className="h-4 w-4 text-slate-400" />
-                    <span className="text-slate-500">
-                        {isDragActive
-                            ? "Déposer les fichiers…"
-                            : "Glisser des fichiers ou cliquer (max 5, 15 Mo)"}
-                    </span>
-                </div>
+                </>
             )}
         </div>
     );

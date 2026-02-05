@@ -183,6 +183,7 @@ export default function SDRActionPage() {
     const [viewType, setViewType] = useState<"all" | "companies" | "contacts">("all");
     const [activeTab, setActiveTab] = useState<string>("intro");
     const [showBookingModal, setShowBookingModal] = useState(false);
+    const [isImprovingNote, setIsImprovingNote] = useState(false);
 
     // View mode: card (current) vs table
     const [viewMode, setViewMode] = useState<"card" | "table">("card");
@@ -680,6 +681,31 @@ export default function SDRActionPage() {
             setError("Erreur de connexion");
         } finally {
             setIsSubmitting(false);
+        }
+    };
+
+    // Improve note with Mistral (orthography + rephrase)
+    const handleImproveNote = async () => {
+        const trimmed = note.trim();
+        if (!trimmed) return;
+        setIsImprovingNote(true);
+        setError(null);
+        try {
+            const res = await fetch("/api/ai/mistral/note-improve", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: trimmed }),
+            });
+            const json = await res.json();
+            if (json.success && json.data?.improvedText) {
+                setNote(json.data.improvedText);
+            } else {
+                setError(json.error || "Impossible d'améliorer la note");
+            }
+        } catch {
+            setError("Erreur de connexion à l'IA");
+        } finally {
+            setIsImprovingNote(false);
         }
     };
 
@@ -1659,7 +1685,24 @@ export default function SDRActionPage() {
                                 <p className="text-xs text-slate-500">Ajoutez des informations sur l'échange</p>
                             </div>
                         </div>
-                        <span className="text-xs text-slate-400 font-medium">{note.length}/500</span>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleImproveNote}
+                                disabled={!note.trim() || isImprovingNote}
+                                className="gap-1.5 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 border border-indigo-200/60"
+                            >
+                                {isImprovingNote ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                )}
+                                {isImprovingNote ? "En cours..." : "Améliorer avec l'IA"}
+                            </Button>
+                            <span className="text-xs text-slate-400 font-medium">{note.length}/500</span>
+                        </div>
                     </div>
                 </div>
                 <div className="p-5">

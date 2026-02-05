@@ -124,6 +124,7 @@ export function UnifiedActionDrawer({
     const [newActionNote, setNewActionNote] = useState("");
     const [newActionSaving, setNewActionSaving] = useState(false);
     const [newCallbackDateValue, setNewCallbackDateValue] = useState("");
+    const [isImprovingNote, setIsImprovingNote] = useState(false);
 
     const [showBookingModal, setShowBookingModal] = useState(false);
 
@@ -239,6 +240,30 @@ export function UnifiedActionDrawer({
     const copyToClipboard = (text: string, label: string) => {
         navigator.clipboard.writeText(text);
         success("Copié", `${label} copié dans le presse-papier`);
+    };
+
+    // Improve note with Mistral (orthography + rephrase)
+    const handleImproveNote = async () => {
+        const trimmed = newActionNote.trim();
+        if (!trimmed) return;
+        setIsImprovingNote(true);
+        try {
+            const res = await fetch("/api/ai/mistral/note-improve", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: trimmed }),
+            });
+            const json = await res.json();
+            if (json.success && json.data?.improvedText) {
+                setNewActionNote(json.data.improvedText);
+            } else {
+                showError("Erreur", json.error || "Impossible d'améliorer la note");
+            }
+        } catch {
+            showError("Erreur", "Connexion à l'IA impossible");
+        } finally {
+            setIsImprovingNote(false);
+        }
     };
 
     // Record action
@@ -988,7 +1013,24 @@ export function UnifiedActionDrawer({
                                         maxLength={500}
                                         className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
                                     />
-                                    <p className="text-xs text-slate-400 mt-1 text-right">{newActionNote.length}/500</p>
+                                    <div className="flex items-center justify-between mt-1 gap-2">
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={handleImproveNote}
+                                            disabled={!newActionNote.trim() || isImprovingNote}
+                                            className="gap-1.5 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 border border-indigo-200/60 h-7 text-xs"
+                                        >
+                                            {isImprovingNote ? (
+                                                <Loader2 className="w-3 h-3 animate-spin" />
+                                            ) : (
+                                                <Sparkles className="w-3 h-3" />
+                                            )}
+                                            {isImprovingNote ? "En cours..." : "Améliorer avec l'IA"}
+                                        </Button>
+                                        <p className="text-xs text-slate-400">{newActionNote.length}/500</p>
+                                    </div>
                                 </div>
 
                                 {/* MEETING_BOOKED: show calendar button when client has booking URL */}

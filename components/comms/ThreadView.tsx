@@ -20,6 +20,8 @@ import {
     Calendar,
     UserPlus,
     CheckCheck,
+    Maximize2,
+    Minimize2,
 } from "lucide-react";
 import { RichTextEditor } from "./RichTextEditor";
 import { MessageContent } from "./MessageContent";
@@ -41,6 +43,9 @@ interface ThreadViewProps {
     onReactionToggle?: (messageId: string, emoji: string) => Promise<void>;
     currentUserId: string;
     typingUserName?: string;
+    /** When true, parent should hide page header/stats and collapse list for near full-screen chat */
+    focusMode?: boolean;
+    onFocusModeChange?: (active: boolean) => void;
 }
 
 export function ThreadView({
@@ -51,6 +56,8 @@ export function ThreadView({
     onReactionToggle,
     currentUserId,
     typingUserName,
+    focusMode,
+    onFocusModeChange,
 }: ThreadViewProps) {
     const [messageContent, setMessageContent] = useState("");
     const [mentionIds, setMentionIds] = useState<string[]>([]);
@@ -156,47 +163,49 @@ export function ThreadView({
 
     return (
         <div className="flex flex-col h-full bg-white dark:bg-[#151c2a]">
-            {/* Sticky Header - Sales Inbox style */}
-            <header className="h-16 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-6 bg-white/80 dark:bg-[#151c2a]/90 backdrop-blur-sm z-10 shrink-0">
-                <div className="flex items-center gap-4">
-                    <div className="size-10 rounded-full bg-gradient-to-br from-indigo-100 to-indigo-200 dark:from-indigo-900/50 dark:to-indigo-800/50 flex items-center justify-center text-sm font-semibold text-indigo-600 dark:text-indigo-400 shrink-0">
+            {/* Compact chat header: Title, online, call, ⋯ menu, close */}
+            <header className="h-12 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 bg-white/80 dark:bg-[#151c2a]/90 backdrop-blur-sm z-10 shrink-0">
+                <div className="flex items-center gap-3 min-w-0">
+                    <div className="size-8 rounded-full bg-gradient-to-br from-indigo-100 to-indigo-200 dark:from-indigo-900/50 dark:to-indigo-800/50 flex items-center justify-center text-xs font-semibold text-indigo-600 dark:text-indigo-400 shrink-0">
                         {threadTitle.charAt(0).toUpperCase()}
                     </div>
-                    <div>
+                    <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                            <h3 className="font-semibold text-slate-900 dark:text-white">{threadTitle}</h3>
+                            <h3 className="font-semibold text-slate-900 dark:text-white truncate text-sm">{threadTitle}</h3>
                             {thread.status === "OPEN" && (
-                                <span className="size-1.5 rounded-full bg-emerald-500" />
+                                <span className="size-1.5 rounded-full bg-emerald-500 shrink-0" title="En ligne" />
                             )}
                         </div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">
-                            {isDirectMessage
-                                ? "Message direct"
-                                : `${thread.participantCount} participant${thread.participantCount > 1 ? "s" : ""} · ${thread.channelName}`}
-                        </p>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-0.5 shrink-0">
+                    {onFocusModeChange && (
+                        <button
+                            onClick={() => onFocusModeChange(!focusMode)}
+                            className={cn(
+                                "p-2 rounded-lg transition-colors",
+                                focusMode
+                                    ? "text-indigo-600 bg-indigo-500/10"
+                                    : "text-slate-500 hover:text-indigo-600 hover:bg-indigo-500/5"
+                            )}
+                            title={focusMode ? "Quitter le mode focus" : "Mode focus (plein écran chat)"}
+                        >
+                            {focusMode ? (
+                                <Minimize2 className="w-4 h-4" />
+                            ) : (
+                                <Maximize2 className="w-4 h-4" />
+                            )}
+                        </button>
+                    )}
                     <button
                         className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-500/5 rounded-lg transition-colors"
                         title="Appeler"
                     >
                         <Phone className="w-4 h-4" />
                     </button>
-                    <button
-                        className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-500/5 rounded-lg transition-colors"
-                        title="Planifier un RDV"
-                    >
-                        <Calendar className="w-4 h-4" />
-                    </button>
-                    <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 mx-1" />
-                    <button className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-300 transition-colors">
-                        <UserPlus className="w-4 h-4" />
-                        Assigner
-                    </button>
 
-                    {/* Actions menu */}
+                    {/* ⋯ menu: Calendar, Assigner, Resolve/Archive, Close */}
                     <div className="relative">
                         <button
                             onClick={() => setShowMenu(!showMenu)}
@@ -206,6 +215,7 @@ export function ThreadView({
                                     ? "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
                                     : "text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
                             )}
+                            title="Plus d'actions"
                         >
                             <MoreVertical className="w-4 h-4" />
                         </button>
@@ -216,15 +226,27 @@ export function ThreadView({
                                     className="fixed inset-0 z-10"
                                     onClick={() => setShowMenu(false)}
                                 />
-                                <div className="absolute right-0 top-full mt-2 w-52 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 py-2 z-20 animate-in fade-in slide-in-from-top-2 duration-200">
+                                <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 py-2 z-20 animate-in fade-in slide-in-from-top-2 duration-200">
+                                    <button
+                                        className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                                        title="Planifier un RDV"
+                                    >
+                                        <Calendar className="w-4 h-4 text-slate-400" />
+                                        <span>Planifier un RDV</span>
+                                    </button>
+                                    <button className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                                        <UserPlus className="w-4 h-4 text-slate-400" />
+                                        <span>Assigner</span>
+                                    </button>
                                     {thread.status === "OPEN" && (
                                         <>
+                                            <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
                                             <button
                                                 onClick={() => {
                                                     onStatusChange("RESOLVED");
                                                     setShowMenu(false);
                                                 }}
-                                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
                                             >
                                                 <CheckCircle className="w-4 h-4 text-emerald-500" />
                                                 <span>Marquer comme résolu</span>
@@ -234,7 +256,7 @@ export function ThreadView({
                                                     onStatusChange("ARCHIVED");
                                                     setShowMenu(false);
                                                 }}
-                                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
                                             >
                                                 <Archive className="w-4 h-4 text-slate-400" />
                                                 <span>Archiver</span>
@@ -242,16 +264,19 @@ export function ThreadView({
                                         </>
                                     )}
                                     {thread.status === "RESOLVED" && (
-                                        <button
-                                            onClick={() => {
-                                                onStatusChange("ARCHIVED");
-                                                setShowMenu(false);
-                                            }}
-                                            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                                        >
-                                            <Archive className="w-4 h-4 text-slate-400" />
-                                            <span>Archiver</span>
-                                        </button>
+                                        <>
+                                            <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
+                                            <button
+                                                onClick={() => {
+                                                    onStatusChange("ARCHIVED");
+                                                    setShowMenu(false);
+                                                }}
+                                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                                            >
+                                                <Archive className="w-4 h-4 text-slate-400" />
+                                                <span>Archiver</span>
+                                            </button>
+                                        </>
                                     )}
                                 </div>
                             </>
@@ -261,15 +286,16 @@ export function ThreadView({
                     <button
                         onClick={onClose}
                         className="p-2 text-slate-500 hover:text-slate-800 dark:hover:text-white rounded-lg transition-colors"
+                        title="Fermer"
                     >
                         <X className="w-4 h-4" />
                     </button>
                 </div>
             </header>
 
-            {/* Typing indicator - below header */}
+            {/* Typing indicator - compact */}
             {typingUserName && (
-                <div className="flex items-center gap-2 px-6 py-2 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800">
                     <div className="flex gap-0.5">
                         <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
                         <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
@@ -286,12 +312,12 @@ export function ThreadView({
                 <ThreadSummary threadId={thread.id} />
             )}
 
-            {/* Messages - inspo: bg-background-light for message area */}
-            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6 bg-slate-50 dark:bg-slate-900/50">
-                {/* Date separator for first message - inspo style */}
+            {/* Messages - edge-to-edge height, denser spacing */}
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-1 bg-slate-50 dark:bg-slate-900/50">
+                {/* Date separator for first message */}
                 {thread.messages.length > 0 && (
-                    <div className="flex justify-center">
-                        <span className="text-xs font-medium text-slate-400 bg-slate-200 dark:bg-slate-800 px-3 py-1 rounded-full">
+                    <div className="flex justify-center py-2">
+                        <span className="text-xs font-medium text-slate-400 bg-slate-200 dark:bg-slate-800 px-2.5 py-0.5 rounded-full">
                             {format(new Date(thread.messages[0].createdAt), "EEEE d MMMM", { locale: fr })}
                         </span>
                     </div>
@@ -299,12 +325,9 @@ export function ThreadView({
 
                 {thread.messages.map((message, index) => {
                     const isOwn = message.author.id === currentUserId;
-                    const showAvatar =
-                        index === 0 ||
-                        thread.messages[index - 1].author.id !== message.author.id;
-
-                    // Check if we need a date separator
                     const prevMessage = index > 0 ? thread.messages[index - 1] : null;
+                    const sameAuthor = !!(prevMessage && prevMessage.author.id === message.author.id);
+                    const showAvatar = !sameAuthor;
                     const currentDate = new Date(message.createdAt).toDateString();
                     const prevDate = prevMessage ? new Date(prevMessage.createdAt).toDateString() : null;
                     const showDateSeparator = prevDate && currentDate !== prevDate;
@@ -312,8 +335,8 @@ export function ThreadView({
                     return (
                         <div key={message.id}>
                             {showDateSeparator && (
-                                <div className="flex justify-center my-6">
-                                    <span className="text-xs font-medium text-slate-400 bg-slate-200 dark:bg-slate-800 px-3 py-1 rounded-full">
+                                <div className="flex justify-center py-3">
+                                    <span className="text-xs font-medium text-slate-400 bg-slate-200 dark:bg-slate-800 px-2.5 py-0.5 rounded-full">
                                         {format(new Date(message.createdAt), "EEEE d MMMM", { locale: fr })}
                                     </span>
                                 </div>
@@ -322,6 +345,7 @@ export function ThreadView({
                                 message={message}
                                 isOwn={isOwn}
                                 showAvatar={showAvatar}
+                                sameAuthor={sameAuthor}
                                 currentUserId={currentUserId}
                                 onReactionToggle={onReactionToggle}
                             />
@@ -331,10 +355,10 @@ export function ThreadView({
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Composer - inspo: toolbar, chips, visibility, keyboard hint */}
+            {/* Composer - compact */}
             {thread.status === "OPEN" && !thread.isBroadcast && (
-                <div className="p-6 bg-white dark:bg-[#151c2a] border-t border-slate-200 dark:border-slate-800">
-                    <div className="max-w-4xl mx-auto flex flex-col gap-3">
+                <div className="p-4 bg-white dark:bg-[#151c2a] border-t border-slate-200 dark:border-slate-800 shrink-0">
+                    <div className="max-w-4xl mx-auto flex flex-col gap-2">
                         {/* Quick suggestion chips */}
                         {!messageContent && thread.messages.length > 0 && (
                             <div className="flex gap-2 mb-1">
@@ -372,8 +396,8 @@ export function ThreadView({
                                 minRows={2}
                                 maxRows={6}
                             />
-                            <div className="flex justify-between items-center px-4 pb-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-                                <div className="flex items-center gap-2 text-xs text-slate-400">
+                            <div className="flex justify-between items-center px-3 pb-2 pt-1.5 border-t border-slate-100 dark:border-slate-800">
+                                <div className="flex items-center gap-2 text-[11px] text-slate-400">
                                     <span>Visible par : Tous les participants</span>
                                 </div>
                                 <div className="flex gap-2">
@@ -421,25 +445,27 @@ export function ThreadView({
     );
 }
 
-// Message bubble component
+// Message bubble component - denser: less padding, tighter same-author spacing
 function MessageBubble({
     message,
     isOwn,
     showAvatar,
+    sameAuthor,
     currentUserId,
     onReactionToggle,
 }: {
     message: CommsMessageView;
     isOwn: boolean;
     showAvatar: boolean;
+    sameAuthor: boolean;
     currentUserId: string;
     onReactionToggle?: (messageId: string, emoji: string) => Promise<void>;
 }) {
     // System messages
     if (message.type === "SYSTEM") {
         return (
-            <div className="flex justify-center my-4">
-                <span className="text-xs text-slate-500 bg-slate-100 px-4 py-1.5 rounded-full font-medium">
+            <div className="flex justify-center py-2">
+                <span className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full font-medium">
                     {message.content}
                 </span>
             </div>
@@ -451,15 +477,16 @@ function MessageBubble({
     return (
         <div
             className={cn(
-                "flex gap-4 group",
+                "flex gap-2.5 group",
+                sameAuthor && (isOwn ? "mt-0.5" : "mt-0.5"),
                 isOwn ? "flex-row-reverse" : "flex-row"
             )}
         >
-            {/* Avatar - inspo: size-8, circular */}
+            {/* Avatar once per block */}
             {showAvatar ? (
                 <div
                     className={cn(
-                        "size-8 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 mt-1",
+                        "size-7 rounded-full flex items-center justify-center text-[10px] font-semibold flex-shrink-0 mt-0.5",
                         isOwn
                             ? "bg-gradient-to-br from-indigo-500 to-indigo-600 text-white"
                             : "bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-600 text-slate-600 dark:text-slate-300"
@@ -468,26 +495,26 @@ function MessageBubble({
                     {message.author.initials}
                 </div>
             ) : (
-                <div className="size-8 flex-shrink-0" />
+                <div className="size-7 flex-shrink-0 w-[26px]" />
             )}
 
-            {/* Content - inspo: chat bubbles with cut corner */}
-            <div className={cn("flex flex-col gap-1 max-w-[75%]", isOwn && "items-end")}>
+            {/* Content - reduced padding, name only when showAvatar */}
+            <div className={cn("flex flex-col gap-0.5 max-w-[75%]", isOwn && "items-end")}>
                 {showAvatar && (
                     <div
                         className={cn(
-                            "flex items-baseline gap-2 px-1",
+                            "flex items-baseline gap-1.5 px-0.5",
                             isOwn && "flex-row-reverse"
                         )}
                     >
-                        <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                        <span className="text-xs font-semibold text-slate-900 dark:text-white">
                             {isOwn ? "Vous" : message.author.name}
                         </span>
-                        <span className="text-xs text-slate-400 flex items-center gap-1">
+                        <span className="text-[11px] text-slate-400 flex items-center gap-0.5">
                             {format(new Date(message.createdAt), "HH:mm", { locale: fr })}
                             {(message as { isOptimistic?: boolean }).isOptimistic && (
-                                <span className="flex items-center gap-1 text-indigo-500">
-                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                <span className="flex items-center gap-0.5 text-indigo-500">
+                                    <Loader2 className="w-2.5 h-2.5 animate-spin" />
                                     Envoi…
                                 </span>
                             )}
@@ -496,11 +523,11 @@ function MessageBubble({
                 )}
                 <div
                     className={cn(
-                        "p-4 text-sm leading-relaxed shadow-sm",
+                        "px-3 py-2 text-sm leading-snug shadow-sm",
                         (message as { isOptimistic?: boolean }).isOptimistic && "opacity-90",
                         isOwn
-                            ? "bg-indigo-500 text-white rounded-2xl rounded-tr-none"
-                            : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 rounded-2xl rounded-tl-none"
+                            ? "bg-indigo-500 text-white rounded-xl rounded-tr-sm"
+                            : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 rounded-xl rounded-tl-sm"
                     )}
                 >
                     <MessageContent
@@ -540,7 +567,7 @@ function MessageBubble({
 
                 {/* Attachments */}
                 {message.attachments.length > 0 && (
-                    <div className="mt-2 space-y-1.5">
+                    <div className="mt-1.5 space-y-1">
                         {message.attachments.map((att) => (
                             <a
                                 key={att.id}
@@ -567,4 +594,3 @@ function MessageBubble({
 
 const MemoizedThreadView = memo(ThreadView);
 export default MemoizedThreadView;
-export { ThreadView };

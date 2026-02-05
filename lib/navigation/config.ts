@@ -87,6 +87,12 @@ export const MANAGER_NAV: NavSection[] = [
         permission: "pages.email",
       },
       {
+        href: "/manager/comms",
+        icon: MessageSquare,
+        label: "Messages",
+        permission: "pages.comms",
+      },
+      {
         href: "/manager/planning",
         icon: Calendar,
         label: "Planning",

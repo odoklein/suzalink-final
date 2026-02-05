@@ -29,6 +29,7 @@ import {
     AlertCircle,
 } from "lucide-react";
 import { Button, Input } from "@/components/ui";
+import { CommsPageHeader } from "@/components/comms/CommsPageHeader";
 import { ThreadList } from "@/components/comms/ThreadList";
 import { ThreadView } from "@/components/comms/ThreadView";
 import { NewThreadModal } from "@/components/comms/NewThreadModal";
@@ -188,6 +189,7 @@ export default function SDRCommsPage() {
     const [showNewThreadModal, setShowNewThreadModal] = useState(false);
     const [showSearchPanel, setShowSearchPanel] = useState(false);
     const [isListCollapsed, setIsListCollapsed] = useState(false);
+    const [focusMode, setFocusMode] = useState(false);
 
     // Filters
     const [filters, setFilters] = useState<CommsInboxFilters>({});
@@ -494,52 +496,49 @@ export default function SDRCommsPage() {
     };
 
     return (
-        <div className="space-y-6 pb-10">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/25">
-                            <MessageSquare className="w-6 h-6 text-white" />
-                        </div>
-                        <div>
-                            <h1 className="text-2xl font-bold text-slate-900">Communications</h1>
-                            <p className="text-sm text-slate-500">
-                                Discussions avec l'équipe et les missions
-                            </p>
-                        </div>
-                    </div>
-                </div>
-                <div className="flex items-center gap-3">
-                    <button
-                        onClick={() => fetchThreads(true)}
-                        disabled={isRefreshing}
-                        className={cn(
-                            "p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors disabled:opacity-50"
-                        )}
-                        title="Actualiser"
-                    >
-                        <RefreshCw className={cn("w-4 h-4 text-slate-500", isRefreshing && "animate-spin")} />
-                    </button>
-                    <button
-                        onClick={() => setShowSearchPanel(true)}
-                        className="p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
-                        title="Recherche avancée"
-                    >
-                        <Search className="w-4 h-4 text-slate-500" />
-                    </button>
-                    <Button
-                        onClick={() => setShowNewThreadModal(true)}
-                        className="h-10 px-5 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-medium shadow-lg shadow-indigo-500/25"
-                    >
-                        <Plus className="w-4 h-4 mr-2" />
-                        Nouveau message
-                    </Button>
-                </div>
+        <div className="flex flex-col min-h-[calc(100vh-8rem)] pb-10">
+            {!focusMode && (
+            <>
+            <div className="shrink-0 space-y-4">
+                <CommsPageHeader
+                title="Communications"
+                subtitle="Discussions avec l'équipe et les missions"
+                slimTitle="Communications — Messages"
+                icon={<MessageSquare className="w-6 h-6 text-white" />}
+                collapsible={true}
+                actions={
+                    <>
+                        <button
+                            onClick={() => fetchThreads(true)}
+                            disabled={isRefreshing}
+                            className={cn(
+                                "p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors disabled:opacity-50"
+                            )}
+                            title="Actualiser"
+                        >
+                            <RefreshCw className={cn("w-4 h-4 text-slate-500", isRefreshing && "animate-spin")} />
+                        </button>
+                        <button
+                            onClick={() => setShowSearchPanel(true)}
+                            className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
+                            title="Recherche avancée"
+                        >
+                            <Search className="w-4 h-4 text-slate-500" />
+                        </button>
+                        <Button
+                            onClick={() => setShowNewThreadModal(true)}
+                            className="h-9 px-4 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white text-sm font-medium shadow-lg shadow-indigo-500/25"
+                        >
+                            <Plus className="w-4 h-4 mr-1.5" />
+                            Nouveau message
+                        </Button>
+                    </>
+                }
+            />
             </div>
 
             {/* Stats Cards */}
-            <div className="grid grid-cols-4 gap-5">
+            <div className="shrink-0 grid grid-cols-4 gap-5 mt-4">
                 <StatCard
                     icon={Inbox}
                     label="Non lus"
@@ -569,15 +568,18 @@ export default function SDRCommsPage() {
                     color="amber"
                 />
             </div>
+            </>
+            )}
 
-            {/* Main Content */}
-            <div className="grid grid-cols-12 gap-6">
-                {/* Thread List Panel */}
+            {/* Main Content - stretches to fill; when focusMode, list hidden and chat full width */}
+            <div className={cn("flex-1 min-h-0 flex flex-col", focusMode ? "mt-0" : "mt-4")}>
+            <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
+                {/* Thread List Panel - hidden in focus mode */}
                 <div className={cn(
-                    "transition-all duration-300",
-                    isListCollapsed ? "col-span-1" : "col-span-4"
+                    "transition-all duration-300 flex flex-col min-h-0",
+                    focusMode ? "hidden" : isListCollapsed ? "col-span-1" : "col-span-4"
                 )}>
-                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden h-[80vh] flex flex-col">
+                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden flex-1 min-h-0 flex flex-col">
                         {/* List Header */}
                         <div className={cn(
                             "border-b border-slate-200 p-4",
@@ -715,12 +717,12 @@ export default function SDRCommsPage() {
                     </div>
                 </div>
 
-                {/* Thread View Panel */}
+                {/* Thread View Panel - full width in focus mode */}
                 <div className={cn(
-                    "transition-all duration-300",
-                    isListCollapsed ? "col-span-11" : "col-span-8"
+                    "transition-all duration-300 flex flex-col min-h-0",
+                    focusMode ? "col-span-12" : isListCollapsed ? "col-span-11" : "col-span-8"
                 )}>
-                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden h-[80vh]">
+                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden flex-1 min-h-0 flex flex-col">
                         {isLoadingThread ? (
                             <div className="flex items-center justify-center h-full">
                                 <div className="flex flex-col items-center gap-3">
@@ -737,6 +739,8 @@ export default function SDRCommsPage() {
                                 onReactionToggle={() => selectedThread && fetchThreadDetails(selectedThread.id)}
                                 currentUserId={session?.user?.id || ""}
                                 typingUserName={getTypingText(selectedThread.id)}
+                                focusMode={focusMode}
+                                onFocusModeChange={setFocusMode}
                             />
                         ) : (
                             <div className="flex-1 flex flex-col items-center justify-center h-full">
@@ -755,6 +759,7 @@ export default function SDRCommsPage() {
                         )}
                     </div>
                 </div>
+            </div>
             </div>
 
             {/* New thread modal */}

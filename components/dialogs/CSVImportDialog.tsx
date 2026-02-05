@@ -62,6 +62,25 @@ const FIELD_OPTIONS = [
     { value: "contact.linkedin", label: "🔗 LinkedIn", group: "Contact" },
 ];
 
+// Count lines in file by streaming (avoids loading full file; used for progress %)
+async function countFileLines(file: File): Promise<number> {
+    const stream = file.stream();
+    const reader = stream.getReader();
+    const dec = new TextDecoder();
+    let count = 0;
+    let buffer = "";
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += dec.decode(value, { stream: true });
+        const parts = buffer.split(/\r?\n/);
+        buffer = parts.pop() ?? "";
+        count += parts.length;
+    }
+    if (buffer.trim()) count++;
+    return Math.max(0, count - 1);
+}
+
 // ============================================
 // CSV IMPORT DIALOG
 // ============================================
@@ -81,6 +100,7 @@ export function CSVImportDialog({ isOpen, onClose, onSuccess, missions }: Import
     const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
     const [mappings, setMappings] = useState<ColumnMapping[]>([]);
     const [previewData, setPreviewData] = useState<PreviewRow[]>([]);
+    const [importProgress, setImportProgress] = useState<number | null>(null);
 
     // ============================================
     // AUTO-DETECT FIELD MAPPINGS
@@ -266,66 +286,73 @@ export function CSVImportDialog({ isOpen, onClose, onSuccess, missions }: Import
         if (!file || !validateMappings()) return;
 
         setIsImporting(true);
+        setImportProgress(0);
 
         try {
-            // Read entire CSV
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                const text = e.target?.result as string;
-                const lines = text.split('\n').filter(line => line.trim());
-                const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+            const totalRows = await countFileLines(file);
+            const formData = new FormData();
+            formData.append("file", file);
+            formData.append("missionId", missionId);
+            formData.append("listName", listName);
+            formData.append("mappings", JSON.stringify(mappings));
+            if (totalRows > 0) formData.append("totalRows", String(totalRows));
 
-                // Detect delimiter
-                const delimiter = detectDelimiter(lines[0]);
+            const res = await fetch("/api/lists/import", {
+                method: "POST",
+                body: formData,
+            });
 
-                // Parse all data rows with advanced parsing
-                const csvData = lines.slice(1).map(line => {
-                    const values = parseCSVLine(line, delimiter).map(v => v.replace(/^"|"$/g, ''));
-                    const row: Record<string, string> = {};
-                    headers.forEach((header, i) => {
-                        row[header] = values[i] || "";
-                    });
-                    return row;
-                });
+            if (!res.ok || !res.body) {
+                const json = await res.json().catch(() => ({}));
+                showError("Erreur d'import", (json as { error?: string }).error || "L'import a échoué");
+                return;
+            }
 
-                // Call API
-                const res = await fetch('/api/lists/import', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        missionId,
-                        listName,
-                        mappings,
-                        csvData,
-                    }),
-                });
+            const reader = res.body.getReader();
+            const dec = new TextDecoder();
+            let buffer = "";
+            let doneData: { listId: string; companiesCreated: number; contactsCreated: number } | null = null;
+            let errorMsg: string | null = null;
 
-                const json = await res.json();
-
-                if (json.success) {
-                    success(
-                        "Import réussi!",
-                        `${json.data.companiesCreated} sociétés et ${json.data.contactsCreated} contacts importés`
-                    );
-                    onSuccess?.(json.data.listId);
-                    handleClose();
-                } else {
-                    showError("Erreur d'import", json.error || "L'import a échoué");
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += dec.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() ?? "";
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed) continue;
+                    try {
+                        const msg = JSON.parse(trimmed) as { type: string; percent?: number; data?: { listId: string; companiesCreated: number; contactsCreated: number }; error?: string };
+                        if (msg.type === "progress" && msg.percent != null) setImportProgress(msg.percent);
+                        if (msg.type === "done" && msg.data) doneData = msg.data;
+                        if (msg.type === "error" && msg.error) errorMsg = msg.error;
+                    } catch {
+                        // ignore malformed lines
+                    }
                 }
+            }
 
-                setIsImporting(false);
-            };
-
-            reader.onerror = () => {
-                showError("Erreur", "Impossible de lire le fichier");
-                setIsImporting(false);
-            };
-
-            reader.readAsText(file);
+            if (errorMsg) {
+                showError("Erreur d'import", errorMsg);
+            } else if (doneData) {
+                setImportProgress(100);
+                success(
+                    "Import réussi!",
+                    `${doneData.companiesCreated} sociétés et ${doneData.contactsCreated} contacts importés`
+                );
+                onSuccess?.(doneData.listId);
+                handleClose();
+            } else {
+                showError("Erreur d'import", "Réponse invalide");
+            }
         } catch (err) {
             console.error("Import failed:", err);
             showError("Erreur", "L'import a échoué");
+        } finally {
             setIsImporting(false);
+            setImportProgress(null);
         }
     };
 
@@ -342,6 +369,7 @@ export function CSVImportDialog({ isOpen, onClose, onSuccess, missions }: Import
         setMappings([]);
         setPreviewData([]);
         setIsImporting(false);
+        setImportProgress(null);
         onClose();
     };
 
@@ -572,24 +600,34 @@ export function CSVImportDialog({ isOpen, onClose, onSuccess, missions }: Import
                         <ArrowRight className="w-4 h-4" />
                     </Button>
                 ) : (
-                    <Button
-                        variant="success"
-                        onClick={handleImport}
-                        disabled={isImporting || !validateMappings()}
-                        className="gap-2"
-                    >
-                        {isImporting ? (
-                            <>
-                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                Import en cours...
-                            </>
-                        ) : (
-                            <>
-                                <CheckCircle2 className="w-4 h-4" />
-                                Lancer l'import
-                            </>
+                    <div className="flex flex-col gap-2 w-full">
+                        {isImporting && importProgress != null && (
+                            <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                                <div
+                                    className="h-full bg-emerald-500 transition-all duration-300"
+                                    style={{ width: `${importProgress}%` }}
+                                />
+                            </div>
                         )}
-                    </Button>
+                        <Button
+                            variant="success"
+                            onClick={handleImport}
+                            disabled={isImporting || !validateMappings()}
+                            className="gap-2"
+                        >
+                            {isImporting ? (
+                                <>
+                                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    {importProgress != null ? `Import… ${importProgress}%` : "Import en cours…"}
+                                </>
+                            ) : (
+                                <>
+                                    <CheckCircle2 className="w-4 h-4" />
+                                    Lancer l&apos;import
+                                </>
+                            )}
+                        </Button>
+                    </div>
                 )}
             </ModalFooter>
         </Modal>

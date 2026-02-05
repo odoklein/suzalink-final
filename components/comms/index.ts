@@ -2,6 +2,7 @@
 // INTERNAL COMMUNICATION COMPONENTS
 // ============================================
 
+export { CommsPageHeader } from "./CommsPageHeader";
 export { ThreadList } from "./ThreadList";
 export { ThreadView } from "./ThreadView";
 export { NewThreadModal } from "./NewThreadModal";

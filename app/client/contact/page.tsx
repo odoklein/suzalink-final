@@ -1,17 +1,15 @@
 "use client";
 
 import { CommsPageHeader } from "@/components/comms/CommsPageHeader";
-import { CommsInbox } from "@/components/comms";
-import { MessageSquare } from "lucide-react";
+import { CommsInbox } from "@/components/comms/CommsInbox";
 
-export default function ClientCommsPage() {
+export default function ClientContactPage() {
     return (
         <div className="flex flex-col h-[calc(100vh-6rem)] min-h-0">
             <CommsPageHeader
-                title="Communications"
-                subtitle="Discussions avec l'équipe et les missions"
-                slimTitle="Communications"
-                icon={<MessageSquare className="w-6 h-6" />}
+                title="Messages"
+                subtitle="Communiquez avec votre équipe et suivez vos missions"
+                slimTitle="Messages — Communiquez avec votre équipe"
                 collapsible={true}
                 className="mb-4 shrink-0"
             />

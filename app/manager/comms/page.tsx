@@ -27,6 +27,7 @@ import {
     Loader2,
 } from "lucide-react";
 import { Button, Input } from "@/components/ui";
+import { CommsPageHeader } from "@/components/comms/CommsPageHeader";
 import { ThreadList } from "@/components/comms/ThreadList";
 import type {
     CommsThreadListItem,
@@ -229,6 +230,7 @@ export default function ManagerCommsPage() {
     const [showNewThreadModal, setShowNewThreadModal] = useState(false);
     const [showSearchPanel, setShowSearchPanel] = useState(false);
     const [isListCollapsed, setIsListCollapsed] = useState(false);
+    const [focusMode, setFocusMode] = useState(false);
 
     // Filters
     const [filters, setFilters] = useState<CommsInboxFilters>({});
@@ -366,13 +368,13 @@ export default function ManagerCommsPage() {
                             prev.map((t) =>
                                 t.id === tid
                                     ? {
-                                          ...t,
-                                          lastMessage: {
-                                              content: payload.content ?? msg.content,
-                                              authorName: payload.userName ?? msg.author.name,
-                                              createdAt: payload.createdAt ?? msg.createdAt,
-                                          },
-                                      }
+                                        ...t,
+                                        lastMessage: {
+                                            content: payload.content ?? msg.content,
+                                            authorName: payload.userName ?? msg.author.name,
+                                            createdAt: payload.createdAt ?? msg.createdAt,
+                                        },
+                                    }
                                     : t
                             )
                         );
@@ -643,52 +645,49 @@ export default function ManagerCommsPage() {
     };
 
     return (
-        <div className="space-y-6 pb-10">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/25">
-                            <MessageSquare className="w-6 h-6 text-white" />
-                        </div>
-                        <div>
-                            <h1 className="text-2xl font-bold text-slate-900">Communications</h1>
-                            <p className="text-sm text-slate-500">
-                                Gérez les discussions avec l'équipe
-                            </p>
-                        </div>
-                    </div>
-                </div>
-                <div className="flex items-center gap-3">
-                    <button
-                        onClick={() => fetchThreads(true)}
-                        disabled={isRefreshing}
-                        className={cn(
-                            "p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors disabled:opacity-50"
-                        )}
-                        title="Actualiser"
-                    >
-                        <RefreshCw className={cn("w-4 h-4 text-slate-500", isRefreshing && "animate-spin")} />
-                    </button>
-                    <button
-                        onClick={() => setShowSearchPanel(true)}
-                        className="p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
-                        title="Recherche avancée"
-                    >
-                        <Search className="w-4 h-4 text-slate-500" />
-                    </button>
-                    <Button
-                        onClick={() => setShowNewThreadModal(true)}
-                        className="h-10 px-5 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-medium shadow-lg shadow-indigo-500/25"
-                    >
-                        <Plus className="w-4 h-4 mr-2" />
-                        Nouveau message
-                    </Button>
-                </div>
+        <div className="flex flex-col min-h-[calc(100vh-8rem)] pb-10">
+            {!focusMode && (
+            <>
+            <div className="shrink-0 space-y-4">
+                <CommsPageHeader
+                title="Communications"
+                subtitle="Gérez les discussions avec l'équipe"
+                slimTitle="Communications — Messages"
+                icon={<MessageSquare className="w-6 h-6 text-white" />}
+                collapsible={true}
+                actions={
+                    <>
+                        <button
+                            onClick={() => fetchThreads(true)}
+                            disabled={isRefreshing}
+                            className={cn(
+                                "p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors disabled:opacity-50"
+                            )}
+                            title="Actualiser"
+                        >
+                            <RefreshCw className={cn("w-4 h-4 text-slate-500", isRefreshing && "animate-spin")} />
+                        </button>
+                        <button
+                            onClick={() => setShowSearchPanel(true)}
+                            className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
+                            title="Recherche avancée"
+                        >
+                            <Search className="w-4 h-4 text-slate-500" />
+                        </button>
+                        <Button
+                            onClick={() => setShowNewThreadModal(true)}
+                            className="h-9 px-4 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white text-sm font-medium shadow-lg shadow-indigo-500/25"
+                        >
+                            <Plus className="w-4 h-4 mr-1.5" />
+                            Nouveau message
+                        </Button>
+                    </>
+                }
+            />
             </div>
 
             {/* Stats Cards */}
-            <div className="grid grid-cols-4 gap-5">
+            <div className="shrink-0 grid grid-cols-4 gap-5 mt-4">
                 <StatCard
                     icon={Inbox}
                     label="Non lus"
@@ -718,15 +717,18 @@ export default function ManagerCommsPage() {
                     color="amber"
                 />
             </div>
+            </>
+            )}
 
-            {/* Main Content - Sales Inbox style: 400px list, flex-1 conversation */}
-            <div className="flex gap-0 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-white dark:bg-[#151c2a] shadow-sm">
+            {/* Main Content - stretches to fill */}
+            <div className="flex-1 min-h-0 flex flex-col mt-4">
+            <div className="flex gap-0 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-white dark:bg-[#151c2a] shadow-sm flex-1 min-h-0">
                 {/* Thread List Panel - fixed 400px like inspo */}
                 <div className={cn(
-                    "flex flex-col shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-[#151c2a] transition-all duration-300",
-                    isListCollapsed ? "w-14" : "w-[400px]"
+                    "flex flex-col shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-[#151c2a] transition-all duration-300 min-h-0",
+                    focusMode ? "hidden" : isListCollapsed ? "w-14" : "w-[400px]"
                 )}>
-                    <div className="flex flex-col h-[calc(100vh-12rem)] overflow-hidden">
+                    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
                         {/* List Header - inspo: Inbox title, filter btn, search */}
                         <div className={cn(
                             "border-b border-slate-100 dark:border-slate-800 p-4 shrink-0",
@@ -867,41 +869,44 @@ export default function ManagerCommsPage() {
                     </div>
                 </div>
 
-                {/* Thread View Panel - flex-1 like inspo */}
-                <div className="flex-1 flex flex-col min-w-0 h-[calc(100vh-12rem)]">
-                        {isLoadingThread ? (
-                            <div className="flex items-center justify-center h-full">
-                                <div className="flex flex-col items-center gap-3">
-                                    <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
-                                    <p className="text-sm text-slate-500">Chargement...</p>
-                                </div>
+                {/* Thread View Panel - flex-1 fills remaining height */}
+                <div className="flex-1 flex flex-col min-w-0 min-h-0">
+                    {isLoadingThread ? (
+                        <div className="flex items-center justify-center h-full">
+                            <div className="flex flex-col items-center gap-3">
+                                <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+                                <p className="text-sm text-slate-500">Chargement...</p>
                             </div>
-                        ) : selectedThread ? (
-                            <ThreadView
-                                thread={selectedThread}
-                                onClose={handleCloseThread}
-                                onStatusChange={handleStatusChange}
-                                onSendMessage={handleSendMessage}
-                                onReactionToggle={() => selectedThread && fetchThreadDetails(selectedThread.id)}
-                                currentUserId={session?.user?.id || ""}
-                                typingUserName={getTypingText(selectedThread.id)}
-                            />
-                        ) : (
-                            <div className="flex-1 flex flex-col items-center justify-center h-full bg-white dark:bg-[#151c2a]">
-                                <div className="text-center">
-                                    <div className="w-20 h-20 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto mb-5">
-                                        <MessageSquare className="w-10 h-10 text-slate-400" />
-                                    </div>
-                                    <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
-                                        Sélectionnez une discussion
-                                    </h3>
-                                    <p className="text-sm text-slate-500 max-w-sm">
-                                        Choisissez une conversation dans la liste pour commencer
-                                    </p>
+                        </div>
+                    ) : selectedThread ? (
+                        <ThreadView
+                            thread={selectedThread}
+                            onClose={handleCloseThread}
+                            onStatusChange={handleStatusChange}
+                            onSendMessage={handleSendMessage}
+                            onReactionToggle={() => selectedThread && fetchThreadDetails(selectedThread.id)}
+                            currentUserId={session?.user?.id || ""}
+                            typingUserName={getTypingText(selectedThread.id)}
+                            focusMode={focusMode}
+                            onFocusModeChange={setFocusMode}
+                        />
+                    ) : (
+                        <div className="flex-1 flex flex-col items-center justify-center h-full bg-white dark:bg-[#151c2a]">
+                            <div className="text-center">
+                                <div className="w-20 h-20 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto mb-5">
+                                    <MessageSquare className="w-10 h-10 text-slate-400" />
                                 </div>
+                                <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
+                                    Sélectionnez une discussion
+                                </h3>
+                                <p className="text-sm text-slate-500 max-w-sm">
+                                    Choisissez une conversation dans la liste pour commencer
+                                </p>
                             </div>
-                        )}
+                        </div>
+                    )}
                 </div>
+            </div>
             </div>
 
             {/* New thread modal */}
