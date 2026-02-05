@@ -36,6 +36,8 @@ interface DataTableProps<T> {
     loading?: boolean;
     emptyMessage?: string;
     onRowClick?: (row: T) => void;
+    /** Optional class name per row (e.g. for highlighting recently updated rows) */
+    getRowClassName?: (row: T) => string;
     className?: string;
 }
 
@@ -53,6 +55,7 @@ export function DataTable<T extends Record<string, any>>({
     loading = false,
     emptyMessage = "Aucune donnée",
     onRowClick,
+    getRowClassName,
     className,
 }: DataTableProps<T>) {
     const [searchQuery, setSearchQuery] = useState("");
@@ -226,7 +229,8 @@ export function DataTable<T extends Record<string, any>>({
                                     onClick={() => onRowClick?.(row)}
                                     className={cn(
                                         "border-b border-slate-100 last:border-0 transition-colors",
-                                        onRowClick && "cursor-pointer hover:bg-slate-50"
+                                        onRowClick && "cursor-pointer hover:bg-slate-50",
+                                        getRowClassName?.(row)
                                     )}
                                 >
                                     {columns.map((column) => (

@@ -187,8 +187,8 @@ export default function SDRActionPage() {
     const [showBookingModal, setShowBookingModal] = useState(false);
     const [isImprovingNote, setIsImprovingNote] = useState(false);
 
-    // View mode: card (current) vs table
-    const [viewMode, setViewMode] = useState<"card" | "table">("card");
+    // View mode: card (current) vs table — default to table
+    const [viewMode, setViewMode] = useState<"card" | "table">("table");
     const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
     const [queueLoading, setQueueLoading] = useState(false);
     const [submittingRowKey, setSubmittingRowKey] = useState<string | null>(null);
@@ -428,6 +428,38 @@ export default function SDRActionPage() {
 
     const queueRowKey = (row: QueueItem) => row.contactId ?? row.companyId;
 
+    // Recently updated row keys (highlight in table after status update in drawer)
+    const [recentlyUpdatedRowKeys, setRecentlyUpdatedRowKeys] = useState<Set<string>>(new Set());
+    const recentlyUpdatedTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    useEffect(() => () => {
+        if (recentlyUpdatedTimeoutRef.current) clearTimeout(recentlyUpdatedTimeoutRef.current);
+    }, []);
+
+    // Refetch queue (table view) — same API as initial load; call on drawer close and when action recorded
+    const refreshQueue = useCallback(() => {
+        if (selectedMissionId === null) return;
+        setQueueLoading(true);
+        const params = new URLSearchParams();
+        params.set("missionId", selectedMissionId);
+        if (selectedListId) params.set("listId", selectedListId);
+        params.set("limit", "100");
+        fetch(`/api/sdr/action-queue?${params.toString()}`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data?.items) {
+                    const items = json.data.items as QueueItem[];
+                    setQueueItems(items.map((i) => ({
+                        ...i,
+                        _displayName: i.contact
+                            ? `${(i.contact.firstName || "").trim()} ${(i.contact.lastName || "").trim()}`.trim() || i.company.name
+                            : i.company.name,
+                        _companyName: i.company.name,
+                    })));
+                }
+            })
+            .finally(() => setQueueLoading(false));
+    }, [selectedMissionId, selectedListId]);
+
     // Unified drawer state (table view)
     const [unifiedDrawerOpen, setUnifiedDrawerOpen] = useState(false);
     const [unifiedDrawerContactId, setUnifiedDrawerContactId] = useState<string | null>(null);
@@ -476,6 +508,8 @@ export default function SDRActionPage() {
         setUnifiedDrawerMissionId(undefined);
         setUnifiedDrawerMissionName(undefined);
         setUnifiedDrawerClientBookingUrl("");
+        // Refresh queue when closing drawer so we always see latest data (e.g. after updating status)
+        if (viewMode === "table") refreshQueue();
     };
 
     const openEmailModalFromDrawer = () => {
@@ -1050,24 +1084,7 @@ export default function SDRActionPage() {
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => {
-                                    setQueueLoading(true);
-                                    fetch(`/api/sdr-queue?missionId=${selectedMissionId || ""}&listId=${selectedListId || ""}`)
-                                        .then((res) => res.json())
-                                        .then((json) => {
-                                            if (json.success && Array.isArray(json.data)) {
-                                                const items = json.data;
-                                                setQueueItems(items.map((i: QueueItem) => ({
-                                                    ...i,
-                                                    _displayName: i.contact
-                                                        ? `${(i.contact.firstName || "").trim()} ${(i.contact.lastName || "").trim()}`.trim() || i.company.name
-                                                        : i.company.name,
-                                                    _companyName: i.company.name,
-                                                })));
-                                            }
-                                        })
-                                        .finally(() => setQueueLoading(false));
-                                }}
+                                onClick={() => refreshQueue()}
                                 className="text-slate-500 hover:text-indigo-600 gap-1.5"
                             >
                                 <RefreshCw className="w-3.5 h-3.5" />
@@ -1091,6 +1108,11 @@ export default function SDRActionPage() {
                         loading={queueLoading}
                         emptyMessage="Aucun contact dans la file. Changez de mission ou liste."
                         onRowClick={openDrawerForRow}
+                        getRowClassName={(row) =>
+                            recentlyUpdatedRowKeys.has(queueRowKey(row))
+                                ? "bg-emerald-50/80 border-l-4 border-l-emerald-500"
+                                : ""
+                        }
                     />
                 </div>
 
@@ -1107,23 +1129,21 @@ export default function SDRActionPage() {
                             clientBookingUrl={unifiedDrawerClientBookingUrl || undefined}
                             onOpenEmailModal={openEmailModalFromDrawer}
                             onActionRecorded={() => {
-                                // Refresh queue items after action recorded
-                                setQueueLoading(true);
-                                fetch(`/api/sdr-queue?missionId=${selectedMissionId || ""}&listId=${selectedListId || ""}`)
-                                    .then((res) => res.json())
-                                    .then((json) => {
-                                        if (json.success && Array.isArray(json.data)) {
-                                            const items = json.data;
-                                            setQueueItems(items.map((i: QueueItem) => ({
-                                                ...i,
-                                                _displayName: i.contact
-                                                    ? `${(i.contact.firstName || "").trim()} ${(i.contact.lastName || "").trim()}`.trim() || i.company.name
-                                                    : i.company.name,
-                                                _companyName: i.company.name,
-                                            })));
-                                        }
-                                    })
-                                    .finally(() => setQueueLoading(false));
+                                // Mark this row as recently updated for table highlight
+                                const rowKey = unifiedDrawerContactId ?? unifiedDrawerCompanyId ?? "";
+                                if (rowKey) {
+                                    setRecentlyUpdatedRowKeys((prev) => new Set([...prev, rowKey]));
+                                    if (recentlyUpdatedTimeoutRef.current) clearTimeout(recentlyUpdatedTimeoutRef.current);
+                                    recentlyUpdatedTimeoutRef.current = setTimeout(() => {
+                                        setRecentlyUpdatedRowKeys((prev) => {
+                                            const next = new Set(prev);
+                                            next.delete(rowKey);
+                                            return next;
+                                        });
+                                        recentlyUpdatedTimeoutRef.current = null;
+                                    }, 5000);
+                                }
+                                refreshQueue();
                             }}
                         />
                     )
