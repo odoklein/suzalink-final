@@ -1038,6 +1038,9 @@ model Mailbox {
   // Provider-specific throttling
   providerProfile     String?       // "titan", "gmail", "outlook", "default"
   syncIntervalMs      Int           @default(300000)  // 5 min default
+
+  // Custom Tracking Domain
+  trackingDomain      String?       // e.g. "https://track.client-domain.com"
   
   // Relations
   emails          Email[]
