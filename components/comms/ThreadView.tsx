@@ -46,6 +46,8 @@ interface ThreadViewProps {
     /** When true, parent should hide page header/stats and collapse list for near full-screen chat */
     focusMode?: boolean;
     onFocusModeChange?: (active: boolean) => void;
+    isRecipientOnline?: boolean;
+    onTyping?: (isTyping: boolean) => void;
 }
 
 export function ThreadView({
@@ -58,6 +60,8 @@ export function ThreadView({
     typingUserName,
     focusMode,
     onFocusModeChange,
+    isRecipientOnline,
+    onTyping,
 }: ThreadViewProps) {
     const [messageContent, setMessageContent] = useState("");
     const [mentionIds, setMentionIds] = useState<string[]>([]);
@@ -73,19 +77,10 @@ export function ThreadView({
         name: p.userName,
     }));
 
-    const postTyping = useCallback(
-        (isTyping: boolean) => {
-            fetch("/api/comms/typing", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ threadId: thread.id, isTyping }),
-            }).catch(() => { });
-        },
-        [thread.id]
-    );
-
     const notifyTyping = useCallback(
         (isTyping: boolean) => {
+            if (!onTyping) return;
+
             if (typingDebounceRef.current) {
                 clearTimeout(typingDebounceRef.current);
                 typingDebounceRef.current = null;
@@ -97,28 +92,27 @@ export function ThreadView({
             if (isTyping) {
                 typingDebounceRef.current = setTimeout(() => {
                     typingDebounceRef.current = null;
-                    postTyping(true);
+                    onTyping(true);
                     typingStopRef.current = setTimeout(() => {
                         typingStopRef.current = null;
-                        postTyping(false);
+                        onTyping(false);
                     }, 2500);
                 }, 300);
             } else {
-                postTyping(false);
+                onTyping(false);
             }
         },
-        [postTyping]
+        [onTyping]
     );
 
     useEffect(() => {
         return () => {
             if (typingDebounceRef.current) clearTimeout(typingDebounceRef.current);
             if (typingStopRef.current) clearTimeout(typingStopRef.current);
-            postTyping(false);
+            if (onTyping) onTyping(false);
         };
-    }, [thread.id, postTyping]);
+    }, [thread.id, onTyping]);
 
-    // Scroll to bottom when messages change
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [thread.messages]);
@@ -142,15 +136,13 @@ export function ThreadView({
         }
     };
 
-    // Helper to get display title for thread (for direct: show the OTHER participant's name, not the current user's)
+    // Helper to get display title for thread
     const getThreadTitle = () => {
         if (thread.channelType === "DIRECT") {
-            // Prefer the other participant's name so recipient sees sender, not themselves
             const otherParticipant = thread.participants.find(p => p.userId !== currentUserId);
             if (otherParticipant) {
                 return otherParticipant.userName;
             }
-            // Fallback: parse subject (may show wrong person for recipient)
             if (thread.subject.startsWith("Message avec ")) {
                 return thread.subject.replace("Message avec ", "");
             }
@@ -163,7 +155,6 @@ export function ThreadView({
 
     return (
         <div className="flex flex-col h-full bg-white dark:bg-[#151c2a]">
-            {/* Compact chat header: Title, online, call, ⋯ menu, close */}
             <header className="h-12 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 bg-white/80 dark:bg-[#151c2a]/90 backdrop-blur-sm z-10 shrink-0">
                 <div className="flex items-center gap-3 min-w-0">
                     <div className="size-8 rounded-full bg-gradient-to-br from-indigo-100 to-indigo-200 dark:from-indigo-900/50 dark:to-indigo-800/50 flex items-center justify-center text-xs font-semibold text-indigo-600 dark:text-indigo-400 shrink-0">
@@ -172,8 +163,11 @@ export function ThreadView({
                     <div className="min-w-0">
                         <div className="flex items-center gap-2">
                             <h3 className="font-semibold text-slate-900 dark:text-white truncate text-sm">{threadTitle}</h3>
-                            {thread.status === "OPEN" && (
-                                <span className="size-1.5 rounded-full bg-emerald-500 shrink-0" title="En ligne" />
+                            {isRecipientOnline && (
+                                <span className="relative flex h-2 w-2 items-center justify-center shrink-0" title="En ligne">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                </span>
                             )}
                         </div>
                     </div>
@@ -191,21 +185,12 @@ export function ThreadView({
                             )}
                             title={focusMode ? "Quitter le mode focus" : "Mode focus (plein écran chat)"}
                         >
-                            {focusMode ? (
-                                <Minimize2 className="w-4 h-4" />
-                            ) : (
-                                <Maximize2 className="w-4 h-4" />
-                            )}
+                            {focusMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                         </button>
                     )}
-                    <button
-                        className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-500/5 rounded-lg transition-colors"
-                        title="Appeler"
-                    >
+                    <button className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-500/5 rounded-lg transition-colors">
                         <Phone className="w-4 h-4" />
                     </button>
-
-                    {/* ⋯ menu: Calendar, Assigner, Resolve/Archive, Close */}
                     <div className="relative">
                         <button
                             onClick={() => setShowMenu(!showMenu)}
@@ -215,63 +200,36 @@ export function ThreadView({
                                     ? "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
                                     : "text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
                             )}
-                            title="Plus d'actions"
                         >
                             <MoreVertical className="w-4 h-4" />
                         </button>
-
                         {showMenu && (
                             <>
-                                <div
-                                    className="fixed inset-0 z-10"
-                                    onClick={() => setShowMenu(false)}
-                                />
-                                <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 py-2 z-20 animate-in fade-in slide-in-from-top-2 duration-200">
-                                    <button
-                                        className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                                        title="Planifier un RDV"
-                                    >
+                                <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+                                <div className="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 py-2 z-20">
+                                    <button className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700">
                                         <Calendar className="w-4 h-4 text-slate-400" />
                                         <span>Planifier un RDV</span>
                                     </button>
-                                    <button className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                                    <button className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700">
                                         <UserPlus className="w-4 h-4 text-slate-400" />
                                         <span>Assigner</span>
                                     </button>
-                                    {thread.status === "OPEN" && (
+                                    {(thread.status === "OPEN" || thread.status === "RESOLVED") && (
                                         <>
                                             <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
+                                            {thread.status === "OPEN" && (
+                                                <button
+                                                    onClick={() => { onStatusChange("RESOLVED"); setShowMenu(false); }}
+                                                    className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700"
+                                                >
+                                                    <CheckCircle className="w-4 h-4 text-emerald-500" />
+                                                    <span>Marquer comme résolu</span>
+                                                </button>
+                                            )}
                                             <button
-                                                onClick={() => {
-                                                    onStatusChange("RESOLVED");
-                                                    setShowMenu(false);
-                                                }}
-                                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                                            >
-                                                <CheckCircle className="w-4 h-4 text-emerald-500" />
-                                                <span>Marquer comme résolu</span>
-                                            </button>
-                                            <button
-                                                onClick={() => {
-                                                    onStatusChange("ARCHIVED");
-                                                    setShowMenu(false);
-                                                }}
-                                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                                            >
-                                                <Archive className="w-4 h-4 text-slate-400" />
-                                                <span>Archiver</span>
-                                            </button>
-                                        </>
-                                    )}
-                                    {thread.status === "RESOLVED" && (
-                                        <>
-                                            <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
-                                            <button
-                                                onClick={() => {
-                                                    onStatusChange("ARCHIVED");
-                                                    setShowMenu(false);
-                                                }}
-                                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                                                onClick={() => { onStatusChange("ARCHIVED"); setShowMenu(false); }}
+                                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700"
                                             >
                                                 <Archive className="w-4 h-4 text-slate-400" />
                                                 <span>Archiver</span>
@@ -282,18 +240,12 @@ export function ThreadView({
                             </>
                         )}
                     </div>
-
-                    <button
-                        onClick={onClose}
-                        className="p-2 text-slate-500 hover:text-slate-800 dark:hover:text-white rounded-lg transition-colors"
-                        title="Fermer"
-                    >
+                    <button onClick={onClose} className="p-2 text-slate-500 hover:text-slate-800 dark:hover:text-white rounded-lg transition-colors">
                         <X className="w-4 h-4" />
                     </button>
                 </div>
             </header>
 
-            {/* Typing indicator - compact */}
             {typingUserName && (
                 <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800">
                     <div className="flex gap-0.5">
@@ -301,20 +253,13 @@ export function ThreadView({
                         <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
                         <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                     </div>
-                    <p className="text-xs text-indigo-600 dark:text-indigo-400 font-medium">
-                        {typingUserName} écrit…
-                    </p>
+                    <p className="text-xs text-indigo-600 dark:text-indigo-400 font-medium">{typingUserName} écrit…</p>
                 </div>
             )}
 
-            {/* AI Summary */}
-            {thread.messages.length >= 5 && (
-                <ThreadSummary threadId={thread.id} />
-            )}
+            {thread.messages.length >= 5 && <ThreadSummary threadId={thread.id} />}
 
-            {/* Messages - edge-to-edge height, denser spacing */}
             <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-1 bg-slate-50 dark:bg-slate-900/50">
-                {/* Date separator for first message */}
                 {thread.messages.length > 0 && (
                     <div className="flex justify-center py-2">
                         <span className="text-xs font-medium text-slate-400 bg-slate-200 dark:bg-slate-800 px-2.5 py-0.5 rounded-full">
@@ -322,7 +267,6 @@ export function ThreadView({
                         </span>
                     </div>
                 )}
-
                 {thread.messages.map((message, index) => {
                     const isOwn = message.author.id === currentUserId;
                     const prevMessage = index > 0 ? thread.messages[index - 1] : null;
@@ -355,38 +299,23 @@ export function ThreadView({
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Composer - compact */}
             {thread.status === "OPEN" && !thread.isBroadcast && (
                 <div className="p-4 bg-white dark:bg-[#151c2a] border-t border-slate-200 dark:border-slate-800 shrink-0">
                     <div className="max-w-4xl mx-auto flex flex-col gap-2">
-                        {/* Quick suggestion chips */}
                         {!messageContent && thread.messages.length > 0 && (
                             <div className="flex gap-2 mb-1">
-                                <SuggestionChips
-                                    threadId={thread.id}
-                                    onSelect={(content) => setMessageContent(content)}
-                                />
-                                <TemplatePicker
-                                    onSelect={(content) => setMessageContent(content)}
-                                />
+                                <SuggestionChips threadId={thread.id} onSelect={setMessageContent} />
+                                <TemplatePicker onSelect={setMessageContent} />
                             </div>
                         )}
-
-                        <MessageAttachments
-                            files={files}
-                            onChange={setFiles}
-                            disabled={isSending}
-                        />
-
+                        <MessageAttachments files={files} onChange={setFiles} disabled={isSending} />
                         <div className="relative bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl shadow-sm focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition-all">
                             <RichTextEditor
                                 value={messageContent}
                                 onChange={(v, ids) => {
                                     setMessageContent(v);
                                     setMentionIds(ids);
-                                    if (thread.status === "OPEN" && !thread.isBroadcast) {
-                                        notifyTyping(true);
-                                    }
+                                    if (thread.status === "OPEN" && !thread.isBroadcast) notifyTyping(true);
                                 }}
                                 onBlur={() => notifyTyping(false)}
                                 onSubmit={handleSend}
@@ -412,31 +341,20 @@ export function ThreadView({
                                                 : "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
                                         )}
                                     >
-                                        Envoyer
-                                        <Send className="w-4 h-4" />
+                                        Envoyer <Send className="w-4 h-4" />
                                     </button>
                                 </div>
                             </div>
                         </div>
-                        <p className="text-center text-[10px] text-slate-400">
-                            Appuyez sur Entrée pour envoyer
-                        </p>
                     </div>
                 </div>
             )}
-
-            {/* Status banner for non-open threads */}
             {thread.status !== "OPEN" && (
                 <div className="px-6 py-4 bg-gradient-to-r from-slate-50 to-slate-100 border-t border-slate-200">
                     <div className="flex items-center justify-center gap-3">
-                        {thread.status === "RESOLVED" ? (
-                            <CheckCircle className="w-5 h-5 text-emerald-500" />
-                        ) : (
-                            <Archive className="w-5 h-5 text-slate-400" />
-                        )}
+                        {thread.status === "RESOLVED" ? <CheckCircle className="w-5 h-5 text-emerald-500" /> : <Archive className="w-5 h-5 text-slate-400" />}
                         <span className="text-sm font-medium text-slate-600">
-                            Cette discussion est{" "}
-                            {thread.status === "RESOLVED" ? "résolue" : "archivée"}
+                            Cette discussion est {thread.status === "RESOLVED" ? "résolue" : "archivée"}
                         </span>
                     </div>
                 </div>
@@ -445,7 +363,6 @@ export function ThreadView({
     );
 }
 
-// Message bubble component - denser: less padding, tighter same-author spacing
 function MessageBubble({
     message,
     isOwn,
@@ -461,7 +378,6 @@ function MessageBubble({
     currentUserId: string;
     onReactionToggle?: (messageId: string, emoji: string) => Promise<void>;
 }) {
-    // System messages
     if (message.type === "SYSTEM") {
         return (
             <div className="flex justify-center py-2">
@@ -475,86 +391,32 @@ function MessageBubble({
     const hasReadReceipt = isOwn && message.readBy && message.readBy.length > 0;
 
     return (
-        <div
-            className={cn(
-                "flex gap-2.5 group",
-                sameAuthor && (isOwn ? "mt-0.5" : "mt-0.5"),
-                isOwn ? "flex-row-reverse" : "flex-row"
-            )}
-        >
-            {/* Avatar once per block */}
+        <div className={cn("flex gap-2.5 group", sameAuthor && "mt-0.5", isOwn ? "flex-row-reverse" : "flex-row")}>
             {showAvatar ? (
-                <div
-                    className={cn(
-                        "size-7 rounded-full flex items-center justify-center text-[10px] font-semibold flex-shrink-0 mt-0.5",
-                        isOwn
-                            ? "bg-gradient-to-br from-indigo-500 to-indigo-600 text-white"
-                            : "bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-600 text-slate-600 dark:text-slate-300"
-                    )}
-                >
+                <div className={cn("size-7 rounded-full flex items-center justify-center text-[10px] font-semibold flex-shrink-0 mt-0.5", isOwn ? "bg-gradient-to-br from-indigo-500 to-indigo-600 text-white" : "bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-600 text-slate-600 dark:text-slate-300")}>
                     {message.author.initials}
                 </div>
-            ) : (
-                <div className="size-7 flex-shrink-0 w-[26px]" />
-            )}
+            ) : <div className="size-7 flex-shrink-0 w-[26px]" />}
 
-            {/* Content - reduced padding, name only when showAvatar */}
             <div className={cn("flex flex-col gap-0.5 max-w-[75%]", isOwn && "items-end")}>
                 {showAvatar && (
-                    <div
-                        className={cn(
-                            "flex items-baseline gap-1.5 px-0.5",
-                            isOwn && "flex-row-reverse"
-                        )}
-                    >
-                        <span className="text-xs font-semibold text-slate-900 dark:text-white">
-                            {isOwn ? "Vous" : message.author.name}
-                        </span>
+                    <div className={cn("flex items-baseline gap-1.5 px-0.5", isOwn && "flex-row-reverse")}>
+                        <span className="text-xs font-semibold text-slate-900 dark:text-white">{isOwn ? "Vous" : message.author.name}</span>
                         <span className="text-[11px] text-slate-400 flex items-center gap-0.5">
                             {format(new Date(message.createdAt), "HH:mm", { locale: fr })}
                             {(message as { isOptimistic?: boolean }).isOptimistic && (
-                                <span className="flex items-center gap-0.5 text-indigo-500">
-                                    <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                                    Envoi…
-                                </span>
+                                <span className="flex items-center gap-0.5 text-indigo-500"><Loader2 className="w-2.5 h-2.5 animate-spin" /> Envoi…</span>
                             )}
                         </span>
                     </div>
                 )}
-                <div
-                    className={cn(
-                        "px-3 py-2 text-sm leading-snug shadow-sm",
-                        (message as { isOptimistic?: boolean }).isOptimistic && "opacity-90",
-                        isOwn
-                            ? "bg-indigo-500 text-white rounded-xl rounded-tr-sm"
-                            : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 rounded-xl rounded-tl-sm"
-                    )}
-                >
-                    <MessageContent
-                        content={message.content}
-                        isOwn={isOwn}
-                        className={isOwn ? "text-white" : ""}
-                    />
-                    {message.isEdited && (
-                        <span
-                            className={cn(
-                                "text-[10px] ml-2",
-                                isOwn ? "text-indigo-200" : "text-slate-400"
-                            )}
-                        >
-                            (modifié)
-                        </span>
-                    )}
+                <div className={cn("px-3 py-2 text-sm leading-snug shadow-sm", (message as { isOptimistic?: boolean }).isOptimistic && "opacity-90", isOwn ? "bg-indigo-500 text-white rounded-xl rounded-tr-sm" : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 rounded-xl rounded-tl-sm")}>
+                    <MessageContent content={message.content} isOwn={isOwn} className={isOwn ? "text-white" : ""} />
+                    {message.isEdited && <span className={cn("text-[10px] ml-2", isOwn ? "text-indigo-200" : "text-slate-400")}>(modifié)</span>}
                 </div>
-
-                {/* Read receipts - inspo: "Read" with done_all icon */}
                 {hasReadReceipt && (
-                    <span className="text-xs font-medium text-slate-400 flex items-center gap-1">
-                        Lu <CheckCheck className="w-3.5 h-3.5" />
-                    </span>
+                    <span className="text-xs font-medium text-slate-400 flex items-center gap-1">Lu <CheckCheck className="w-3.5 h-3.5" /></span>
                 )}
-
-                {/* Reactions - hide for optimistic (sending) messages */}
                 {message.type === "TEXT" && !(message as { isOptimistic?: boolean }).isOptimistic && (
                     <MessageReactions
                         messageId={message.id}
@@ -564,25 +426,11 @@ function MessageBubble({
                         isOwn={isOwn}
                     />
                 )}
-
-                {/* Attachments */}
                 {message.attachments.length > 0 && (
                     <div className="mt-1.5 space-y-1">
                         {message.attachments.map((att) => (
-                            <a
-                                key={att.id}
-                                href={att.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className={cn(
-                                    "flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg transition-colors",
-                                    isOwn
-                                        ? "bg-indigo-400/30 text-indigo-100 hover:bg-indigo-400/50"
-                                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                                )}
-                            >
-                                <Paperclip className="w-3.5 h-3.5" />
-                                {att.filename}
+                            <a key={att.id} href={att.url} target="_blank" rel="noopener noreferrer" className={cn("flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg transition-colors", isOwn ? "bg-indigo-400/30 text-indigo-100 hover:bg-indigo-400/50" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}>
+                                <Paperclip className="w-3.5 h-3.5" /> {att.filename}
                             </a>
                         ))}
                     </div>
