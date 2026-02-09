@@ -46,6 +46,8 @@ export function PermissionProvider({ children }: PermissionProviderProps) {
             }
 
             if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`Permission fetch failed: ${response.status} ${response.statusText}`, errorText);
                 throw new Error("Failed to fetch permissions");
             }
 

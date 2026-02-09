@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
       // Assuming Contact model has an 'unsubscribed' field or similar
       // If not, we'll just log it or update a metadata field
       try {
-        await (prisma.contact as any).update({
+        await prisma.contact.update({
           where: { id: email.contactId },
           data: { unsubscribed: true },
         });

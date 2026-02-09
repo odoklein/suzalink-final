@@ -89,12 +89,16 @@ export class GmailProvider implements IEmailProvider {
   async handleCallback(code: string): Promise<OAuthTokens> {
     const { tokens } = await this.oauth2Client.getToken(code);
 
+    if (!tokens.access_token) {
+      throw new Error("No access token returned from Google");
+    }
+
     return {
-      accessToken: tokens.access_token!,
-      refreshToken: tokens.refresh_token,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token || undefined,
       expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
-      scope: tokens.scope,
-      tokenType: tokens.token_type,
+      scope: tokens.scope || undefined,
+      tokenType: tokens.token_type || undefined,
     };
   }
 
@@ -105,14 +109,18 @@ export class GmailProvider implements IEmailProvider {
 
     const { credentials } = await this.oauth2Client.refreshAccessToken();
 
+    if (!credentials.access_token) {
+      throw new Error("Failed to refresh access token");
+    }
+
     return {
-      accessToken: credentials.access_token!,
+      accessToken: credentials.access_token,
       refreshToken: credentials.refresh_token || refreshToken,
       expiresAt: credentials.expiry_date
         ? new Date(credentials.expiry_date)
         : undefined,
-      scope: credentials.scope,
-      tokenType: credentials.token_type,
+      scope: credentials.scope || undefined,
+      tokenType: credentials.token_type || undefined,
     };
   }
 
@@ -319,9 +327,9 @@ export class GmailProvider implements IEmailProvider {
     });
 
     return {
-      id: response.data.id!,
-      messageId: response.data.message?.id!,
-      threadId: response.data.message?.threadId,
+      id: response.data.id as string,
+      messageId: response.data.message?.id as string,
+      threadId: response.data.message?.threadId || undefined,
     };
   }
 
@@ -352,9 +360,9 @@ export class GmailProvider implements IEmailProvider {
     });
 
     return {
-      id: response.data.id!,
-      messageId: response.data.message?.id!,
-      threadId: response.data.message?.threadId,
+      id: response.data.id as string,
+      messageId: response.data.message?.id as string,
+      threadId: response.data.message?.threadId || undefined,
     };
   }
 
@@ -445,7 +453,7 @@ export class GmailProvider implements IEmailProvider {
 
   async setupWebhook(
     tokens: OAuthTokens,
-    callbackUrl: string,
+    _callbackUrl: string,
   ): Promise<WebhookConfig> {
     const gmail = this.getGmailClient(tokens);
 
@@ -519,7 +527,11 @@ export class GmailProvider implements IEmailProvider {
     const name = response.data.names?.[0]?.displayName;
     const picture = response.data.photos?.[0]?.url;
 
-    return { email, name, picture };
+    return {
+      email,
+      name: name || undefined,
+      picture: picture || undefined,
+    };
   }
 
   async search(
@@ -668,7 +680,9 @@ export class GmailProvider implements IEmailProvider {
           filename: part.filename,
           mimeType: part.mimeType || "application/octet-stream",
           size: part.body.size || 0,
-          contentId: part.headers?.find((h) => h.name === "Content-ID")?.value,
+          contentId:
+            (part.headers?.find((h) => h.name === "Content-ID")
+              ?.value as string) || undefined,
         });
       }
       if (part.parts) {

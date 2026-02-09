@@ -93,8 +93,9 @@ export async function GET(
     // Check access
     const hasAccess =
       mailbox.ownerId === session.user.id ||
-      mailbox.permissions.some(
-        (p) => p.userId === session.user.id && p.canRead,
+      (mailbox as any).permissions.some(
+        (p: { userId: string; canRead: boolean }) =>
+          p.userId === session.user.id && p.canRead,
       ) ||
       session.user.role === "MANAGER";
 

@@ -22,12 +22,7 @@ import {
 import * as nodemailer from "nodemailer";
 import { ImapFlow } from "imapflow";
 import { simpleParser, ParsedMail } from "mailparser";
-import {
-  getProfile,
-  ThrottleProfile,
-  throttleDelay,
-} from "../utils/throttle-profiles";
-import { classifyError, ClassifiedError } from "../utils/error-taxonomy";
+import { getProfile, ThrottleProfile } from "../utils/throttle-profiles";
 
 // ============================================
 // IMAP PROVIDER CONFIGURATION
@@ -162,7 +157,6 @@ export class ImapProvider implements IEmailProvider {
     _tokens: OAuthTokens,
     options: SyncOptions = {},
   ): Promise<{ threads: EmailThreadData[]; syncResult: SyncResult }> {
-    const config = this.ensureConfig();
     let client: ImapFlow | null = null;
     const threads: EmailThreadData[] = [];
     let threadsAdded = 0;
@@ -177,7 +171,7 @@ export class ImapProvider implements IEmailProvider {
 
       try {
         // Calculate search criteria
-        const searchCriteria: any = {};
+        const searchCriteria: { since?: Date } = {};
 
         if (options.since) {
           searchCriteria.since = options.since;
@@ -331,11 +325,13 @@ export class ImapProvider implements IEmailProvider {
 
   private getThreadId(parsed: ParsedMail): string {
     // Try to extract thread ID from References or In-Reply-To
-    if (parsed.references && parsed.references.length > 0) {
+    const refs = parsed.references;
+    if (refs && Array.isArray(refs) && refs.length > 0) {
       // Use the first reference as thread ID
-      return typeof parsed.references === "string"
-        ? parsed.references
-        : parsed.references[0];
+      return refs[0];
+    }
+    if (typeof refs === "string") {
+      return refs;
     }
     if (parsed.inReplyTo) {
       return parsed.inReplyTo;
@@ -437,11 +433,16 @@ export class ImapProvider implements IEmailProvider {
     const config = this.ensureConfig();
 
     try {
+      // Extract domain for HELO/EHLO to avoid "localhost" leakage
+      const senderEmail = params.from?.email || config.email;
+      const domain = senderEmail.split("@")[1] || "localhost";
+
       // Create transporter
       const transporter = nodemailer.createTransport({
         host: config.smtpHost,
         port: config.smtpPort,
         secure: config.smtpPort === 465,
+        name: domain, // Set HELO name to prevent spam flagging
         auth: {
           user: config.email,
           pass: config.password,
@@ -457,6 +458,13 @@ export class ImapProvider implements IEmailProvider {
         subject: params.subject,
         html: params.bodyHtml,
         text: params.bodyText,
+        // Match envelope to from address for SPF alignment
+        envelope: {
+          from: params.from?.email || config.email,
+          to: params.to.map((r) => r.email).join(", "),
+        },
+        // Custom message-id for domain alignment
+        messageId: `<${Date.now()}.${Math.random().toString(36).substring(7)}@${domain}>`,
       };
 
       if (params.cc?.length) {

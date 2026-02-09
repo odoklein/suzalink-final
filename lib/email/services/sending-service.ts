@@ -12,7 +12,7 @@ import {
   SendEmailParams,
   EmailAddress,
 } from "../providers";
-import { Mailbox, EmailStatus } from "@prisma/client";
+import { Mailbox } from "@prisma/client";
 import { randomUUID } from "crypto";
 
 // ============================================
@@ -85,11 +85,19 @@ export class EmailSendingService {
         return { success: false, error: "Daily send limit reached" };
       }
 
+      // Safe access to mailbox-specific settings
+      interface MailboxWithTracking extends Mailbox {
+        trackingDomain: string | null;
+        trackingEnabled: boolean;
+      }
+      const mailboxData = mailbox as MailboxWithTracking;
+      const trackingDomain = mailboxData.trackingDomain || undefined;
+
       // Generate tracking pixel if enabled
       // Default to true unless environment variable or mailbox setting disables it
       const globalTrackingEnabled =
         process.env.EMAIL_TRACKING_ENABLED !== "false";
-      const mailboxTrackingEnabled = (mailbox as any).trackingEnabled !== false;
+      const mailboxTrackingEnabled = mailboxData.trackingEnabled !== false;
 
       const shouldTrackOpens =
         globalTrackingEnabled &&
@@ -103,11 +111,6 @@ export class EmailSendingService {
       // Inject tracking pixel into HTML
       let bodyHtml = options.bodyHtml;
       if (bodyHtml && trackingPixelId) {
-        // Safe access to trackingDomain
-        const mailboxData = mailbox as Mailbox & {
-          trackingDomain?: string | null;
-        };
-        const trackingDomain = mailboxData.trackingDomain || undefined;
         bodyHtml = this.injectTrackingPixel(
           bodyHtml,
           trackingPixelId,
@@ -153,8 +156,7 @@ export class EmailSendingService {
           "X-Entity-Ref-ID": randomUUID(),
           // "Precedence": "list", // Removed to keep it personal
           "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-          // Including a standard header helps reputation, but only if we have a real link
-          // For now, only adding the X-Entity header which is common for legitimate business tools
+          "List-Unsubscribe": `<${this.getTrackingBaseUrl(trackingDomain)}/api/email/unsubscribe?mailboxId=${mailbox.id}${trackingPixelId ? `&emailId=${trackingPixelId}` : ""}>`,
         },
       };
 
@@ -317,7 +319,6 @@ export class EmailSendingService {
   async scheduleSend(
     mailboxId: string,
     options: SendOptions,
-    scheduledAt?: Date,
   ): Promise<{ success: boolean; jobId?: string; error?: string }> {
     try {
       const { scheduleEmailSend } = await import("../queue");
@@ -352,7 +353,7 @@ export class EmailSendingService {
 
   async recordOpen(
     trackingPixelId: string,
-    metadata?: {
+    _metadata?: {
       ipAddress?: string;
       userAgent?: string;
     },
@@ -390,8 +391,8 @@ export class EmailSendingService {
 
   async recordClick(
     trackingPixelId: string,
-    url: string,
-    metadata?: {
+    _url: string,
+    _metadata?: {
       ipAddress?: string;
       userAgent?: string;
     },
