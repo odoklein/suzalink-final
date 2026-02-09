@@ -422,55 +422,12 @@ export default function ManagerCommsPage() {
                 default:
                     break;
             }
+
+
         },
         [session?.user?.id, debouncedFetchStats]
     );
 
-    useCommsRealtime({
-        enabled: !!session?.user?.id,
-        onEvent: handleRealtimeEvent,
-    });
-
-    // Initial load: threads and stats in parallel
-    useEffect(() => {
-        void fetchThreads();
-        void fetchStats();
-    }, [fetchThreads, fetchStats]);
-
-    // Handle thread selection: show header immediately, load messages in background
-    const handleSelectThread = useCallback(
-        (thread: CommsThreadListItem) => {
-            const minimalThread: CommsThreadView = {
-                ...thread,
-                participants: [],
-                messages: [],
-            };
-            setSelectedThread(minimalThread);
-            setIsLoadingThread(true);
-            fetch(`/api/comms/threads/${thread.id}`)
-                .then((res) => {
-                    if (!res.ok) throw new Error("Failed to load");
-                    return res.json();
-                })
-                .then((data: CommsThreadView) => {
-                    setSelectedThread((prev) => (prev?.id === thread.id ? data : prev));
-                })
-                .catch(() => {
-                    error("Erreur", "Impossible de charger la discussion");
-                    setSelectedThread((prev) => (prev?.id === thread.id ? null : prev));
-                })
-                .finally(() => setIsLoadingThread(false));
-        },
-        [error]
-    );
-
-    // Handle close thread panel
-    const handleCloseThread = () => {
-        setSelectedThread(null);
-        fetchThreads(true);
-    };
-
-    // Handle status change: optimistic update, no refetch
     const handleStatusChange = useCallback(
         async (status: CommsThreadStatus) => {
             const thread = selectedThread;
@@ -596,8 +553,93 @@ export default function ManagerCommsPage() {
                 error("Erreur", "Impossible d'envoyer le message");
             }
         },
-        [selectedThread?.id, session?.user, error]
+        [session?.user?.id, debouncedFetchStats]
     );
+
+    // Real-time hook with presence
+    const {
+        isConnected,
+        onlineUsers,
+        joinThread,
+        leaveThread,
+        startTyping,
+        stopTyping
+    } = useCommsRealtime({
+        enabled: !!session?.user?.id,
+        userId: session?.user?.id,
+        onEvent: handleRealtimeEvent,
+    });
+
+    // Keep track of selected thread for room management
+    const selectedThreadRef = useRef<string | null>(null);
+    useEffect(() => {
+        selectedThreadRef.current = selectedThread?.id || null;
+    }, [selectedThread?.id]);
+
+    // Initial load: threads and stats in parallel
+    useEffect(() => {
+        void fetchThreads();
+        void fetchStats();
+    }, [fetchThreads, fetchStats]);
+
+    // Handle thread selection
+    const handleSelectThread = useCallback(
+        (thread: CommsThreadListItem) => {
+            if (selectedThreadRef.current && selectedThreadRef.current !== thread.id) {
+                leaveThread(selectedThreadRef.current);
+            }
+            joinThread(thread.id);
+
+            const minimalThread: CommsThreadView = {
+                ...thread,
+                participants: [],
+                messages: [],
+            };
+            setSelectedThread(minimalThread);
+            setIsLoadingThread(true);
+            fetch(`/api/comms/threads/${thread.id}`)
+                .then((res) => {
+                    if (!res.ok) throw new Error("Failed to load");
+                    return res.json();
+                })
+                .then((data: CommsThreadView) => {
+                    setSelectedThread((prev) => (prev?.id === thread.id ? data : prev));
+                })
+                .catch(() => {
+                    error("Erreur", "Impossible de charger la discussion");
+                    setSelectedThread((prev) => (prev?.id === thread.id ? null : prev));
+                })
+                .finally(() => setIsLoadingThread(false));
+        },
+        [error, joinThread, leaveThread]
+    );
+
+    // Handle close thread panel
+    const handleCloseThread = useCallback(() => {
+        if (selectedThreadRef.current) {
+            leaveThread(selectedThreadRef.current);
+        }
+        setSelectedThread(null);
+        fetchThreads(true);
+    }, [leaveThread, fetchThreads]);
+
+    const handleTyping = useCallback((isTyping: boolean) => {
+        if (!session?.user?.name || !selectedThread?.id) return;
+        if (isTyping) {
+            startTyping(selectedThread.id, session.user.name);
+        } else {
+            stopTyping(selectedThread.id, session.user.name);
+        }
+    }, [selectedThread?.id, session?.user?.name, startTyping, stopTyping]);
+
+    const isRecipientOnline = useMemo(() => {
+        if (!selectedThread) return false;
+        return selectedThread.participants.some(
+            p => p.userId !== session?.user?.id && onlineUsers.has(p.userId)
+        );
+    }, [selectedThread, session?.user?.id, onlineUsers]);
+
+
 
     // Handle create thread
     const handleCreateThread = async (request: CreateThreadRequest) => {
@@ -647,266 +689,268 @@ export default function ManagerCommsPage() {
     return (
         <div className="flex flex-col min-h-[calc(100vh-8rem)] pb-10">
             {!focusMode && (
-            <>
-            <div className="shrink-0 space-y-4">
-                <CommsPageHeader
-                title="Communications"
-                subtitle="Gérez les discussions avec l'équipe"
-                slimTitle="Communications — Messages"
-                icon={<MessageSquare className="w-6 h-6 text-white" />}
-                collapsible={true}
-                actions={
-                    <>
-                        <button
-                            onClick={() => fetchThreads(true)}
-                            disabled={isRefreshing}
-                            className={cn(
-                                "p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors disabled:opacity-50"
-                            )}
-                            title="Actualiser"
-                        >
-                            <RefreshCw className={cn("w-4 h-4 text-slate-500", isRefreshing && "animate-spin")} />
-                        </button>
-                        <button
-                            onClick={() => setShowSearchPanel(true)}
-                            className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
-                            title="Recherche avancée"
-                        >
-                            <Search className="w-4 h-4 text-slate-500" />
-                        </button>
-                        <Button
-                            onClick={() => setShowNewThreadModal(true)}
-                            className="h-9 px-4 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white text-sm font-medium shadow-lg shadow-indigo-500/25"
-                        >
-                            <Plus className="w-4 h-4 mr-1.5" />
-                            Nouveau message
-                        </Button>
-                    </>
-                }
-            />
-            </div>
+                <>
+                    <div className="shrink-0 space-y-4">
+                        <CommsPageHeader
+                            title="Communications"
+                            subtitle="Gérez les discussions avec l'équipe"
+                            slimTitle="Communications — Messages"
+                            icon={<MessageSquare className="w-6 h-6 text-white" />}
+                            collapsible={true}
+                            actions={
+                                <>
+                                    <button
+                                        onClick={() => fetchThreads(true)}
+                                        disabled={isRefreshing}
+                                        className={cn(
+                                            "p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors disabled:opacity-50"
+                                        )}
+                                        title="Actualiser"
+                                    >
+                                        <RefreshCw className={cn("w-4 h-4 text-slate-500", isRefreshing && "animate-spin")} />
+                                    </button>
+                                    <button
+                                        onClick={() => setShowSearchPanel(true)}
+                                        className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
+                                        title="Recherche avancée"
+                                    >
+                                        <Search className="w-4 h-4 text-slate-500" />
+                                    </button>
+                                    <Button
+                                        onClick={() => setShowNewThreadModal(true)}
+                                        className="h-9 px-4 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white text-sm font-medium shadow-lg shadow-indigo-500/25"
+                                    >
+                                        <Plus className="w-4 h-4 mr-1.5" />
+                                        Nouveau message
+                                    </Button>
+                                </>
+                            }
+                        />
+                    </div>
 
-            {/* Stats Cards */}
-            <div className="shrink-0 grid grid-cols-4 gap-5 mt-4">
-                <StatCard
-                    icon={Inbox}
-                    label="Non lus"
-                    value={totalUnread}
-                    subValue="messages"
-                    color="indigo"
-                />
-                <StatCard
-                    icon={MessageSquare}
-                    label="Discussions ouvertes"
-                    value={openThreads}
-                    subValue="en cours"
-                    color="emerald"
-                />
-                <StatCard
-                    icon={MessageCircle}
-                    label="Directs"
-                    value={stats?.unreadByType?.DIRECT || 0}
-                    subValue="non lus"
-                    color="blue"
-                />
-                <StatCard
-                    icon={Target}
-                    label="Missions"
-                    value={stats?.unreadByType?.MISSION || 0}
-                    subValue="non lus"
-                    color="amber"
-                />
-            </div>
-            </>
+                    {/* Stats Cards */}
+                    <div className="shrink-0 grid grid-cols-4 gap-5 mt-4">
+                        <StatCard
+                            icon={Inbox}
+                            label="Non lus"
+                            value={totalUnread}
+                            subValue="messages"
+                            color="indigo"
+                        />
+                        <StatCard
+                            icon={MessageSquare}
+                            label="Discussions ouvertes"
+                            value={openThreads}
+                            subValue="en cours"
+                            color="emerald"
+                        />
+                        <StatCard
+                            icon={MessageCircle}
+                            label="Directs"
+                            value={stats?.unreadByType?.DIRECT || 0}
+                            subValue="non lus"
+                            color="blue"
+                        />
+                        <StatCard
+                            icon={Target}
+                            label="Missions"
+                            value={stats?.unreadByType?.MISSION || 0}
+                            subValue="non lus"
+                            color="amber"
+                        />
+                    </div>
+                </>
             )}
 
             {/* Main Content - stretches to fill */}
             <div className="flex-1 min-h-0 flex flex-col mt-4">
-            <div className="flex gap-0 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-white dark:bg-[#151c2a] shadow-sm flex-1 min-h-0">
-                {/* Thread List Panel - fixed 400px like inspo */}
-                <div className={cn(
-                    "flex flex-col shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-[#151c2a] transition-all duration-300 min-h-0",
-                    focusMode ? "hidden" : isListCollapsed ? "w-14" : "w-[400px]"
-                )}>
-                    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-                        {/* List Header - inspo: Inbox title, filter btn, search */}
-                        <div className={cn(
-                            "border-b border-slate-100 dark:border-slate-800 p-4 shrink-0",
-                            isListCollapsed && "p-2 flex flex-col items-center"
-                        )}>
-                            {!isListCollapsed ? (
-                                <>
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Inbox</h2>
-                                        <div className="flex items-center gap-1">
-                                            <button
-                                                onClick={() => setIsListCollapsed(true)}
-                                                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-500 transition-colors"
-                                                title="Réduire"
-                                            >
-                                                <PanelLeftClose className="w-4 h-4" />
-                                            </button>
+                <div className="flex gap-0 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-white dark:bg-[#151c2a] shadow-sm flex-1 min-h-0">
+                    {/* Thread List Panel - fixed 400px like inspo */}
+                    <div className={cn(
+                        "flex flex-col shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-[#151c2a] transition-all duration-300 min-h-0",
+                        focusMode ? "hidden" : isListCollapsed ? "w-14" : "w-[400px]"
+                    )}>
+                        <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                            {/* List Header - inspo: Inbox title, filter btn, search */}
+                            <div className={cn(
+                                "border-b border-slate-100 dark:border-slate-800 p-4 shrink-0",
+                                isListCollapsed && "p-2 flex flex-col items-center"
+                            )}>
+                                {!isListCollapsed ? (
+                                    <>
+                                        <div className="flex items-center justify-between mb-4">
+                                            <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Inbox</h2>
+                                            <div className="flex items-center gap-1">
+                                                <button
+                                                    onClick={() => setIsListCollapsed(true)}
+                                                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-500 transition-colors"
+                                                    title="Réduire"
+                                                >
+                                                    <PanelLeftClose className="w-4 h-4" />
+                                                </button>
+                                            </div>
                                         </div>
-                                    </div>
 
-                                    <div className="relative">
-                                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400 pointer-events-none" />
-                                        <Input
-                                            value={searchQuery}
-                                            onChange={(e) => setSearchQuery(e.target.value)}
-                                            placeholder="Rechercher des messages..."
-                                            className="w-full pl-10 pr-4 py-2.5 text-sm bg-slate-50 dark:bg-slate-900 border-0 rounded-lg focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-white placeholder-slate-400"
-                                        />
-                                    </div>
+                                        <div className="relative">
+                                            <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400 pointer-events-none" />
+                                            <Input
+                                                value={searchQuery}
+                                                onChange={(e) => setSearchQuery(e.target.value)}
+                                                placeholder="Rechercher des messages..."
+                                                className="w-full pl-10 pr-4 py-2.5 text-sm bg-slate-50 dark:bg-slate-900 border-0 rounded-lg focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-white placeholder-slate-400"
+                                            />
+                                        </div>
 
-                                    {/* Smart filter chips - inspo style */}
-                                    <div className="flex gap-2 overflow-x-auto py-3 border-b border-slate-100 dark:border-slate-800 -mx-4 px-4 no-scrollbar">
-                                        <button
-                                            onClick={() => setFilters((p) => ({ ...p, unreadOnly: !p.unreadOnly }))}
-                                            className={cn(
-                                                "flex h-7 items-center justify-center px-3 rounded-full text-xs font-semibold whitespace-nowrap transition-colors border",
-                                                filters.unreadOnly
-                                                    ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20"
-                                                    : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 text-slate-600 dark:text-slate-300"
-                                            )}
-                                        >
-                                            Non lus {totalUnread > 0 && `(${totalUnread})`}
-                                        </button>
-                                        {FILTER_OPTIONS.map((opt) => (
+                                        {/* Smart filter chips - inspo style */}
+                                        <div className="flex gap-2 overflow-x-auto py-3 border-b border-slate-100 dark:border-slate-800 -mx-4 px-4 no-scrollbar">
                                             <button
-                                                key={opt.type}
-                                                onClick={() => handleFilterChange(opt.type)}
+                                                onClick={() => setFilters((p) => ({ ...p, unreadOnly: !p.unreadOnly }))}
                                                 className={cn(
-                                                    "flex h-7 items-center justify-center gap-1 px-3 rounded-full text-xs font-medium whitespace-nowrap transition-colors border",
-                                                    (filters.type === opt.type || (opt.type === "all" && !filters.type))
+                                                    "flex h-7 items-center justify-center px-3 rounded-full text-xs font-semibold whitespace-nowrap transition-colors border",
+                                                    filters.unreadOnly
                                                         ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20"
                                                         : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 text-slate-600 dark:text-slate-300"
                                                 )}
                                             >
-                                                {opt.label}
-                                                {stats && opt.type !== "all" && stats.unreadByType[opt.type as CommsChannelType] > 0 && (
-                                                    <span className="ml-0.5 text-[10px] bg-indigo-500 text-white rounded-full px-1.5 py-0.5">
-                                                        {stats.unreadByType[opt.type as CommsChannelType]}
-                                                    </span>
-                                                )}
+                                                Non lus {totalUnread > 0 && `(${totalUnread})`}
                                             </button>
+                                            {FILTER_OPTIONS.map((opt) => (
+                                                <button
+                                                    key={opt.type}
+                                                    onClick={() => handleFilterChange(opt.type)}
+                                                    className={cn(
+                                                        "flex h-7 items-center justify-center gap-1 px-3 rounded-full text-xs font-medium whitespace-nowrap transition-colors border",
+                                                        (filters.type === opt.type || (opt.type === "all" && !filters.type))
+                                                            ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20"
+                                                            : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 text-slate-600 dark:text-slate-300"
+                                                    )}
+                                                >
+                                                    {opt.label}
+                                                    {stats && opt.type !== "all" && stats.unreadByType[opt.type as CommsChannelType] > 0 && (
+                                                        <span className="ml-0.5 text-[10px] bg-indigo-500 text-white rounded-full px-1.5 py-0.5">
+                                                            {stats.unreadByType[opt.type as CommsChannelType]}
+                                                        </span>
+                                                    )}
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        {(filters.type || debouncedSearchQuery || filters.unreadOnly) && (
+                                            <div className="mt-3 flex items-center justify-between">
+                                                <span className="text-xs text-slate-500">
+                                                    {threads.length} résultat{threads.length !== 1 ? "s" : ""}
+                                                </span>
+                                                <button
+                                                    onClick={() => {
+                                                        setFilters({});
+                                                        setSearchQuery("");
+                                                    }}
+                                                    className="text-xs text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
+                                                >
+                                                    Effacer
+                                                </button>
+                                            </div>
+                                        )}
+                                    </>
+                                ) : (
+                                    <div className="flex flex-col items-center gap-2">
+                                        <button
+                                            onClick={() => setIsListCollapsed(false)}
+                                            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                                            title="Développer"
+                                        >
+                                            <PanelLeft className="w-5 h-5" />
+                                        </button>
+                                        {totalUnread > 0 && (
+                                            <span className="px-2 py-0.5 text-xs font-medium text-white bg-indigo-500 rounded-full">
+                                                {totalUnread}
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Thread List */}
+                            <div className={cn(
+                                "flex-1 overflow-y-auto",
+                                isListCollapsed && "hidden"
+                            )}>
+                                {isLoading ? (
+                                    <div className="space-y-2 p-4">
+                                        {[1, 2, 3, 4, 5].map((i) => (
+                                            <div
+                                                key={i}
+                                                className="animate-pulse bg-slate-100 rounded-xl h-20"
+                                            />
                                         ))}
                                     </div>
-
-                                    {(filters.type || debouncedSearchQuery || filters.unreadOnly) && (
-                                        <div className="mt-3 flex items-center justify-between">
-                                            <span className="text-xs text-slate-500">
-                                                {threads.length} résultat{threads.length !== 1 ? "s" : ""}
-                                            </span>
-                                            <button
-                                                onClick={() => {
-                                                    setFilters({});
-                                                    setSearchQuery("");
-                                                }}
-                                                className="text-xs text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
-                                            >
-                                                Effacer
-                                            </button>
+                                ) : threads.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center h-full py-12">
+                                        <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                                            <MessageSquare className="w-8 h-8 text-slate-400" />
                                         </div>
-                                    )}
-                                </>
-                            ) : (
-                                <div className="flex flex-col items-center gap-2">
-                                    <button
-                                        onClick={() => setIsListCollapsed(false)}
-                                        className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                                        title="Développer"
-                                    >
-                                        <PanelLeft className="w-5 h-5" />
-                                    </button>
-                                    {totalUnread > 0 && (
-                                        <span className="px-2 py-0.5 text-xs font-medium text-white bg-indigo-500 rounded-full">
-                                            {totalUnread}
-                                        </span>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Thread List */}
-                        <div className={cn(
-                            "flex-1 overflow-y-auto",
-                            isListCollapsed && "hidden"
-                        )}>
-                            {isLoading ? (
-                                <div className="space-y-2 p-4">
-                                    {[1, 2, 3, 4, 5].map((i) => (
-                                        <div
-                                            key={i}
-                                            className="animate-pulse bg-slate-100 rounded-xl h-20"
-                                        />
-                                    ))}
-                                </div>
-                            ) : threads.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center h-full py-12">
-                                    <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
-                                        <MessageSquare className="w-8 h-8 text-slate-400" />
+                                        <h3 className="text-lg font-semibold text-slate-900 mb-2">
+                                            {debouncedSearchQuery || filters.type ? "Aucun résultat" : "Aucune discussion"}
+                                        </h3>
+                                        <p className="text-sm text-slate-500 text-center max-w-xs">
+                                            {debouncedSearchQuery || filters.type
+                                                ? "Essayez de modifier vos filtres"
+                                                : "Envoyez un premier message pour commencer"
+                                            }
+                                        </p>
                                     </div>
-                                    <h3 className="text-lg font-semibold text-slate-900 mb-2">
-                                        {debouncedSearchQuery || filters.type ? "Aucun résultat" : "Aucune discussion"}
-                                    </h3>
-                                    <p className="text-sm text-slate-500 text-center max-w-xs">
-                                        {debouncedSearchQuery || filters.type
-                                            ? "Essayez de modifier vos filtres"
-                                            : "Envoyez un premier message pour commencer"
-                                        }
-                                    </p>
-                                </div>
-                            ) : (
-                                <ThreadList
-                                    threads={threads}
-                                    selectedId={selectedThread?.id}
-                                    onSelect={handleSelectThread}
-                                    currentUserId={session?.user?.id}
-                                />
-                            )}
+                                ) : (
+                                    <ThreadList
+                                        threads={threads}
+                                        selectedId={selectedThread?.id}
+                                        onSelect={handleSelectThread}
+                                        currentUserId={session?.user?.id}
+                                    />
+                                )}
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                {/* Thread View Panel - flex-1 fills remaining height */}
-                <div className="flex-1 flex flex-col min-w-0 min-h-0">
-                    {isLoadingThread ? (
-                        <div className="flex items-center justify-center h-full">
-                            <div className="flex flex-col items-center gap-3">
-                                <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
-                                <p className="text-sm text-slate-500">Chargement...</p>
-                            </div>
-                        </div>
-                    ) : selectedThread ? (
-                        <ThreadView
-                            thread={selectedThread}
-                            onClose={handleCloseThread}
-                            onStatusChange={handleStatusChange}
-                            onSendMessage={handleSendMessage}
-                            onReactionToggle={() => selectedThread && fetchThreadDetails(selectedThread.id)}
-                            currentUserId={session?.user?.id || ""}
-                            typingUserName={getTypingText(selectedThread.id)}
-                            focusMode={focusMode}
-                            onFocusModeChange={setFocusMode}
-                        />
-                    ) : (
-                        <div className="flex-1 flex flex-col items-center justify-center h-full bg-white dark:bg-[#151c2a]">
-                            <div className="text-center">
-                                <div className="w-20 h-20 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto mb-5">
-                                    <MessageSquare className="w-10 h-10 text-slate-400" />
+                    {/* Thread View Panel - flex-1 fills remaining height */}
+                    <div className="flex-1 flex flex-col min-w-0 min-h-0">
+                        {isLoadingThread ? (
+                            <div className="flex items-center justify-center h-full">
+                                <div className="flex flex-col items-center gap-3">
+                                    <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+                                    <p className="text-sm text-slate-500">Chargement...</p>
                                 </div>
-                                <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
-                                    Sélectionnez une discussion
-                                </h3>
-                                <p className="text-sm text-slate-500 max-w-sm">
-                                    Choisissez une conversation dans la liste pour commencer
-                                </p>
                             </div>
-                        </div>
-                    )}
+                        ) : selectedThread ? (
+                            <ThreadView
+                                thread={selectedThread}
+                                onClose={handleCloseThread}
+                                onStatusChange={handleStatusChange}
+                                onSendMessage={handleSendMessage}
+                                onReactionToggle={() => selectedThread && fetchThreadDetails(selectedThread.id)}
+                                currentUserId={session?.user?.id || ""}
+                                typingUserName={getTypingText(selectedThread.id)}
+                                focusMode={focusMode}
+                                onFocusModeChange={setFocusMode}
+                                isRecipientOnline={isRecipientOnline}
+                                onTyping={handleTyping}
+                            />
+                        ) : (
+                            <div className="flex-1 flex flex-col items-center justify-center h-full bg-white dark:bg-[#151c2a]">
+                                <div className="text-center">
+                                    <div className="w-20 h-20 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto mb-5">
+                                        <MessageSquare className="w-10 h-10 text-slate-400" />
+                                    </div>
+                                    <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
+                                        Sélectionnez une discussion
+                                    </h3>
+                                    <p className="text-sm text-slate-500 max-w-sm">
+                                        Choisissez une conversation dans la liste pour commencer
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
-            </div>
             </div>
 
             {/* New thread modal */}
