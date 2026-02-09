@@ -10,10 +10,15 @@ import {
   ProspectStatus,
   DecisionOutcome,
 } from "@prisma/client";
-import { normalizeProfile, NormalizedProfile } from "./normalization-service";
+import { normalizeProfile } from "./normalization-service";
 import { evaluateRule, applyAction } from "./rule-engine";
 import { calculateScores } from "./scoring-service";
-import { ProspectRule } from "@prisma/client";
+import { JsonValue } from "@prisma/client/runtime/library";
+
+type ProfileWithRelations = ProspectProfile & {
+  assignedMission?: import("@prisma/client").Mission | null;
+  events?: import("@prisma/client").ProspectEvent[];
+};
 
 // ============================================
 // PROCESS PROFILE THROUGH PIPELINE
@@ -23,6 +28,7 @@ export async function processProfile(profileId: string): Promise<void> {
   const profile = await prisma.prospectProfile.findUnique({
     where: { id: profileId },
     include: {
+      assignedMission: true,
       events: {
         orderBy: { createdAt: "desc" },
         take: 1,
@@ -36,11 +42,12 @@ export async function processProfile(profileId: string): Promise<void> {
 
   // Process each step in order
   let currentStep = profile.currentStep;
-  let updatedProfile = { ...profile };
+  let updatedProfile = { ...profile } as ProfileWithRelations;
 
   // NORMALIZE
   if (currentStep === ProspectPipelineStep.INTAKE) {
-    updatedProfile = await processNormalizeStep(updatedProfile);
+    const normalizedData = await processNormalizeStep(updatedProfile);
+    updatedProfile = { ...updatedProfile, ...normalizedData };
     currentStep = ProspectPipelineStep.NORMALIZE;
   }
 
@@ -79,7 +86,8 @@ export async function processProfile(profileId: string): Promise<void> {
 
   // SCORE
   if (currentStep === ProspectPipelineStep.ENRICH) {
-    updatedProfile = await processScoreStep(updatedProfile);
+    const scoreData = await processScoreStep(updatedProfile);
+    updatedProfile = { ...updatedProfile, ...scoreData };
     currentStep = ProspectPipelineStep.SCORE;
   }
 
@@ -139,11 +147,18 @@ export async function processProfile(profileId: string): Promise<void> {
   }
 
   // Update profile with new step
+  // Filter out relation fields and internal tracking before update
+  const dataToUpdate = { ...updatedProfile };
+  const untypedData = dataToUpdate as Record<string, unknown>;
+  delete untypedData.events;
+  delete untypedData.assignedMission;
+  delete untypedData.currentStep;
+
   await prisma.prospectProfile.update({
     where: { id: profileId },
     data: {
       currentStep,
-      ...updatedProfile,
+      ...(untypedData as unknown as import("@prisma/client").Prisma.ProspectProfileUpdateInput),
     },
   });
 }
@@ -198,7 +213,7 @@ async function checkDeduplication(
 // ============================================
 
 async function processNormalizeStep(
-  profile: ProspectProfile,
+  profile: ProfileWithRelations,
 ): Promise<Partial<ProspectProfile>> {
   // Get latest event with raw payload
   const latestEvent = await prisma.prospectEvent.findFirst({
@@ -232,7 +247,7 @@ async function processNormalizeStep(
 // VALIDATE STEP
 // ============================================
 
-async function processValidateStep(profile: ProspectProfile): Promise<{
+async function processValidateStep(profile: ProfileWithRelations): Promise<{
   updatedProfile: Partial<ProspectProfile>;
   reviewRequired: boolean;
   rejected: boolean;
@@ -258,12 +273,15 @@ async function processValidateStep(profile: ProspectProfile): Promise<{
 
   // Evaluate each rule
   for (const rule of rules) {
-    const evaluation = evaluateRule(rule, profile as ProspectProfile);
+    const evaluation = evaluateRule(
+      rule,
+      profile as unknown as ProspectProfile,
+    );
 
     if (evaluation.matched && evaluation.action) {
       const actionResult = applyAction(
         evaluation.action,
-        profile as ProspectProfile,
+        profile as unknown as ProspectProfile,
       );
 
       // Merge updates
@@ -301,7 +319,7 @@ async function processValidateStep(profile: ProspectProfile): Promise<{
 // ENRICH STEP (APOLLO.IO)
 // ============================================
 
-async function processEnrichStep(profile: ProspectProfile): Promise<{
+async function processEnrichStep(profile: ProfileWithRelations): Promise<{
   enrichedData: Partial<ProspectProfile> | null;
 }> {
   // Check if enrichment is enabled for this client
@@ -331,7 +349,9 @@ async function processEnrichStep(profile: ProspectProfile): Promise<{
 
   try {
     const { enrichFromApollo } = await import("@/lib/listing/apollo-service");
-    const apolloResult = await enrichFromApollo(profile);
+    const apolloResult = await enrichFromApollo(
+      profile as unknown as ProspectProfile,
+    );
 
     if (!apolloResult) {
       // No enrichment data found - this is not an error
@@ -411,7 +431,8 @@ async function processEnrichStep(profile: ProspectProfile): Promise<{
     }
 
     // Store full Apollo response in customFields for reference
-    const existingCustomFields = (profile.customFields as any) || {};
+    const existingCustomFields =
+      (profile.customFields as Record<string, unknown>) || {};
     enrichedData.customFields = {
       ...existingCustomFields,
       apolloEnrichment: {
@@ -432,7 +453,9 @@ async function processEnrichStep(profile: ProspectProfile): Promise<{
             })
           )?.sourceId || "", // Use original source
         profileId: profile.id,
-        rawPayload: apolloResult,
+        rawPayload:
+          (apolloResult as unknown as import("@prisma/client").Prisma.InputJsonValue) ||
+          {},
         eventType: "enrichment",
         step: ProspectPipelineStep.ENRICH,
         outcome: DecisionOutcome.PASS,
@@ -467,7 +490,6 @@ async function processEnrichStep(profile: ProspectProfile): Promise<{
     // Enrichment failure should NEVER break the pipeline
     console.error("[Pipeline] Enrichment step failed (continuing):", {
       message: error instanceof Error ? error.message : "Unknown error",
-      // DO NOT log profileId or PII
     });
 
     await createDecisionLog(
@@ -489,9 +511,9 @@ async function processEnrichStep(profile: ProspectProfile): Promise<{
 // ============================================
 
 async function processScoreStep(
-  profile: ProspectProfile,
+  profile: ProfileWithRelations,
 ): Promise<Partial<ProspectProfile>> {
-  const scores = calculateScores(profile);
+  const scores = calculateScores(profile as unknown as ProspectProfile);
 
   // Apply scoring rules
   const rules = await prisma.prospectRule.findMany({
@@ -512,13 +534,13 @@ async function processScoreStep(
     const evaluation = evaluateRule(rule, {
       ...profile,
       qualityScore,
-    } as ProspectProfile);
+    } as unknown as ProspectProfile);
 
     if (evaluation.matched && evaluation.action) {
       const actionResult = applyAction(evaluation.action, {
         ...profile,
         qualityScore,
-      } as ProspectProfile);
+      } as unknown as ProspectProfile);
       qualityScore = actionResult.updatedProfile.qualityScore || qualityScore;
 
       await createDecisionLog(
@@ -576,9 +598,9 @@ async function createDecisionLog(
   data: {
     reason: string;
     ruleId?: string;
-    ruleResult?: any;
-    inputData?: any;
-    outputData?: any;
+    ruleResult?: unknown;
+    inputData?: unknown;
+    outputData?: unknown;
   },
 ) {
   await prisma.prospectDecisionLog.create({
@@ -587,9 +609,9 @@ async function createDecisionLog(
       step,
       outcome,
       ruleId: data.ruleId,
-      ruleResult: data.ruleResult || null,
-      inputData: data.inputData || {},
-      outputData: data.outputData || null,
+      ruleResult: (data.ruleResult as JsonValue) || undefined,
+      inputData: (data.inputData as JsonValue) || {},
+      outputData: (data.outputData as JsonValue) || undefined,
       reason: data.reason,
       executedBy: "system",
     },
@@ -600,25 +622,20 @@ async function updateProfileStatus(
   profileId: string,
   status: ProspectStatus,
   reason: string,
-  reviewReason?: string,
+  notes?: string,
 ) {
   await prisma.prospectProfile.update({
     where: { id: profileId },
     data: {
       status,
-      reviewRequired: status === ProspectStatus.IN_REVIEW,
-      reviewReason: reviewReason || reason,
+      reviewReason: reason,
+      reviewNotes: notes,
     },
   });
 }
 
 async function getPipelineConfig(clientId: string | null) {
-  if (!clientId) {
-    return await prisma.prospectPipelineConfig.findFirst({
-      where: { clientId: null },
-    });
-  }
-  return await prisma.prospectPipelineConfig.findUnique({
+  return await prisma.prospectPipelineConfig.findFirst({
     where: { clientId },
   });
 }

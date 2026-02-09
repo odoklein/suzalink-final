@@ -3,29 +3,24 @@
 import React, { useState, useEffect, use } from "react";
 import { cn } from "@/lib/utils";
 import {
-    Mail,
     Settings,
     Shield,
     ShieldCheck,
     Globe,
-    CheckCircle,
     AlertCircle,
     Loader2,
     ArrowLeft,
     Save,
     Copy,
     Info,
-    ExternalLink,
-    ChevronRight,
     Eye,
     Activity,
     Trash2,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
-import { Button } from "@/components/ui/Button";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
-import { Badge } from "@/components/ui/Badge";
-import { toast } from "@/components/ui/Toast";
+import Button from "@/components/ui/Button";
+import Badge from "@/components/ui/Badge";
+import { useToast } from "@/components/ui/Toast";
 
 interface MailboxDetail {
     id: string;
@@ -48,6 +43,7 @@ interface MailboxDetail {
 }
 
 export default function MailboxSettingsPage({ params }: { params: Promise<{ id: string }> }) {
+    const { addToast } = useToast();
     const { id } = use(params);
     const [mailbox, setMailbox] = useState<MailboxDetail | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -102,19 +98,19 @@ export default function MailboxSettingsPage({ params }: { params: Promise<{ id: 
             const json = await res.json();
             if (json.success) {
                 setMailbox(json.data);
-                toast({
+                addToast({
                     title: "Succès",
-                    description: "Configuration mise à jour avec succès.",
-                    variant: "success",
+                    message: "Configuration mise à jour avec succès.",
+                    type: "success",
                 });
             } else {
                 throw new Error(json.error);
             }
         } catch (error) {
-            toast({
+            addToast({
                 title: "Erreur",
-                description: error instanceof Error ? error.message : "Échec de la sauvegarde",
-                variant: "error",
+                message: error instanceof Error ? error.message : "Échec de la sauvegarde",
+                type: "error",
             });
         } finally {
             setIsSaving(false);
@@ -123,9 +119,10 @@ export default function MailboxSettingsPage({ params }: { params: Promise<{ id: 
 
     const copyToClipboard = (text: string) => {
         navigator.clipboard.writeText(text);
-        toast({
+        addToast({
             title: "Copié",
-            description: "Valeur copiée dans le presse-papier",
+            message: "Valeur copiée dans le presse-papier",
+            type: "info"
         });
     };
 
@@ -171,7 +168,7 @@ export default function MailboxSettingsPage({ params }: { params: Promise<{ id: 
                     </button>
                     <div className="flex items-center gap-3">
                         <h1 className="text-3xl font-bold text-slate-900">{mailbox.email}</h1>
-                        <Badge variant={mailbox.isActive ? "success" : "secondary"}>
+                        <Badge variant={mailbox.isActive ? "success" : "default"}>
                             {mailbox.isActive ? "Connecté" : "Inactif"}
                         </Badge>
                     </div>
@@ -243,7 +240,7 @@ export default function MailboxSettingsPage({ params }: { params: Promise<{ id: 
                                 <CardContent className="space-y-4">
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div className="space-y-2">
-                                            <label className="text-sm font-semibold text-slate-700">Nom d'affichage</label>
+                                            <label className="text-sm font-semibold text-slate-700">Nom d&apos;affichage</label>
                                             <input
                                                 type="text"
                                                 value={displayName}
@@ -251,10 +248,10 @@ export default function MailboxSettingsPage({ params }: { params: Promise<{ id: 
                                                 placeholder="John Doe"
                                                 className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
                                             />
-                                            <p className="text-xs text-slate-500">Le nom qui apparaîtra dans l'en-tête "De" de vos emails.</p>
+                                            <p className="text-xs text-slate-500">Le nom qui apparaîtra dans l&apos;en-tête &quot;De&quot; de vos emails.</p>
                                         </div>
                                         <div className="space-y-2">
-                                            <label className="text-sm font-semibold text-slate-700">Limite quotidienne d'envoi</label>
+                                            <label className="text-sm font-semibold text-slate-700">Limite quotidienne d&apos;envoi</label>
                                             <input
                                                 type="number"
                                                 value={dailySendLimit}
@@ -303,7 +300,7 @@ export default function MailboxSettingsPage({ params }: { params: Promise<{ id: 
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <span className="text-xs font-medium text-emerald-600 uppercase tracking-wider">Statut:</span>
-                                        <Badge variant={trackingEnabled ? "success" : "secondary"}>
+                                        <Badge variant={trackingEnabled ? "success" : "default"}>
                                             {trackingEnabled ? "Activé" : "Désactivé"}
                                         </Badge>
                                     </div>
@@ -380,7 +377,7 @@ export default function MailboxSettingsPage({ params }: { params: Promise<{ id: 
                                                 <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
                                                 <div className="text-xs text-amber-800 space-y-1">
                                                     <p className="font-bold">Important pour la mise en production</p>
-                                                    <p>Une fois le CNAME ajouté, attendez la propagation DNS (jusqu'à 24h) pour que vos emails ne tombent plus en spam.</p>
+                                                    <p>Une fois le CNAME ajouté, attendez la propagation DNS (jusqu&apos;à 24h) pour que vos emails ne tombent plus en spam.</p>
                                                 </div>
                                             </div>
                                         </div>
@@ -426,7 +423,7 @@ export default function MailboxSettingsPage({ params }: { params: Promise<{ id: 
                             <Card>
                                 <CardHeader>
                                     <CardTitle className="text-lg flex items-center gap-2">
-                                        <Activity className="w-5 h-5 text-indigo-500" /> Logs d'activité récents
+                                        <Activity className="w-5 h-5 text-indigo-500" /> Logs d&apos;activité récents
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent>

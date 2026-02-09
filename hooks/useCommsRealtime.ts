@@ -40,7 +40,8 @@ export function useCommsRealtime(
   const [isConnected, setIsConnected] = useState(false);
   const [lastEvent, setLastEvent] = useState<CommsRealtimePayload | null>(null);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
-  const [socket, setSocket] = useState<Socket | null>(null); // Changed from useRef to useState
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const socketRef = useRef<Socket | null>(null);
 
   const onEventRef = useRef(onEvent);
   const onPresenceChangeRef = useRef(onPresenceChange);
@@ -58,14 +59,17 @@ export function useCommsRealtime(
     console.log("Connecting to socket:", SOCKET_URL, "UserId:", userId);
 
     const newSocket = io(SOCKET_URL, {
-      // Use a local variable for the new socket
       query: { userId },
       transports: ["websocket"],
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
     });
 
-    setSocket(newSocket); // Set the state
+    socketRef.current = newSocket;
+    // Set socket in a microtask to avoid cascading render warning in effect body
+    Promise.resolve().then(() => {
+      setSocket(newSocket);
+    });
 
     newSocket.on("connect", () => {
       console.log("Socket connected:", newSocket.id);
@@ -77,8 +81,7 @@ export function useCommsRealtime(
       setIsConnected(false);
     });
 
-    newSocket.on("connect_error", (err: any) => {
-      // Explicitly cast to any
+    newSocket.on("connect_error", (err: Error) => {
       console.error("Socket connection error:", err);
     });
 
@@ -101,89 +104,90 @@ export function useCommsRealtime(
       },
     );
 
-    newSocket.on("typing_start", (data: any) => {
-      // Explicitly cast to any
-      const payload: CommsRealtimePayload = {
-        type: "typing_start",
-        threadId: data.threadId,
-        userId: data.userId,
-        userName: data.userName,
-        timestamp: new Date().toISOString(),
-      };
-      // Avoid duplicate events if possible, or let consumer dbounce
-      setLastEvent(payload);
-      onEventRef.current?.(payload);
-    });
+    newSocket.on(
+      "typing_start",
+      (data: { threadId: string; userId: string; userName: string }) => {
+        const payload: CommsRealtimePayload = {
+          type: "typing_start",
+          threadId: data.threadId,
+          userId: data.userId,
+          userName: data.userName,
+          timestamp: new Date().toISOString(),
+        };
+        setLastEvent(payload);
+        onEventRef.current?.(payload);
+      },
+    );
 
-    newSocket.on("typing_stop", (data: any) => {
-      // Explicitly cast to any
-      const payload: CommsRealtimePayload = {
-        type: "typing_stop",
-        threadId: data.threadId,
-        userId: data.userId,
-        userName: data.userName,
-        timestamp: new Date().toISOString(),
-      };
-      setLastEvent(payload);
-      onEventRef.current?.(payload);
-    });
+    newSocket.on(
+      "typing_stop",
+      (data: { threadId: string; userId: string; userName: string }) => {
+        const payload: CommsRealtimePayload = {
+          type: "typing_stop",
+          threadId: data.threadId,
+          userId: data.userId,
+          userName: data.userName,
+          timestamp: new Date().toISOString(),
+        };
+        setLastEvent(payload);
+        onEventRef.current?.(payload);
+      },
+    );
 
-    newSocket.on("message_created", (data: any) => {
-      // Explicitly cast to any
-      const payload: CommsRealtimePayload = {
-        type: "message_created",
-        threadId: data.threadId,
-        messageId: data.messageId,
-        content: data.content,
-        userId: data.userId,
-        userName: data.userName,
-        createdAt: data.createdAt,
-        timestamp: new Date().toISOString(),
-      };
-      setLastEvent(payload);
-      onEventRef.current?.(payload);
-    });
+    newSocket.on(
+      "message_created",
+      (data: {
+        threadId: string;
+        messageId: string;
+        content: string;
+        userId: string;
+        userName: string;
+        createdAt: string;
+      }) => {
+        const payload: CommsRealtimePayload = {
+          type: "message_created",
+          threadId: data.threadId,
+          messageId: data.messageId,
+          content: data.content,
+          userId: data.userId,
+          userName: data.userName,
+          createdAt: data.createdAt,
+          timestamp: new Date().toISOString(),
+        };
+        setLastEvent(payload);
+        onEventRef.current?.(payload);
+      },
+    );
 
     return () => {
-      newSocket.disconnect(); // Disconnect the socket created in this effect run
-      setSocket(null); // Clear the state
+      newSocket.disconnect();
+      socketRef.current = null;
+      setSocket(null);
     };
   }, [enabled, userId]);
 
   // --- Actions ---
 
-  const joinThread = useCallback(
-    (threadId: string) => {
-      socket?.emit("join_thread", threadId);
-    },
-    [socket],
-  ); // Added socket to dependencies
+  const joinThread = useCallback((threadId: string) => {
+    socketRef.current?.emit("join_thread", threadId);
+  }, []);
 
-  const leaveThread = useCallback(
-    (threadId: string) => {
-      socket?.emit("leave_thread", threadId);
-    },
-    [socket],
-  ); // Added socket to dependencies
+  const leaveThread = useCallback((threadId: string) => {
+    socketRef.current?.emit("leave_thread", threadId);
+  }, []);
 
-  const startTyping = useCallback(
-    (threadId: string, userName: string) => {
-      socket?.emit("typing_start", { threadId, userName });
-    },
-    [socket],
-  ); // Added socket to dependencies
+  const startTyping = useCallback((threadId: string, userName: string) => {
+    socketRef.current?.emit("typing_start", { threadId, userName });
+  }, []);
 
-  const stopTyping = useCallback(
-    (threadId: string, userName: string) => {
-      socket?.emit("typing_stop", { threadId, userName });
-    },
-    [socket],
-  ); // Added socket to dependencies
+  const stopTyping = useCallback((threadId: string, userName: string) => {
+    socketRef.current?.emit("typing_stop", { threadId, userName });
+  }, []);
 
   return {
     isConnected,
     lastEvent,
-    socket, // Changed from socketRef.current to socket state
+    socket,
     onlineUsers,
     joinThread,
     leaveThread,

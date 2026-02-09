@@ -337,7 +337,8 @@ function AddBlockModal({
         return missions.filter(m => member.missions.some(mm => mm.id === m.id));
     }, [member, missions]);
 
-    // Reset when opening
+    // State is naturally reset because component is only mounted when modal opens
+    /*
     useEffect(() => {
         if (isOpen) {
             setSelectedMission("");
@@ -346,6 +347,7 @@ function AddBlockModal({
             setSelectedDuration(3);
         }
     }, [isOpen]);
+    */
 
     const handleDurationClick = (dur: typeof QUICK_DURATIONS[0]) => {
         if (dur.start && dur.end) {
@@ -767,7 +769,7 @@ export default function PlanningPage() {
                             <span className="font-semibold text-slate-900">{formatWeekRange()}</span>
                         </div>
                     </div>
-                    <Button variant="secondary" size="sm" onClick={goToToday}>Aujourd'hui</Button>
+                    <Button variant="secondary" size="sm" onClick={goToToday}>Aujourd&apos;hui</Button>
                 </div>
             </Card>
 
@@ -808,7 +810,7 @@ export default function PlanningPage() {
                     {teamMembers.length === 0 ? (
                         <div className="text-center py-12 text-slate-400">
                             <Users className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                            <p>Aucun membre d'équipe</p>
+                            <p>Aucun membre d&apos;équipe</p>
                         </div>
                     ) : (
                         teamMembers.map(member => (
@@ -828,15 +830,17 @@ export default function PlanningPage() {
             </Card>
 
             {/* Add Modal */}
-            <AddBlockModal
-                isOpen={modalOpen}
-                onClose={() => setModalOpen(false)}
-                member={modalMember}
-                date={modalDate}
-                missions={allMissions}
-                onSubmit={handleCreateBlock}
-                isSubmitting={isSubmitting}
-            />
+            {modalOpen && (
+                <AddBlockModal
+                    isOpen={modalOpen}
+                    onClose={() => setModalOpen(false)}
+                    member={modalMember}
+                    date={modalDate}
+                    missions={allMissions}
+                    onSubmit={handleCreateBlock}
+                    isSubmitting={isSubmitting}
+                />
+            )}
         </div>
     );
 }
