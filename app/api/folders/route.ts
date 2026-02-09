@@ -30,7 +30,7 @@ const createFolderSchema = z.object({
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    await requireAuth();
+    await requireAuth(request);
     const { searchParams } = new URL(request.url);
 
     const parentId = searchParams.get('parentId');
@@ -100,7 +100,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(['MANAGER', 'SDR']);
+    await requireRole(['MANAGER', 'SDR'], request);
     const data = await validateRequest(request, createFolderSchema);
 
     // Check if parent exists if provided

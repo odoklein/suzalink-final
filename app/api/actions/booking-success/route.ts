@@ -22,7 +22,7 @@ const bookingSuccessSchema = z.object({
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(['SDR', 'BUSINESS_DEVELOPER']);
+    const session = await requireRole(['SDR', 'BUSINESS_DEVELOPER'], request);
     const { contactId, eventData } = await validateRequest(request, bookingSuccessSchema);
 
     // Get contact with campaign info

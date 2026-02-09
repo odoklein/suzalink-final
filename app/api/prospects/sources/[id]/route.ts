@@ -29,7 +29,7 @@ export const GET = withErrorHandler(async (
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) => {
-  await requireRole(['MANAGER']);
+  await requireRole(['MANAGER'], request);
   const { id } = await params;
 
   const source = await prisma.prospectSource.findUnique({
@@ -73,7 +73,7 @@ export const PATCH = withErrorHandler(async (
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) => {
-  await requireRole(['MANAGER']);
+  await requireRole(['MANAGER'], request);
   const { id } = await params;
   const data = await validateRequest(request, updateSourceSchema);
 
@@ -110,7 +110,7 @@ export const DELETE = withErrorHandler(async (
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) => {
-  await requireRole(['MANAGER']);
+  await requireRole(['MANAGER'], request);
   const { id } = await params;
 
   // Soft delete by deactivating

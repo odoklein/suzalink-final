@@ -19,7 +19,7 @@ export const GET = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    const session = await requireAuth();
+    const session = await requireAuth(request);
     const { id } = await params;
     
     // Users can only fetch their own permissions, unless they're a manager
@@ -90,7 +90,7 @@ export const PUT = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER'], request);
     const { id } = await params;
     const data = await validateRequest(request, updatePermissionsSchema);
 

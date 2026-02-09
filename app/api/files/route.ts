@@ -15,7 +15,7 @@ import {
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    await requireAuth();
+    await requireAuth(request);
     const { searchParams } = new URL(request.url);
     const { page, limit, skip } = getPaginationParams(searchParams);
 

@@ -29,7 +29,7 @@ export const GET = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER', 'SDR']);
+    await requireRole(['MANAGER', 'SDR'], request);
     const { id } = await params;
 
     const companies = await prisma.company.findMany({
@@ -54,7 +54,7 @@ export const POST = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER'], request);
     const { id: listId } = await params;
     const data = await validateRequest(request, createCompanySchema);
 

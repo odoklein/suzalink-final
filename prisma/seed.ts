@@ -201,6 +201,56 @@ async function seedPermissions() {
     console.log(`✅ Created ${rolePermCount} role-permission mappings`);
 }
 
+// GLOBAL action status definitions (mirrors current ActionResult enum + workflow behavior)
+const GLOBAL_STATUS_DEFINITIONS = [
+    { code: "NO_RESPONSE", label: "Pas de réponse", sortOrder: 1, requiresNote: false, priorityLabel: "RETRY" as const, priorityOrder: 4, triggersOpportunity: false, triggersCallback: false },
+    { code: "BAD_CONTACT", label: "Standard / Mauvais contact", sortOrder: 2, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "INTERESTED", label: "Intéressé", sortOrder: 3, requiresNote: true, priorityLabel: "FOLLOW_UP" as const, priorityOrder: 2, triggersOpportunity: true, triggersCallback: false },
+    { code: "CALLBACK_REQUESTED", label: "Rappel demandé", sortOrder: 4, requiresNote: true, priorityLabel: "CALLBACK" as const, priorityOrder: 1, triggersOpportunity: false, triggersCallback: true },
+    { code: "MEETING_BOOKED", label: "Meeting booké", sortOrder: 5, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: true, triggersCallback: false },
+    { code: "MEETING_CANCELLED", label: "Meeting annulé", sortOrder: 6, requiresNote: false, priorityLabel: "RETRY" as const, priorityOrder: 4, triggersOpportunity: false, triggersCallback: false },
+    { code: "DISQUALIFIED", label: "Disqualifié", sortOrder: 7, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "ENVOIE_MAIL", label: "Envoie mail", sortOrder: 8, requiresNote: true, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+];
+
+async function seedActionStatusDefinitions() {
+    for (const def of GLOBAL_STATUS_DEFINITIONS) {
+        await prisma.actionStatusDefinition.upsert({
+            where: {
+                scopeType_scopeId_code: {
+                    scopeType: "GLOBAL",
+                    scopeId: "",
+                    code: def.code,
+                },
+            },
+            update: {
+                label: def.label,
+                sortOrder: def.sortOrder,
+                requiresNote: def.requiresNote,
+                priorityLabel: def.priorityLabel,
+                priorityOrder: def.priorityOrder,
+                triggersOpportunity: def.triggersOpportunity,
+                triggersCallback: def.triggersCallback,
+                isActive: true,
+            },
+            create: {
+                scopeType: "GLOBAL",
+                scopeId: "",
+                code: def.code,
+                label: def.label,
+                sortOrder: def.sortOrder,
+                requiresNote: def.requiresNote,
+                priorityLabel: def.priorityLabel,
+                priorityOrder: def.priorityOrder,
+                triggersOpportunity: def.triggersOpportunity,
+                triggersCallback: def.triggersCallback,
+                isActive: true,
+            },
+        });
+    }
+    console.log("✅ Seeded GLOBAL action status definitions");
+}
+
 async function main() {
     console.log("🌱 Seeding database...");
 
@@ -354,6 +404,9 @@ async function main() {
         });
     }
     console.log("✅ Created 3 companies with contacts");
+
+    // Seed GLOBAL action status definitions (config-driven workflow defaults)
+    await seedActionStatusDefinitions();
 
     // Seed permissions
     await seedPermissions();

@@ -11,7 +11,7 @@ import {
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER'], request);
 
     const { searchParams } = new URL(request.url);
     const roleFilter = searchParams.get('role'); // Optional filter: SDR, BUSINESS_DEVELOPER, or null for all

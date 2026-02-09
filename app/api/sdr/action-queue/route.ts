@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { successResponse, requireRole, withErrorHandler } from "@/lib/api-utils";
+import { statusConfigService } from "@/lib/services/StatusConfigService";
 
 // ============================================
 // GET /api/sdr/action-queue
@@ -9,7 +10,7 @@ import { successResponse, requireRole, withErrorHandler } from "@/lib/api-utils"
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(["SDR", "BUSINESS_DEVELOPER"]);
+    const session = await requireRole(["SDR", "BUSINESS_DEVELOPER"], request);
     const { searchParams } = new URL(request.url);
     const missionId = searchParams.get("missionId");
     const listId = searchParams.get("listId");
@@ -22,7 +23,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     const missionFilter = missionId ? `AND m.id = '${missionId.replace(/'/g, "''")}'` : "";
     const listFilter = listId ? `AND l.id = '${listId.replace(/'/g, "''")}'` : "";
 
-    const result = await prisma.$queryRawUnsafe<
+    const rawResult = await prisma.$queryRawUnsafe<
         Array<{
             contact_id: string | null;
             company_id: string;
@@ -44,8 +45,6 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
             last_action_result: string | null;
             last_action_note: string | null;
             last_action_created: Date | null;
-            priority: number;
-            priority_label: string;
         }>
     >(
         `
@@ -155,48 +154,59 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
               AND a."companyId" IS NOT NULL
             ORDER BY a."companyId", a."createdAt" DESC
         ),
-        prioritized_targets AS (
+        targets_with_last_action AS (
             SELECT
                 at.*,
-                COALESCE(lac.result, lac2.result) as last_action_result,
+                COALESCE(lac.result, lac2.result)::text as last_action_result,
                 COALESCE(lac.note, lac2.note) as last_action_note,
-                COALESCE(lac."createdAt", lac2."createdAt") as last_action_created,
-                CASE
-                    WHEN COALESCE(lac."createdAt", lac2."createdAt") >= $2 THEN 999
-                    WHEN COALESCE(lac.result, lac2.result) = 'CALLBACK_REQUESTED' THEN 1
-                    WHEN COALESCE(lac.result, lac2.result) = 'INTERESTED' THEN 2
-                    WHEN COALESCE(lac.result, lac2.result) IS NULL THEN 3
-                    WHEN COALESCE(lac.result, lac2.result) IN ('NO_RESPONSE', 'MEETING_CANCELLED') THEN 4
-                    ELSE 5
-                END as priority,
-                CASE
-                    WHEN COALESCE(lac.result, lac2.result) = 'CALLBACK_REQUESTED' THEN 'CALLBACK'
-                    WHEN COALESCE(lac.result, lac2.result) = 'INTERESTED' THEN 'FOLLOW_UP'
-                    WHEN COALESCE(lac.result, lac2.result) IS NULL THEN 'NEW'
-                    WHEN COALESCE(lac.result, lac2.result) IN ('NO_RESPONSE', 'MEETING_CANCELLED') THEN 'RETRY'
-                    WHEN COALESCE(lac.result, lac2.result) IN ('MEETING_BOOKED', 'ENVOIE_MAIL', 'DISQUALIFIED', 'BAD_CONTACT') THEN 'SKIP'
-                    ELSE 'SKIP'
-                END as priority_label
+                COALESCE(lac."createdAt", lac2."createdAt") as last_action_created
             FROM all_targets at
             LEFT JOIN last_actions_contacts lac ON at.contact_id = lac."contactId"
             LEFT JOIN last_actions_companies lac2 ON at.contact_id IS NULL AND at.company_id = lac2."companyId"
         )
-        SELECT *
-        FROM prioritized_targets
-        ORDER BY
-            priority ASC,
-            CASE
-                WHEN contact_status = 'ACTIONABLE' THEN 0
-                WHEN contact_status = 'PARTIAL' THEN 1
-                WHEN contact_status = 'INCOMPLETE' THEN 2
-                ELSE 3
-            END,
-            COALESCE(last_action_created, '1970-01-01'::timestamp) ASC
-        LIMIT ${limit}
+        SELECT * FROM targets_with_last_action
     `,
-        sdrId,
-        cooldownDate
+        sdrId
     );
+
+    // Resolve missionId for config
+    let configMissionId = missionId ?? null;
+    if (!configMissionId && listId) {
+        const list = await prisma.list.findUnique({
+            where: { id: listId },
+            select: { missionId: true },
+        });
+        configMissionId = list?.missionId ?? null;
+    }
+    if (!configMissionId && rawResult.length > 0) {
+        const camp = await prisma.campaign.findUnique({
+            where: { id: rawResult[0].campaign_id },
+            select: { missionId: true },
+        });
+        configMissionId = camp?.missionId ?? null;
+    }
+
+    const config = await statusConfigService.getEffectiveStatusConfig(
+        configMissionId ? { missionId: configMissionId } : {}
+    );
+
+    // Add config-driven priority, apply cooldown (999 for recent), sort, limit
+    const withPriority = rawResult.map((row) => {
+        const inCooldown =
+            row.last_action_created && new Date(row.last_action_created) >= cooldownDate;
+        const { priorityOrder, priorityLabel } = inCooldown
+            ? { priorityOrder: 999, priorityLabel: "SKIP" as const }
+            : statusConfigService.getPriorityForResult(row.last_action_result, config);
+        return { ...row, _priorityOrder: priorityOrder, _priorityLabel: priorityLabel };
+    });
+    const sorted = withPriority.sort(
+        (a, b) =>
+            a._priorityOrder - b._priorityOrder ||
+            (a.contact_status === "ACTIONABLE" ? 0 : a.contact_status === "PARTIAL" ? 1 : 2) -
+                (b.contact_status === "ACTIONABLE" ? 0 : b.contact_status === "PARTIAL" ? 1 : 2) ||
+            new Date(a.last_action_created ?? 0).getTime() - new Date(b.last_action_created ?? 0).getTime()
+    );
+    const result = sorted.slice(0, limit);
 
     const items = result.map((row) => ({
         contactId: row.contact_id,
@@ -231,7 +241,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                 createdAt: row.last_action_created?.toISOString(),
             }
             : null,
-        priority: row.priority_label,
+        priority: row._priorityLabel,
     }));
 
     return successResponse({ items });

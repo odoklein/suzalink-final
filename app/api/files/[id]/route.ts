@@ -31,7 +31,7 @@ export const GET = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireAuth();
+    await requireAuth(request);
     const { id } = await params;
 
     const file = await prisma.file.findUnique({
@@ -89,7 +89,7 @@ export const PUT = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    const session = await requireAuth();
+    const session = await requireAuth(request);
     const { id } = await params;
     const data = await validateRequest(request, updateFileSchema);
 
@@ -132,7 +132,7 @@ export const DELETE = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    const session = await requireAuth();
+    const session = await requireAuth(request);
     const { id } = await params;
 
     // Check if file exists and user has permission

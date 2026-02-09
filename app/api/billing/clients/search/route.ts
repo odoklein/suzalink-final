@@ -12,7 +12,7 @@ import { pappersService, PappersService } from "@/lib/billing/pappers-service";
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(["MANAGER"]);
+    await requireRole(["MANAGER"], request);
     const { searchParams } = new URL(request.url);
     const query = searchParams.get("q");
 

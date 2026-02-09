@@ -5,6 +5,7 @@ import {
     requireRole,
     withErrorHandler,
 } from '@/lib/api-utils';
+import { statusConfigService } from '@/lib/services/StatusConfigService';
 
 // ============================================
 // OPTIMIZED QUEUE QUERY - PHASE 2.5
@@ -14,7 +15,7 @@ import {
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(['SDR', 'BUSINESS_DEVELOPER']);
+    const session = await requireRole(['SDR', 'BUSINESS_DEVELOPER'], request);
     const { searchParams } = new URL(request.url);
     const missionId = searchParams.get('missionId');
     const listId = searchParams.get('listId');
@@ -182,64 +183,69 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
               AND a."companyId" IS NOT NULL
             ORDER BY a."companyId", a."createdAt" DESC
         ),
-        prioritized_targets AS (
+        targets_with_last_action AS (
             SELECT
                 at.*,
-                COALESCE(lac.result, lac2.result) as last_action_result,
+                COALESCE(lac.result, lac2.result)::text as last_action_result,
                 COALESCE(lac.note, lac2.note) as last_action_note,
-                COALESCE(lac."createdAt", lac2."createdAt") as last_action_created,
-                CASE
-                    -- Priority 0: Explicit SKIP for recent actions (within cooldown)
-                    WHEN COALESCE(lac."createdAt", lac2."createdAt") >= $2 THEN 999
-                    
-                    -- Priority 1: Callbacks (oldest first)
-                    WHEN COALESCE(lac.result, lac2.result) = 'CALLBACK_REQUESTED' THEN 1
-                    
-                    -- Priority 2: Interested (follow-up)
-                    WHEN COALESCE(lac.result, lac2.result) = 'INTERESTED' THEN 2
-                    
-                    -- Priority 3: New contacts/companies (never contacted)
-                    WHEN COALESCE(lac.result, lac2.result) IS NULL THEN 3
-                    
-                    -- Priority 4: No response (retry)
-                    WHEN COALESCE(lac.result, lac2.result) = 'NO_RESPONSE' THEN 4
-                    
-                    -- Skip: Recently contacted or completed
-                    ELSE 999
-                END as priority,
-                CASE
-                    WHEN COALESCE(lac.result, lac2.result) = 'CALLBACK_REQUESTED' THEN 'CALLBACK'
-                    WHEN COALESCE(lac.result, lac2.result) = 'INTERESTED' THEN 'FOLLOW_UP'
-                    WHEN COALESCE(lac.result, lac2.result) IS NULL THEN 'NEW'
-                    WHEN COALESCE(lac.result, lac2.result) = 'NO_RESPONSE' THEN 'RETRY'
-                    ELSE 'SKIP'
-                END as priority_label
+                COALESCE(lac."createdAt", lac2."createdAt") as last_action_created
             FROM all_targets at
             LEFT JOIN last_actions_contacts lac ON at.contact_id = lac."contactId"
             LEFT JOIN last_actions_companies lac2 ON at.contact_id IS NULL AND at.company_id = lac2."companyId"
         )
         SELECT *
-        FROM prioritized_targets
-        WHERE priority < 999
+        FROM targets_with_last_action
+        WHERE (last_action_created IS NULL OR last_action_created < $2)
         ORDER BY 
-            priority ASC,
-            -- Secondary sort: ACTIONABLE contacts first, but include all statuses
-            CASE 
-                WHEN contact_status = 'ACTIONABLE' THEN 0 
-                WHEN contact_status = 'PARTIAL' THEN 1
-                WHEN contact_status = 'INCOMPLETE' THEN 2
-                ELSE 3
-            END,
-            -- Tertiary sort: oldest first
+            CASE WHEN contact_status = 'ACTIONABLE' THEN 0 WHEN contact_status = 'PARTIAL' THEN 1 WHEN contact_status = 'INCOMPLETE' THEN 2 ELSE 3 END,
             COALESCE(last_action_created, '1970-01-01'::timestamp) ASC
-        LIMIT 1
+        LIMIT 500
     `, sdrId, cooldownDate);
+
+    // Resolve missionId for config (from params or first row's campaign)
+    let configMissionId = missionId ?? null;
+    if (!configMissionId && listId) {
+        const list = await prisma.list.findUnique({
+            where: { id: listId },
+            select: { missionId: true },
+        });
+        configMissionId = list?.missionId ?? null;
+    }
+    if (!configMissionId && result.length > 0) {
+        const camp = await prisma.campaign.findUnique({
+            where: { id: result[0].campaign_id },
+            select: { missionId: true },
+        });
+        configMissionId = camp?.missionId ?? null;
+    }
+
+    const config = await statusConfigService.getEffectiveStatusConfig(
+        configMissionId ? { missionId: configMissionId } : {}
+    );
+
+    // Sort by config-driven priority, filter out SKIP (999)
+    const withPriority = result.map((row) => {
+        const { priorityOrder, priorityLabel } = statusConfigService.getPriorityForResult(
+            row.last_action_result,
+            config
+        );
+        return { ...row, _priorityOrder: priorityOrder, _priorityLabel: priorityLabel };
+    });
+    const filtered = withPriority.filter((r) => r._priorityOrder < 999);
+    const sorted = filtered.sort(
+        (a, b) =>
+            a._priorityOrder - b._priorityOrder ||
+            (a.contact_status === "ACTIONABLE" ? 0 : a.contact_status === "PARTIAL" ? 1 : 2) -
+                (b.contact_status === "ACTIONABLE" ? 0 : b.contact_status === "PARTIAL" ? 1 : 2) ||
+            new Date(a.last_action_created ?? 0).getTime() - new Date(b.last_action_created ?? 0).getTime()
+    );
+    const next = sorted[0];
 
     // ============================================
     // HANDLE RESULT
     // ============================================
 
-    if (result.length === 0) {
+    if (!next) {
         return successResponse({
             hasNext: false,
             message: listId
@@ -249,8 +255,6 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                     : 'Queue vide - aucun contact disponible ou tous en cooldown',
         });
     }
-
-    const next = result[0];
 
     // Fetch client bookingUrl separately (handles case where column doesn't exist yet)
     let clientBookingUrl: string | undefined = undefined;
@@ -267,7 +271,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 
     return successResponse({
         hasNext: true,
-        priority: next.priority_label,
+        priority: next._priorityLabel,
         missionName: next.mission_name,
         contact: next.contact_id ? {
             id: next.contact_id,

@@ -12,7 +12,7 @@ export const POST = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    const session = await requireAuth();
+    const session = await requireAuth(request);
     const { id: fileId } = await params;
 
     const file = await prisma.file.findUnique({

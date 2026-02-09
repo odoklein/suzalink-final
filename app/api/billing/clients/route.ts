@@ -14,7 +14,7 @@ import { z } from "zod";
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(["MANAGER"]);
+    await requireRole(["MANAGER"], request);
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search");
 
@@ -53,7 +53,7 @@ const createBillingClientSchema = z.object({
 });
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(["MANAGER"]);
+    await requireRole(["MANAGER"], request);
     const data = await validateRequest(request, createBillingClientSchema);
 
     const client = await prisma.billingClient.create({

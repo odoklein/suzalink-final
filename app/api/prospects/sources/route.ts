@@ -27,7 +27,7 @@ const createSourceSchema = z.object({
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-  await requireRole(['MANAGER']);
+  await requireRole(['MANAGER'], request);
   const { searchParams } = new URL(request.url);
   const { page, limit, skip } = getPaginationParams(searchParams);
 
@@ -80,7 +80,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-  await requireRole(['MANAGER']);
+  await requireRole(['MANAGER'], request);
   const data = await validateRequest(request, createSourceSchema);
 
   // Generate API key for API sources

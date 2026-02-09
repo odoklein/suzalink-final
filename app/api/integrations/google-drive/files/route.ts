@@ -14,7 +14,7 @@ import { listFiles, refreshTokenIfNeeded } from '@/lib/google-drive';
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireAuth();
+    const session = await requireAuth(request);
 
     try {
         const { searchParams } = new URL(request.url);

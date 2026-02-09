@@ -13,7 +13,7 @@ import {
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireAuth();
+    const session = await requireAuth(request);
 
     try {
         // Update user record - remove Google Drive connection

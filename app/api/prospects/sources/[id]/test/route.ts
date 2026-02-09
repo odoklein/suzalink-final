@@ -14,7 +14,7 @@ export const POST = withErrorHandler(async (
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) => {
-  await requireRole(['MANAGER']);
+  await requireRole(['MANAGER'], request);
   const { id } = await params;
 
   const source = await prisma.prospectSource.findUnique({

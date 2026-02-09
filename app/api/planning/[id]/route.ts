@@ -22,7 +22,7 @@ interface RouteParams {
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest, { params }: RouteParams) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER'], request);
     const { id } = await params;
 
     const block = await prisma.scheduleBlock.findUnique({
@@ -78,7 +78,7 @@ const updateBlockSchema = z.object({
 });
 
 export const PUT = withErrorHandler(async (request: NextRequest, { params }: RouteParams) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER'], request);
     const { id } = await params;
     const data = await validateRequest(request, updateBlockSchema);
 
@@ -190,7 +190,7 @@ export const PUT = withErrorHandler(async (request: NextRequest, { params }: Rou
 // ============================================
 
 export const DELETE = withErrorHandler(async (request: NextRequest, { params }: RouteParams) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER'], request);
     const { id } = await params;
 
     // Fetch block with related data before deleting

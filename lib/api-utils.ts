@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { getToken } from 'next-auth/jwt';
+import { authOptions, sessionFromToken } from '@/lib/auth';
 import { z } from 'zod';
 
 // ============================================
@@ -37,22 +38,27 @@ export function paginatedResponse<T>(
 // ============================================
 // AUTH HELPERS
 // ============================================
+// In App Router Route Handlers, pass the request so session is read from the incoming request.
+// Without it, getServerSession() may not see the cookie and returns null → 401.
 
-export async function getAuthSession() {
-    const session = await getServerSession(authOptions);
-    return session;
+export async function getAuthSession(request?: NextRequest) {
+    if (request) {
+        const token = await getToken({ req: request });
+        return sessionFromToken(token);
+    }
+    return getServerSession(authOptions);
 }
 
-export async function requireAuth() {
-    const session = await getAuthSession();
+export async function requireAuth(request?: NextRequest) {
+    const session = await getAuthSession(request);
     if (!session?.user) {
         throw new AuthError('Non authentifié', 401);
     }
     return session;
 }
 
-export async function requireRole(allowedRoles: string[]) {
-    const session = await requireAuth();
+export async function requireRole(allowedRoles: string[], request?: NextRequest) {
+    const session = await requireAuth(request);
     if (!allowedRoles.includes(session.user.role)) {
         throw new AuthError('Accès non autorisé', 403);
     }

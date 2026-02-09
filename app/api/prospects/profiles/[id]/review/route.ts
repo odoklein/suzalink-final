@@ -26,7 +26,7 @@ export const PATCH = withErrorHandler(async (
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) => {
-  await requireRole(['MANAGER']);
+  await requireRole(['MANAGER'], request);
   const { id } = await params;
   const data = await validateRequest(request, reviewSchema);
 
@@ -50,7 +50,7 @@ export const PATCH = withErrorHandler(async (
   }
 
   // Get session (already checked above, but need user ID)
-  const session = await requireRole(['MANAGER']);
+  const session = await requireRole(['MANAGER'], request);
 
     if (data.action === 'approve') {
       // Approve and continue pipeline

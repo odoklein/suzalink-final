@@ -13,7 +13,7 @@ import {
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireAuth();
+    const session = await requireAuth(request);
 
     try {
         // Get user with Google Drive info

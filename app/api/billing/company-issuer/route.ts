@@ -14,7 +14,7 @@ import { z } from "zod";
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(["MANAGER"]);
+    await requireRole(["MANAGER"], request);
 
     // Get the first (and only) company issuer
     const issuer = await prisma.companyIssuer.findFirst();
@@ -44,7 +44,7 @@ const updateIssuerSchema = z.object({
 });
 
 export const PUT = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(["MANAGER"]);
+    await requireRole(["MANAGER"], request);
     const data = await validateRequest(request, updateIssuerSchema);
 
     // Get existing issuer or create if doesn't exist

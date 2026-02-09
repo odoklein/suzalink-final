@@ -18,7 +18,7 @@ import bcrypt from 'bcryptjs';
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
     // Allow all authenticated users to search (needed for direct messages)
-    const session = await requireAuth();
+    const session = await requireAuth(request);
     const { searchParams } = new URL(request.url);
     const { page, limit, skip } = getPaginationParams(searchParams);
 
@@ -110,7 +110,7 @@ const createUserSchema = z.object({
 });
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER'], request);
     const data = await validateRequest(request, createUserSchema);
 
     // Check if email already exists

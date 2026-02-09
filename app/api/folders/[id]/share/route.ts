@@ -12,7 +12,7 @@ export const POST = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireAuth();
+    await requireAuth(request);
     const { id: folderId } = await params;
 
     const folder = await prisma.folder.findUnique({

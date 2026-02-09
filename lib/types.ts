@@ -17,19 +17,21 @@ export type ActionResult =
     | "INTERESTED"
     | "CALLBACK_REQUESTED"
     | "MEETING_BOOKED"
+    | "MEETING_CANCELLED"
     | "DISQUALIFIED"
     | "ENVOIE_MAIL";
 
 // Opportunity urgency levels
 export type Urgency = "SHORT" | "MEDIUM" | "LONG";
 
-// Labels for displaying in UI
-export const ACTION_RESULT_LABELS: Record<ActionResult, string> = {
+// Labels for displaying in UI (fallback when config API unavailable)
+export const ACTION_RESULT_LABELS: Record<string, string> = {
     NO_RESPONSE: "Pas de réponse",
     BAD_CONTACT: "Standard / Mauvais contact",
     INTERESTED: "Intéressé",
     CALLBACK_REQUESTED: "Rappel demandé",
     MEETING_BOOKED: "Meeting booké",
+    MEETING_CANCELLED: "Meeting annulé",
     DISQUALIFIED: "Disqualifié",
     ENVOIE_MAIL: "Envoie mail",
 };

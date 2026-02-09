@@ -18,7 +18,7 @@ import { z } from "zod";
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(["MANAGER"]);
+    await requireRole(["MANAGER"], request);
     const { searchParams } = new URL(request.url);
     const { page, limit, skip } = getPaginationParams(searchParams);
 
@@ -63,7 +63,7 @@ const createInvoiceSchema = z.object({
 });
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(["MANAGER"]);
+    const session = await requireRole(["MANAGER"], request);
     const data = await validateRequest(request, createInvoiceSchema);
 
     // Verify billing client exists

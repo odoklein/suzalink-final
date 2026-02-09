@@ -3,6 +3,7 @@
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
 import { Modal, ModalFooter, Select, ConfirmModal, ContextMenu, useContextMenu, useToast } from "@/components/ui";
+import { MissionStatusWorkflowDrawer } from "@/components/drawers";
 import {
     ArrowLeft,
     Target,
@@ -26,6 +27,7 @@ import {
     Plus,
     X,
     Eye,
+    ListChecks,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -153,6 +155,7 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
     // Team lead: SDR who can see all teammates' rappels and notes in this mission
     const [teamLeadSdrId, setTeamLeadSdrId] = useState<string>("");
     const [isSavingTeamLead, setIsSavingTeamLead] = useState(false);
+    const [showStatusWorkflowDrawer, setShowStatusWorkflowDrawer] = useState(false);
 
     // ============================================
     // FETCH MISSION
@@ -684,6 +687,28 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
                 </div>
             </div>
 
+            {/* Statuts et workflow */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm border-l-4 border-l-teal-500">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-teal-100 flex items-center justify-center">
+                            <ListChecks className="w-5 h-5 text-teal-600" />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-semibold text-slate-900">Statuts et workflow</h2>
+                            <p className="text-sm text-slate-500">Statuts d&apos;appel et priorités pour cette mission</p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => setShowStatusWorkflowDrawer(true)}
+                        className="flex items-center gap-2 h-9 px-4 text-sm font-medium text-teal-600 bg-teal-50 hover:bg-teal-100 rounded-lg transition-colors"
+                    >
+                        Gérer les statuts
+                        <ChevronRight className="w-4 h-4" />
+                    </button>
+                </div>
+            </div>
+
             {/* SDRs & BDs two-column layout */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Left: SDRs */}
@@ -1156,6 +1181,14 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
                 confirmText="Supprimer"
                 variant="danger"
                 isLoading={isDeleting}
+            />
+
+            {/* Statuts et workflow drawer */}
+            <MissionStatusWorkflowDrawer
+                isOpen={showStatusWorkflowDrawer}
+                onClose={() => setShowStatusWorkflowDrawer(false)}
+                missionId={mission.id}
+                missionName={mission.name}
             />
 
             {/* List right-click context menu (delete) */}

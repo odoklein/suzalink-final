@@ -12,7 +12,7 @@ import {
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(['BUSINESS_DEVELOPER']);
+    const session = await requireRole(['BUSINESS_DEVELOPER'], request);
 
     // Get clients in BD's portfolio
     const portfolioClients = await prisma.businessDeveloperClient.findMany({

@@ -11,7 +11,7 @@ import { requireRole, withErrorHandler, getPaginationParams, paginatedResponse }
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-  await requireRole(['MANAGER', 'BUSINESS_DEVELOPER']);
+  await requireRole(['MANAGER', 'BUSINESS_DEVELOPER'], request);
   const { searchParams } = new URL(request.url);
   const { page, limit, skip } = getPaginationParams(searchParams);
 

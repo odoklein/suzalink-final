@@ -11,7 +11,7 @@ import {
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(['MANAGER', 'SDR', 'CLIENT']);
+    const session = await requireRole(['MANAGER', 'SDR', 'CLIENT'], request);
     const { searchParams } = new URL(request.url);
 
     // Period filter

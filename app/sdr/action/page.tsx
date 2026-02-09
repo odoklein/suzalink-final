@@ -30,6 +30,7 @@ import { CompanyDrawer, ContactDrawer } from "@/components/drawers";
 import { UnifiedActionDrawer } from "@/components/drawers/UnifiedActionDrawer";
 import { BookingModal } from "@/components/sdr/BookingModal";
 import { QuickEmailModal } from "@/components/email/QuickEmailModal";
+import { DialerDrawer } from "@/components/calls/DialerDrawer";
 import type { ActionResult, Channel } from "@/lib/types";
 import { ACTION_RESULT_LABELS, CHANNEL_LABELS } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -139,7 +140,8 @@ interface DrawerCompany {
     _count: { contacts: number };
 }
 
-const RESULT_OPTIONS: { value: ActionResult; label: string; icon: React.ReactNode; key: string; color: string }[] = [
+// Fallback when config API not available
+const RESULT_OPTIONS_FALLBACK: { value: ActionResult; label: string; icon: React.ReactNode; key: string; color: string }[] = [
     { value: "NO_RESPONSE", label: "Pas de réponse", icon: <XCircle className="w-4 h-4" />, key: "1", color: "slate" },
     { value: "BAD_CONTACT", label: "Mauvais contact", icon: <Ban className="w-4 h-4" />, key: "2", color: "red" },
     { value: "INTERESTED", label: "Intéressé", icon: <Sparkles className="w-4 h-4" />, key: "3", color: "emerald" },
@@ -148,6 +150,17 @@ const RESULT_OPTIONS: { value: ActionResult; label: string; icon: React.ReactNod
     { value: "DISQUALIFIED", label: "Disqualifié", icon: <XCircle className="w-4 h-4" />, key: "6", color: "slate" },
     { value: "ENVOIE_MAIL", label: "Envoie mail", icon: <Mail className="w-4 h-4" />, key: "7", color: "blue" },
 ];
+
+const RESULT_ICON_MAP: Record<string, React.ReactNode> = {
+    NO_RESPONSE: <XCircle className="w-4 h-4" />,
+    BAD_CONTACT: <Ban className="w-4 h-4" />,
+    INTERESTED: <Sparkles className="w-4 h-4" />,
+    CALLBACK_REQUESTED: <Clock className="w-4 h-4" />,
+    MEETING_BOOKED: <Calendar className="w-4 h-4" />,
+    MEETING_CANCELLED: <XCircle className="w-4 h-4" />,
+    DISQUALIFIED: <XCircle className="w-4 h-4" />,
+    ENVOIE_MAIL: <Mail className="w-4 h-4" />,
+};
 
 const PRIORITY_LABELS: Record<string, { label: string; color: string }> = {
     CALLBACK: { label: "Rappel", color: "bg-amber-50 text-amber-700 border-amber-200" },
@@ -220,6 +233,9 @@ export default function SDRActionPage() {
     const [emailModalCompany, setEmailModalCompany] = useState<{ id: string; name: string; phone?: string | null } | null>(null);
     const [pendingEmailAction, setPendingEmailAction] = useState<{ row: QueueItem; result: ActionResult } | { cardMode: true; result: ActionResult } | null>(null);
 
+    // Config-driven status options (from API)
+    const [statusConfig, setStatusConfig] = useState<{ statuses: Array<{ code: string; label: string; requiresNote: boolean }> } | null>(null);
+
     // Load filters
     useEffect(() => {
         const loadFilters = async () => {
@@ -249,6 +265,42 @@ export default function SDRActionPage() {
         };
         loadFilters();
     }, []);
+
+    // Fetch status config when mission is selected
+    useEffect(() => {
+        if (!selectedMissionId) {
+            setStatusConfig(null);
+            return;
+        }
+        fetch(`/api/config/action-statuses?missionId=${selectedMissionId}`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data?.statuses) {
+                    setStatusConfig({ statuses: json.data.statuses });
+                } else {
+                    setStatusConfig(null);
+                }
+            })
+            .catch(() => setStatusConfig(null));
+    }, [selectedMissionId]);
+
+    const resultOptions = statusConfig?.statuses?.length
+        ? statusConfig.statuses.map((s, i) => ({
+            value: s.code as ActionResult,
+            label: s.label,
+            icon: RESULT_ICON_MAP[s.code] ?? <XCircle className="w-4 h-4" />,
+            key: String(i + 1),
+            color: ["slate", "red", "emerald", "amber", "indigo", "slate", "blue"][i % 7] as string,
+        }))
+        : RESULT_OPTIONS_FALLBACK;
+
+    const statusLabels: Record<string, string> = statusConfig?.statuses?.length
+        ? Object.fromEntries(statusConfig.statuses.map((s) => [s.code, s.label]))
+        : ACTION_RESULT_LABELS;
+
+    const getRequiresNote = (code: string) =>
+        statusConfig?.statuses?.find((s) => s.code === code)?.requiresNote ??
+        ["INTERESTED", "CALLBACK_REQUESTED", "ENVOIE_MAIL"].includes(code);
 
     const filteredLists = selectedMissionId
         ? lists.filter((l) => l.mission.id === selectedMissionId)
@@ -512,6 +564,47 @@ export default function SDRActionPage() {
         setUnifiedDrawerOpen(true);
     };
 
+    // Dialer: target for click-to-call from current action (card) or selected row (table)
+    const dialerInitialTarget = useMemo(() => {
+        if (viewMode === "card" && currentAction?.channel === "CALL") {
+            const phone = currentAction.contact?.phone || (currentAction.company?.phone ?? null);
+            if (!phone) return undefined;
+            const contactName = currentAction.contact
+                ? (`${currentAction.contact.firstName ?? ""} ${currentAction.contact.lastName ?? ""}`.trim() || currentAction.company?.name) ?? "Contact"
+                : currentAction.company?.name ?? "Contact";
+            const companyName = currentAction.company?.name ?? "";
+            return {
+                contactName,
+                companyName,
+                phone,
+                contactId: currentAction.contact?.id,
+                companyId: currentAction.company?.id,
+                campaignId: currentAction.campaignId,
+            };
+        }
+        if (viewMode === "table" && drawerRow) {
+            const phone = (drawerRow.contact?.phone || drawerRow.company?.phone) ?? null;
+            if (!phone) return undefined;
+            const contactName = drawerRow.contact
+                ? `${drawerRow.contact.firstName ?? ""} ${drawerRow.contact.lastName ?? ""}`.trim() || drawerRow.company.name
+                : drawerRow.company.name;
+            return {
+                contactName,
+                companyName: drawerRow.company.name,
+                phone,
+                contactId: drawerRow.contactId ?? undefined,
+                companyId: drawerRow.companyId,
+                campaignId: drawerRow.campaignId,
+            };
+        }
+        return undefined;
+    }, [viewMode, currentAction, drawerRow]);
+
+    const handleDialerCallComplete = useCallback(() => {
+        if (viewMode === "card") loadNextAction();
+        else if (viewMode === "table") refreshQueue();
+    }, [viewMode, loadNextAction, refreshQueue]);
+
     const closeUnifiedDrawer = () => {
         setUnifiedDrawerOpen(false);
         setDrawerRow(null);
@@ -583,9 +676,9 @@ export default function SDRActionPage() {
 
         const key = queueRowKey(row);
         setSubmittingRowKey(key);
-        const noteRequired = result === "INTERESTED" || result === "CALLBACK_REQUESTED";
+        const noteRequired = getRequiresNote(result);
         const note = noteRequired
-            ? (result === "CALLBACK_REQUESTED" ? "Rappel demandé" : "Intéressé")
+            ? (result === "CALLBACK_REQUESTED" ? "Rappel demandé" : statusLabels[result] ?? "Note")
             : undefined;
         try {
             const res = await fetch("/api/actions", {
@@ -672,7 +765,7 @@ export default function SDRActionPage() {
             setError("Aucun contact ou entreprise disponible");
             return;
         }
-        if ((selectedResult === "INTERESTED" || selectedResult === "CALLBACK_REQUESTED") && !note.trim()) {
+        if (getRequiresNote(selectedResult) && !note.trim()) {
             setError("Note requise pour ce résultat");
             return;
         }
@@ -776,8 +869,9 @@ export default function SDRActionPage() {
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
             if (e.target instanceof HTMLTextAreaElement) return;
-            if (e.key >= "1" && e.key <= "7") {
-                setSelectedResult(RESULT_OPTIONS[parseInt(e.key) - 1].value);
+            if (e.key >= "1" && e.key <= "9") {
+                const idx = parseInt(e.key, 10) - 1;
+                if (resultOptions[idx]) setSelectedResult(resultOptions[idx].value);
             }
             if (e.key === "Enter" && selectedResult && !isSubmitting) {
                 e.preventDefault();
@@ -786,7 +880,7 @@ export default function SDRActionPage() {
         };
         window.addEventListener("keydown", handler);
         return () => window.removeEventListener("keydown", handler);
-    }, [selectedResult, isSubmitting]);
+    }, [selectedResult, isSubmitting, resultOptions]);
 
     // Parse script
     let scriptSections: Record<string, string> | null = null;
@@ -842,7 +936,7 @@ export default function SDRActionPage() {
                 render: (_, row) =>
                     row.lastAction ? (
                         <Badge className={cn("text-xs", PRIORITY_LABELS[row.priority as keyof typeof PRIORITY_LABELS]?.color ?? "bg-slate-100 text-slate-700")}>
-                            {ACTION_RESULT_LABELS[row.lastAction.result as ActionResult] ?? row.lastAction.result}
+                            {statusLabels[row.lastAction.result] ?? row.lastAction.result}
                         </Badge>
                     ) : (
                         <span className="text-xs text-slate-400">—</span>
@@ -870,7 +964,7 @@ export default function SDRActionPage() {
                                     <Loader2 className="w-4 h-4 animate-spin" />
                                 </span>
                             )}
-                            {RESULT_OPTIONS.map((opt) => (
+                            {resultOptions.map((opt) => (
                                 <button
                                     key={opt.value}
                                     type="button"
@@ -1034,7 +1128,7 @@ export default function SDRActionPage() {
                                 >
                                     <option value="">Tous les statuts</option>
                                     <option value="NONE">Jamais contacté</option>
-                                    {(Object.entries(ACTION_RESULT_LABELS) as [ActionResult, string][]).map(([value, label]) => (
+                                    {Object.entries(statusLabels).map(([value, label]) => (
                                         <option key={value} value={value}>{label}</option>
                                     ))}
                                 </select>
@@ -1204,7 +1298,12 @@ export default function SDRActionPage() {
 
     // Loading (card view)
     if (isLoading && !currentAction) {
-        return <LoadingState message="Chargement du prochain contact..." />;
+        return (
+            <>
+                <LoadingState message="Chargement du prochain contact..." />
+                <DialerDrawer onCallComplete={loadNextAction} />
+            </>
+        );
     }
 
     // Empty queue (card view)
@@ -1300,6 +1399,7 @@ export default function SDRActionPage() {
                         }
                     />
                 </div>
+                <DialerDrawer onCallComplete={loadNextAction} />
             </div>
         );
     }
@@ -1690,7 +1790,7 @@ export default function SDRActionPage() {
                 </div>
                 <div className="p-5">
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                        {RESULT_OPTIONS.map((option) => (
+                        {resultOptions.map((option) => (
                             <button
                                 key={option.value}
                                 onClick={() => setSelectedResult(option.value)}
@@ -1735,7 +1835,7 @@ export default function SDRActionPage() {
                             <div>
                                 <h3 className="text-sm font-bold text-slate-900">
                                     Note
-                                    {(selectedResult === "INTERESTED" || selectedResult === "CALLBACK_REQUESTED") && (
+                                    {selectedResult && getRequiresNote(selectedResult) && (
                                         <span className="text-red-500 ml-1">*</span>
                                     )}
                                 </h3>
@@ -1815,7 +1915,7 @@ export default function SDRActionPage() {
                     variant="primary"
                     size="lg"
                     onClick={handleSubmit}
-                    disabled={!selectedResult || isSubmitting}
+                    disabled={!selectedResult || isSubmitting || (getRequiresNote(selectedResult) && !note.trim())}
                     isLoading={isSubmitting}
                     className="gap-2 px-8 shadow-lg shadow-indigo-500/20 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600"
                 >
@@ -1856,6 +1956,12 @@ export default function SDRActionPage() {
                     }}
                 />
             )}
+
+            {/* Floating dialer: always visible on action page; target from current card or selected table row */}
+            <DialerDrawer
+                initialTarget={dialerInitialTarget}
+                onCallComplete={handleDialerCallComplete}
+            />
         </div>
     );
 }

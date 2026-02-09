@@ -127,6 +127,9 @@ export function UnifiedActionDrawer({
     const [campaigns, setCampaigns] = useState<Array<{ id: string; name: string; mission?: { channel: string } }>>([]);
     const [campaignsLoading, setCampaignsLoading] = useState(false);
 
+    // Config-driven status options
+    const [statusConfig, setStatusConfig] = useState<{ statuses: Array<{ code: string; label: string; requiresNote: boolean }> } | null>(null);
+
     // New action form
     const [newActionResult, setNewActionResult] = useState<string>("");
     const [newActionNote, setNewActionNote] = useState("");
@@ -231,6 +234,36 @@ export function UnifiedActionDrawer({
             .finally(() => setCampaignsLoading(false));
     }, [isOpen, missionId]);
 
+    // Fetch status config when mission is available
+    useEffect(() => {
+        if (!isOpen || !missionId) {
+            setStatusConfig(null);
+            return;
+        }
+        fetch(`/api/config/action-statuses?missionId=${missionId}`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data?.statuses) {
+                    setStatusConfig({ statuses: json.data.statuses });
+                } else {
+                    setStatusConfig(null);
+                }
+            })
+            .catch(() => setStatusConfig(null));
+    }, [isOpen, missionId]);
+
+    const getRequiresNote = (code: string) =>
+        statusConfig?.statuses?.find((s) => s.code === code)?.requiresNote ??
+        ["INTERESTED", "CALLBACK_REQUESTED", "ENVOIE_MAIL"].includes(code);
+
+    const statusOptions = statusConfig?.statuses?.length
+        ? statusConfig.statuses.map((s) => ({ value: s.code, label: s.label }))
+        : Object.entries(ACTION_RESULT_LABELS).map(([value, label]) => ({ value, label }));
+
+    const statusLabels: Record<string, string> = statusConfig?.statuses?.length
+        ? Object.fromEntries(statusConfig.statuses.map((s) => [s.code, s.label]))
+        : { ...ACTION_RESULT_LABELS };
+
     // Get primary phone number
     const primaryPhone = useMemo(() => {
         if (contact?.phone) return { number: contact.phone, label: "Contact" };
@@ -287,7 +320,7 @@ export function UnifiedActionDrawer({
             return;
         }
 
-        const noteRequired = ["INTERESTED", "CALLBACK_REQUESTED"].includes(newActionResult);
+        const noteRequired = getRequiresNote(newActionResult);
         if (noteRequired && !newActionNote.trim()) {
             showError("Erreur", "Une note est requise pour ce résultat");
             return;
@@ -1155,7 +1188,7 @@ export function UnifiedActionDrawer({
                                 {/* Result Select */}
                                 <Select
                                     placeholder="Sélectionner un résultat..."
-                                    options={Object.entries(ACTION_RESULT_LABELS).map(([value, label]) => ({ value, label }))}
+                                    options={statusOptions}
                                     value={newActionResult}
                                     onChange={(value) => {
                                         setNewActionResult(value);
@@ -1186,7 +1219,7 @@ export function UnifiedActionDrawer({
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1.5">
                                         Note
-                                        {["INTERESTED", "CALLBACK_REQUESTED"].includes(newActionResult) && (
+                                        {newActionResult && getRequiresNote(newActionResult) && (
                                             <span className="text-red-500 ml-1">*</span>
                                         )}
                                     </label>
@@ -1305,7 +1338,7 @@ export function UnifiedActionDrawer({
                                     >
                                         <div className="flex items-center justify-between gap-2 mb-1">
                                             <span className="font-medium text-slate-700">
-                                                {ACTION_RESULT_LABELS[a.result as keyof typeof ACTION_RESULT_LABELS] ?? a.result}
+                                                {statusLabels[a.result] ?? a.result}
                                             </span>
                                             <span className="text-xs text-slate-400">
                                                 {new Date(a.createdAt).toLocaleDateString("fr-FR", {

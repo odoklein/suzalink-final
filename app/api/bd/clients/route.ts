@@ -17,7 +17,7 @@ import { z } from 'zod';
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(['BUSINESS_DEVELOPER']);
+    const session = await requireRole(['BUSINESS_DEVELOPER'], request);
     const { searchParams } = new URL(request.url);
     const { page, limit, skip } = getPaginationParams(searchParams);
     const search = searchParams.get('search');
@@ -103,7 +103,7 @@ const createClientSchema = z.object({
 });
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(['BUSINESS_DEVELOPER']);
+    const session = await requireRole(['BUSINESS_DEVELOPER'], request);
     const data = await validateRequest(request, createClientSchema);
 
     // Create client with onboarding and portfolio assignment in a transaction

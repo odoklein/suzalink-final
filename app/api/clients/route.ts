@@ -52,7 +52,7 @@ const createClientSchema = z.object({
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(['MANAGER', 'CLIENT']);
+    const session = await requireRole(['MANAGER', 'CLIENT'], request);
     const { searchParams } = new URL(request.url);
     const { page, limit, skip } = getPaginationParams(searchParams);
 
@@ -99,7 +99,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(['MANAGER']);
+    const session = await requireRole(['MANAGER'], request);
     const data = await validateRequest(request, createClientSchema);
 
     // Extract onboarding fields
