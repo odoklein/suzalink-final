@@ -51,17 +51,15 @@ function SidebarNavItem({
     const isActive = pathname === item.href || 
         (item.href !== "/" && pathname.startsWith(item.href + "/"));
 
-    return (
-        <Link
-            href={item.href}
-            onClick={onMobileClose}
-            className={cn(
+    const linkClass = cn(
                 "sidebar-nav-item flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] font-medium transition-all duration-200 group relative",
                 isActive
                     ? "text-indigo-400 bg-gradient-to-r from-indigo-500/15 to-indigo-600/10"
                     : "text-slate-400 hover:text-white hover:bg-white/5"
-            )}
-        >
+            );
+
+    const content = (
+        <>
             {/* Active indicator */}
             {isActive && (
                 <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-[60%] bg-gradient-to-b from-indigo-400 to-indigo-600 rounded-r-full" />
@@ -119,6 +117,30 @@ function SidebarNavItem({
                     {item.badgeDetail && ` · ${item.badgeDetail}`}
                 </div>
             )}
+        </>
+    );
+
+    if (item.openInNewTab) {
+        return (
+            <a
+                href={item.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={onMobileClose}
+                className={linkClass}
+            >
+                {content}
+            </a>
+        );
+    }
+
+    return (
+        <Link
+            href={item.href}
+            onClick={onMobileClose}
+            className={linkClass}
+        >
+            {content}
         </Link>
     );
 }

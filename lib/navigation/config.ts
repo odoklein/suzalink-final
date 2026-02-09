@@ -36,6 +36,7 @@ export interface NavItem {
   badge?: string; // Optional badge text (e.g. count)
   badgeDetail?: string; // Optional secondary badge (e.g. "Proch. 31 janv.")
   children?: NavItem[]; // Sub-items for nested navigation
+  openInNewTab?: boolean; // Open in new tab (e.g. email inbox)
 }
 
 export interface NavSection {
@@ -85,6 +86,7 @@ export const MANAGER_NAV: NavSection[] = [
         icon: Mail,
         label: "Emails",
         permission: "pages.email",
+        openInNewTab: true,
       },
       {
         href: "/manager/comms",
@@ -157,6 +159,7 @@ export const SDR_NAV: NavSection[] = [
         icon: Mail,
         label: "Mes emails",
         permission: "pages.email",
+        openInNewTab: true,
       },
       {
         href: "/sdr/emails/sent",

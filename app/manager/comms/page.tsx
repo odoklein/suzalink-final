@@ -553,7 +553,7 @@ export default function ManagerCommsPage() {
                 error("Erreur", "Impossible d'envoyer le message");
             }
         },
-        [session?.user?.id, debouncedFetchStats]
+        [selectedThread, session?.user?.id, error, debouncedFetchStats]
     );
 
     // Real-time hook with presence
@@ -687,7 +687,7 @@ export default function ManagerCommsPage() {
     };
 
     return (
-        <div className="flex flex-col min-h-[calc(100vh-8rem)] pb-10">
+        <div className="flex flex-col min-h-[calc(100vh-8rem)] pb-10 bg-slate-100 dark:bg-slate-900">
             {!focusMode && (
                 <>
                     <div className="shrink-0 space-y-4">

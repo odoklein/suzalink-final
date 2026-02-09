@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
     Target,
     Users,
     Phone,
     Calendar,
-    TrendingUp,
     ArrowRight,
     Plus,
     Loader2,
@@ -14,8 +13,9 @@ import {
     Sparkles,
     File,
     Download,
-    BarChart3,
     ChevronRight,
+    Activity,
+    PhoneCall,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -41,12 +41,48 @@ interface DashboardStats {
     leaderboard: { id: string; name: string; actions: number }[];
 }
 
-interface Mission {
+interface MissionSummaryItem {
     id: string;
     name: string;
     isActive: boolean;
-    client: { name: string };
-    _count: { sdrAssignments: number };
+    client: { id: string; name: string };
+    sdrCount: number;
+    actionsThisPeriod: number;
+    meetingsThisPeriod: number;
+    lastActionAt: string | null;
+}
+
+interface RecentActivityItem {
+    id: string;
+    user: string;
+    userId: string;
+    action: string;
+    time: string;
+    type: "call" | "meeting" | "schedule";
+    createdAt: string;
+    contactOrCompanyName?: string;
+    campaignName?: string;
+}
+
+interface SdrActivityStatus {
+    isActive: boolean;
+    status: string;
+    lastSeenMinutesAgo: number | null;
+}
+
+interface TeamMember {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    isActive: boolean;
+}
+
+interface CallStats {
+    totalCalls: number;
+    totalDurationSeconds: number;
+    byStatus: Record<string, number>;
+    byUser: Array<{ userId: string; userName: string; calls: number; durationSeconds: number }>;
 }
 
 interface FileItem {
@@ -61,78 +97,101 @@ interface FileItem {
     };
 }
 
+function formatRelativeTime(dateStr: string): string {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    if (diffMins < 1) return "À l'instant";
+    if (diffMins < 60) return `Il y a ${diffMins} min`;
+    if (diffHours < 24) return `Il y a ${diffHours}h`;
+    if (diffDays === 1) return "Hier";
+    if (diffDays < 7) return `Il y a ${diffDays} jours`;
+    return date.toLocaleDateString("fr-FR");
+}
+
 export default function ManagerDashboard() {
     const [stats, setStats] = useState<DashboardStats | null>(null);
-    const [missions, setMissions] = useState<Mission[]>([]);
+    const [missionsSummary, setMissionsSummary] = useState<MissionSummaryItem[]>([]);
+    const [recentActivity, setRecentActivity] = useState<RecentActivityItem[]>([]);
+    const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+    const [activityByUserId, setActivityByUserId] = useState<Record<string, SdrActivityStatus>>({});
+    const [callStats, setCallStats] = useState<CallStats | null>(null);
     const [recentFiles, setRecentFiles] = useState<FileItem[]>([]);
+    const [missionFilter, setMissionFilter] = useState<string>("");
     const [isLoading, setIsLoading] = useState(true);
     const [period, setPeriod] = useState<"today" | "week" | "month">("week");
 
-    const fetchData = async () => {
+    const fetchData = useCallback(async () => {
         setIsLoading(true);
         try {
-            const [statsRes, missionsRes, filesRes] = await Promise.all([
-                fetch(`/api/stats?period=${period}`),
-                fetch("/api/missions?limit=5&isActive=true"),
+            const statsUrl = `/api/stats?period=${period}${missionFilter ? `&missionId=${missionFilter}` : ""}`;
+            const [statsRes, missionsSummaryRes, recentRes, usersRes, filesRes, callsRes] = await Promise.all([
+                fetch(statsUrl),
+                fetch(`/api/stats/missions-summary?period=${period}&limit=10`),
+                fetch("/api/actions/recent?limit=10"),
+                fetch("/api/users?role=SDR,BUSINESS_DEVELOPER&limit=50"),
                 fetch("/api/files?limit=5"),
+                fetch("/api/calls/stats"),
             ]);
 
-            const [statsJson, missionsJson, filesJson] = await Promise.all([
+            const [statsJson, missionsSummaryJson, recentJson, usersJson, filesJson, callsJson] = await Promise.all([
                 statsRes.json(),
-                missionsRes.json(),
+                missionsSummaryRes.json(),
+                recentRes.json(),
+                usersRes.json(),
                 filesRes.json(),
+                callsRes.json(),
             ]);
 
             if (statsJson.success) setStats(statsJson.data);
-            if (missionsJson.success) setMissions(missionsJson.data);
-            if (filesJson.success) setRecentFiles(filesJson.data.files);
+            if (missionsSummaryJson.success) setMissionsSummary(missionsSummaryJson.data?.missions ?? []);
+            if (recentJson.success) setRecentActivity(recentJson.data ?? []);
+            if (filesJson.success) setRecentFiles(filesJson.data?.files ?? []);
+            if (callsJson.success && callsJson.data) setCallStats(callsJson.data);
+
+            const users: TeamMember[] = usersJson.data?.users ?? usersJson.data ?? [];
+            if (usersJson.success && Array.isArray(users)) {
+                setTeamMembers(users);
+                if (users.length > 0) {
+                    const ids = users.map((u: TeamMember) => u.id).join(",");
+                    const batchRes = await fetch(`/api/sdr/activity/batch?userIds=${encodeURIComponent(ids)}`);
+                    const batchJson = await batchRes.json();
+                    if (batchJson.success && batchJson.data) {
+                        setActivityByUserId(batchJson.data);
+                    }
+                } else {
+                    setActivityByUserId({});
+                }
+            }
         } catch (error) {
             console.error("Failed to fetch dashboard data:", error);
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [period, missionFilter]);
 
     useEffect(() => {
         fetchData();
         const interval = setInterval(fetchData, 30000);
         return () => clearInterval(interval);
-    }, [period]);
+    }, [fetchData]);
+
+    const inactiveSdrs = teamMembers.filter((m) => {
+        if (!m.isActive) return true;
+        const act = activityByUserId[m.id];
+        if (!act) return true;
+        if (act.lastSeenMinutesAgo !== null && act.lastSeenMinutesAgo > 1440) return true;
+        return false;
+    });
 
     const STATS_CARDS = [
-        {
-            label: "Missions en cours",
-            value: stats?.activeMissions || 0,
-            icon: Target,
-            gradient: "from-indigo-500 to-indigo-600",
-            iconBg: "bg-indigo-100",
-            iconColor: "text-indigo-600",
-        },
-        {
-            label: "Appels cette période",
-            value: stats?.totalActions || 0,
-            icon: Phone,
-            gradient: "from-emerald-500 to-emerald-600",
-            iconBg: "bg-emerald-100",
-            iconColor: "text-emerald-600",
-        },
-        {
-            label: "RDV pris",
-            value: stats?.meetingsBooked || 0,
-            icon: Calendar,
-            gradient: "from-amber-500 to-amber-600",
-            iconBg: "bg-amber-100",
-            iconColor: "text-amber-600",
-            subtitle: stats?.totalActions ? `1 RDV pour ${Math.round(stats.totalActions / (stats.meetingsBooked || 1))} appels` : null,
-        },
-        {
-            label: "Contacts chauds",
-            value: stats?.opportunities || 0,
-            icon: Sparkles,
-            gradient: "from-cyan-500 to-cyan-600",
-            iconBg: "bg-cyan-100",
-            iconColor: "text-cyan-600",
-        },
+        { label: "Missions", value: stats?.activeMissions ?? 0, icon: Target, iconBg: "bg-indigo-100", iconColor: "text-indigo-600" },
+        { label: "Appels", value: stats?.totalActions ?? 0, icon: Phone, iconBg: "bg-emerald-100", iconColor: "text-emerald-600" },
+        { label: "RDV", value: stats?.meetingsBooked ?? 0, icon: Calendar, iconBg: "bg-amber-100", iconColor: "text-amber-600" },
+        { label: "Chauds", value: stats?.opportunities ?? 0, icon: Sparkles, iconBg: "bg-cyan-100", iconColor: "text-cyan-600" },
     ];
 
     const RESULT_BREAKDOWN = [
@@ -156,254 +215,244 @@ export default function ManagerDashboard() {
     }
 
     return (
-        <div className="space-y-8">
-            {/* Premium Hero Header */}
-            <div className="relative overflow-hidden bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-2xl p-8 text-white">
-                <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjAzKSIvPjwvc3ZnPg==')] opacity-50" />
-                <div className="relative z-10">
-                    <div className="flex items-center gap-2 text-indigo-400 text-sm font-medium mb-2">
-                        <BarChart3 className="w-4 h-4" />
-                        <span>Accueil</span>
+        <div className="space-y-4 max-w-[1600px]">
+            {/* ROW 1 — Snapshot: compact header + KPIs + controls inline */}
+            <div className="flex flex-wrap items-center justify-between gap-3 py-2 border-b border-slate-200">
+                <div className="flex items-center gap-4 flex-wrap">
+                    <h1 className="text-lg font-semibold text-slate-800">Tableau de bord</h1>
+                    <div className="flex items-center gap-2">
+                        {(["today", "week", "month"] as const).map((p) => (
+                            <button
+                                key={p}
+                                onClick={() => setPeriod(p)}
+                                className={`text-xs px-2.5 py-1.5 rounded-md border transition-colors ${period === p ? "bg-slate-800 text-white border-slate-800" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                            >
+                                {p === "today" ? "Auj." : p === "week" ? "Sem." : "Mois"}
+                            </button>
+                        ))}
                     </div>
-                    <h1 className="text-3xl font-bold mb-2">Bonjour !</h1>
-                    <p className="text-slate-400 max-w-xl">
-                        Voici où en sont vos équipes et vos missions.
-                    </p>
-                </div>
-            </div>
-
-            {/* Header Actions */}
-            <div className="flex items-center justify-between">
-                <div className="mgr-period-selector">
-                    {(["today", "week", "month"] as const).map((p) => (
-                        <button
-                            key={p}
-                            onClick={() => setPeriod(p)}
-                            className={`mgr-period-btn ${period === p ? "active" : ""}`}
-                        >
-                            {p === "today" ? "Aujourd'hui" : p === "week" ? "Semaine" : "Mois"}
-                        </button>
-                    ))}
-                </div>
-                <div className="flex items-center gap-3">
-                    <button
-                        onClick={fetchData}
-                        className="p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
+                    <select
+                        value={missionFilter}
+                        onChange={(e) => setMissionFilter(e.target.value)}
+                        className="text-xs border border-slate-200 rounded-md px-2.5 py-1.5 bg-white text-slate-700 min-w-[140px]"
                     >
+                        <option value="">Toutes les missions</option>
+                        {missionsSummary.map((m) => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                    </select>
+                    <button onClick={fetchData} className="p-1.5 rounded-md border border-slate-200 bg-white hover:bg-slate-50" title="Rafraîchir">
                         <RefreshCw className={`w-4 h-4 text-slate-500 ${isLoading ? "animate-spin" : ""}`} />
                     </button>
-                    <Link
-                        href="/manager/missions/new"
-                        className="mgr-btn-primary flex items-center gap-2 h-10 px-5 text-sm font-medium"
-                    >
-                        <Plus className="w-4 h-4" />
-                        Nouvelle mission
+                    <Link href="/manager/missions/new" className="text-xs font-medium px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1.5">
+                        <Plus className="w-3.5 h-3.5" /> Nouvelle mission
                     </Link>
                 </div>
             </div>
 
-            {/* Premium Stats Grid */}
-            <div className="grid grid-cols-4 gap-5">
-                {STATS_CARDS.map((stat, index) => (
-                    <div key={stat.label} className="mgr-stat-card" style={{ animationDelay: `${index * 100}ms` }}>
-                        <div className="flex items-start justify-between">
-                            <div>
-                                <p className="text-sm text-slate-500 font-medium">{stat.label}</p>
-                                <p className="text-3xl font-bold text-slate-900 mt-1 dev-counter">{stat.value}</p>
-                                {stat.subtitle && (
-                                    <div className="flex items-center gap-1.5 mt-2 text-sm text-emerald-600">
-                                        <TrendingUp className="w-4 h-4" />
-                                        <span>{stat.subtitle}</span>
-                                    </div>
-                                )}
-                            </div>
-                            <div className={`w-12 h-12 rounded-xl ${stat.iconBg} flex items-center justify-center`}>
-                                <stat.icon className={`w-6 h-6 ${stat.iconColor}`} />
-                            </div>
+            {/* KPI row — single row, compact */}
+            <div className="grid grid-cols-4 gap-3">
+                {STATS_CARDS.map((stat) => (
+                    <div key={stat.label} className="bg-white border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                            <p className="text-[10px] uppercase tracking-wide text-slate-400 font-medium">{stat.label}</p>
+                            <p className="text-xl font-bold text-slate-900 mt-0.5 dev-counter">{stat.value}</p>
+                        </div>
+                        <div className={`w-9 h-9 rounded-lg ${stat.iconBg} flex items-center justify-center flex-shrink-0`}>
+                            <stat.icon className={`w-4 h-4 ${stat.iconColor}`} />
                         </div>
                     </div>
                 ))}
             </div>
 
-            {/* Main Content Grid */}
-            <div className="grid grid-cols-3 gap-6">
-                {/* Recent Missions */}
-                <div className="col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                    <div className="flex items-center justify-between mb-6">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
-                                <Target className="w-5 h-5 text-indigo-600" />
-                            </div>
-                            <div>
-                                <h2 className="text-lg font-semibold text-slate-900">Missions actives</h2>
-                                <p className="text-sm text-slate-500">{missions.length} en cours</p>
-                            </div>
-                        </div>
-                        <Link
-                            href="/manager/missions"
-                            className="text-sm text-indigo-600 hover:text-indigo-500 flex items-center gap-1"
-                        >
-                            Voir tout <ArrowRight className="w-4 h-4" />
+            {/* ROW 2 — Operations: 60% Missions | 40% Team (Top SDRs + Live + Inactifs) */}
+            <div className="grid grid-cols-[3fr_2fr] gap-4">
+                {/* Left: Missions actives — compact list */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <h2 className="text-sm font-semibold text-slate-900">Missions actives</h2>
+                        <Link href="/manager/missions" className="text-xs text-indigo-600 hover:text-indigo-500 flex items-center gap-0.5">
+                            Voir tout <ArrowRight className="w-3 h-3" />
                         </Link>
                     </div>
-
-                    <div className="space-y-3">
-                        {missions.length === 0 ? (
-                            <div className="text-center py-12">
-                                <Target className="w-12 h-12 mx-auto mb-3 text-slate-300" />
-                                <p className="text-sm text-slate-500">Aucune mission active</p>
-                            </div>
+                    <div className="space-y-1.5">
+                        {missionsSummary.length === 0 ? (
+                            <p className="text-xs text-slate-500 py-4">Aucune mission active</p>
                         ) : (
-                            missions.map((mission) => (
+                            missionsSummary.map((mission) => (
                                 <Link
                                     key={mission.id}
                                     href={`/manager/missions/${mission.id}`}
-                                    className="mgr-mission-card group flex items-center gap-4 block"
+                                    className="flex items-center gap-3 py-2 px-2 -mx-2 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-100 transition-colors group"
                                 >
-                                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-50 to-indigo-100 flex items-center justify-center text-lg font-bold text-indigo-600 group-hover:scale-110 transition-transform duration-300">
+                                    <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center text-sm font-semibold text-indigo-600 flex-shrink-0">
                                         {mission.client?.name?.[0] || "M"}
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2">
-                                            <span className="font-medium text-slate-900 group-hover:text-indigo-600 transition-colors">
-                                                {mission.name}
-                                            </span>
-                                            <span className={mission.isActive ? "mgr-badge-active" : "mgr-badge-paused"}>
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="text-sm font-medium text-slate-900 truncate group-hover:text-indigo-600">{mission.name}</span>
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${mission.isActive ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
                                                 {mission.isActive ? "Actif" : "Pause"}
                                             </span>
                                         </div>
-                                        <p className="text-sm text-slate-500 mt-1">
-                                            {mission.client.name} · {mission._count.sdrAssignments} SDR{mission._count.sdrAssignments > 1 ? "s" : ""}
+                                        <p className="text-xs text-slate-500 truncate">
+                                            {mission.client.name} · {mission.sdrCount} SDR{mission.sdrCount > 1 ? "s" : ""}
+                                            {mission.actionsThisPeriod > 0 && <> · {mission.actionsThisPeriod} act. · {mission.meetingsThisPeriod} RDV</>}
                                         </p>
                                     </div>
-                                    <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-1 transition-all" />
+                                    <ChevronRight className="w-4 h-4 text-slate-300 flex-shrink-0" />
                                 </Link>
                             ))
                         )}
                     </div>
                 </div>
 
-                {/* Top Performers */}
-                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                    <div className="flex items-center gap-3 mb-6">
-                        <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
-                            <Users className="w-5 h-5 text-amber-600" />
-                        </div>
-                        <div>
-                            <h2 className="text-lg font-semibold text-slate-900">Top SDRs</h2>
-                            <p className="text-sm text-slate-500">
-                                {period === "today" ? "Aujourd'hui" : period === "week" ? "Cette semaine" : "Ce mois"}
-                            </p>
+                {/* Right: Team Performance — Top SDRs + Équipe en direct + SDRs inactifs */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col gap-4">
+                    <div>
+                        <h2 className="text-sm font-semibold text-slate-900 mb-2">Top SDRs</h2>
+                        <div className="space-y-1">
+                            {!stats?.leaderboard?.length ? (
+                                <p className="text-xs text-slate-500 py-2">Pas de données</p>
+                            ) : (
+                                stats.leaderboard.map((performer, index) => (
+                                    <div key={performer.id} className="flex items-center gap-2 py-1">
+                                        <span className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-semibold flex-shrink-0 ${index === 0 ? "bg-amber-100 text-amber-700" : index === 1 ? "bg-slate-200 text-slate-600" : "bg-slate-100 text-slate-500"}`}>
+                                            {index + 1}
+                                        </span>
+                                        <span className="text-sm font-medium text-slate-900 truncate">{performer.name}</span>
+                                        <span className="text-xs text-slate-400 ml-auto">{performer.actions}</span>
+                                    </div>
+                                ))
+                            )}
                         </div>
                     </div>
-
-                    <div className="space-y-1">
-                        {!stats?.leaderboard?.length ? (
-                            <div className="text-center py-8">
-                                <Users className="w-10 h-10 mx-auto mb-2 text-slate-300" />
-                                <p className="text-sm text-slate-500">Pas encore de données</p>
+                    <div className="border-t border-slate-100 pt-3">
+                        <h2 className="text-sm font-semibold text-slate-900 mb-2">Équipe en direct</h2>
+                        <div className="space-y-1">
+                            {teamMembers.length === 0 ? (
+                                <p className="text-xs text-slate-500 py-1">Aucun SDR</p>
+                            ) : (
+                                teamMembers.slice(0, 6).map((member) => {
+                                    const act = activityByUserId[member.id];
+                                    const isOnline = act?.isActive ?? false;
+                                    const lastSeen = act?.lastSeenMinutesAgo;
+                                    const statusLabel = act?.status === "online" || act?.status === "busy" ? "En ligne" : act?.status === "away" ? "Absent" : "Hors ligne";
+                                    return (
+                                        <div key={member.id} className="flex items-center gap-2 py-0.5">
+                                            <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isOnline ? "bg-emerald-500" : "bg-slate-300"}`} />
+                                            <span className="text-xs font-medium text-slate-900 truncate flex-1">{member.name}</span>
+                                            {!isOnline && lastSeen != null && lastSeen < 1440 && (
+                                                <span className="text-[10px] text-slate-400">{lastSeen >= 60 ? `${Math.floor(lastSeen / 60)}h` : `${lastSeen}m`}</span>
+                                            )}
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </div>
+                    {inactiveSdrs.length > 0 && (
+                        <div className="border-t border-slate-100 pt-3">
+                            <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs font-medium text-slate-500">Inactifs (24h)</span>
+                                <Link href="/manager/team" className="text-[10px] text-indigo-600 hover:text-indigo-500">Voir</Link>
                             </div>
+                            <div className="flex flex-wrap gap-1">
+                                {inactiveSdrs.slice(0, 4).map((m) => (
+                                    <span key={m.id} className="text-[10px] text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded truncate max-w-[100px]" title={m.email}>
+                                        {m.name}{!m.isActive ? " (off)" : ""}
+                                    </span>
+                                ))}
+                                {inactiveSdrs.length > 4 && <span className="text-[10px] text-slate-400">+{inactiveSdrs.length - 4}</span>}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* ROW 3 — Signals: 50% Activité récente | 50% Call outcomes (calls + result distribution) */}
+            <div className="grid grid-cols-2 gap-4">
+                {/* Left: Activité récente — compact feed */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <h2 className="text-sm font-semibold text-slate-900">Activité récente</h2>
+                        <Link href="/manager/team" className="text-xs text-indigo-600 hover:text-indigo-500 flex items-center gap-0.5">Équipe <ArrowRight className="w-3 h-3" /></Link>
+                    </div>
+                    <div className="space-y-1">
+                        {recentActivity.length === 0 ? (
+                            <p className="text-xs text-slate-500 py-3">Aucune activité</p>
                         ) : (
-                            stats.leaderboard.map((performer, index) => (
-                                <div key={performer.id} className="mgr-leaderboard-item">
-                                    <div className={`mgr-leaderboard-rank ${index === 0 ? "mgr-leaderboard-rank-1" : index === 1 ? "mgr-leaderboard-rank-2" : "mgr-leaderboard-rank-3"}`}>
-                                        {index + 1}
-                                    </div>
-                                    <div className="flex-1">
-                                        <p className="font-medium text-slate-900">{performer.name}</p>
-                                        <p className="text-sm text-slate-500">{performer.actions} actions</p>
-                                    </div>
+                            recentActivity.slice(0, 8).map((item) => (
+                                <div key={item.id} className="flex items-baseline gap-2 py-1.5 border-b border-slate-50 last:border-0">
+                                    <span className="text-xs text-slate-500 whitespace-nowrap w-14">{item.time}</span>
+                                    <p className="text-xs text-slate-900 truncate flex-1 min-w-0">
+                                        <span className="font-medium">{item.user}</span> {item.action}
+                                        {item.contactOrCompanyName && <span className="text-slate-500"> — {item.contactOrCompanyName}</span>}
+                                    </p>
                                 </div>
                             ))
                         )}
                     </div>
                 </div>
 
-                {/* Recent Files */}
-                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                    <div className="flex items-center justify-between mb-6">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center">
-                                <File className="w-5 h-5 text-violet-600" />
-                            </div>
-                            <h2 className="text-lg font-semibold text-slate-900">Fichiers récents</h2>
+                {/* Right: Call outcomes — calls + result distribution merged */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <h2 className="text-sm font-semibold text-slate-900 mb-2">Appels</h2>
+                            {callStats ? (
+                                <>
+                                    <p className="text-2xl font-bold text-slate-900">{callStats.totalCalls}</p>
+                                    <p className="text-xs text-slate-500">{Math.floor((callStats.totalDurationSeconds || 0) / 60)} min</p>
+                                    {callStats.byUser?.length > 0 && (
+                                        <div className="mt-2 space-y-0.5">
+                                            {callStats.byUser.slice(0, 3).map((u) => (
+                                                <p key={u.userId} className="text-[10px] text-slate-600">{u.userName}: {u.calls}</p>
+                                            ))}
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <p className="text-xs text-slate-500">—</p>
+                            )}
                         </div>
-                        <Link
-                            href="/manager/files"
-                            className="text-sm text-indigo-600 hover:text-indigo-500 flex items-center gap-1"
-                        >
-                            Voir tout <ArrowRight className="w-4 h-4" />
-                        </Link>
-                    </div>
-
-                    <div className="space-y-2">
-                        {recentFiles.length === 0 ? (
-                            <div className="text-center py-8">
-                                <File className="w-10 h-10 mx-auto mb-2 text-slate-300" />
-                                <p className="text-sm text-slate-500">Aucun fichier</p>
-                            </div>
-                        ) : (
-                            recentFiles.map((file) => {
-                                const isImage = file.mimeType.startsWith("image/");
-                                const isVideo = file.mimeType.startsWith("video/");
-                                const isDocument = file.mimeType.includes("pdf") || file.mimeType.includes("document");
-
-                                return (
-                                    <div key={file.id} className="mgr-file-item">
-                                        <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
-                                            {isImage && <File className="w-5 h-5 text-indigo-500" />}
-                                            {isVideo && <File className="w-5 h-5 text-purple-500" />}
-                                            {isDocument && <File className="w-5 h-5 text-emerald-500" />}
-                                            {!isImage && !isVideo && !isDocument && <File className="w-5 h-5 text-slate-400" />}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-medium text-slate-900 truncate">{file.name}</p>
-                                            <p className="text-xs text-slate-500">
-                                                {file.uploadedBy.name} · {file.formattedSize}
-                                            </p>
-                                        </div>
-                                        <a
-                                            href={`/api/files/${file.id}/download`}
-                                            className="p-2 hover:bg-slate-200 rounded-lg transition-colors"
-                                        >
-                                            <Download className="w-4 h-4 text-slate-400" />
-                                        </a>
-                                    </div>
-                                );
-                            })
-                        )}
+                        <div>
+                            <h2 className="text-sm font-semibold text-slate-900 mb-2">Résultats</h2>
+                            {stats ? (
+                                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                                    {RESULT_BREAKDOWN.map(({ key, label, color }) => {
+                                        const value = stats.resultBreakdown[key as keyof typeof stats.resultBreakdown];
+                                        return (
+                                            <div key={key} className="flex items-center gap-1">
+                                                <span className={`w-2 h-2 rounded-sm ${color}`} />
+                                                <span className="text-xs text-slate-700">{label}</span>
+                                                <span className="text-xs font-semibold text-slate-900">{value}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <p className="text-xs text-slate-500">—</p>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
 
-            {/* Results Breakdown */}
-            {stats && (
-                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                    <div className="flex items-center gap-3 mb-6">
-                        <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
-                            <BarChart3 className="w-5 h-5 text-emerald-600" />
-                        </div>
-                        <h2 className="text-lg font-semibold text-slate-900">Répartition des résultats</h2>
+            {/* Compact footer strip: recent files */}
+            {recentFiles.length > 0 && (
+                <div className="flex items-center gap-4 py-2 px-3 bg-slate-50 rounded-lg border border-slate-100">
+                    <span className="text-xs font-medium text-slate-500 flex items-center gap-1.5">
+                        <File className="w-3.5 h-3.5" /> Fichiers récents
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                        {recentFiles.slice(0, 4).map((file) => (
+                            <a key={file.id} href={`/api/files/${file.id}/download`} className="text-xs text-indigo-600 hover:text-indigo-500 truncate max-w-[160px] flex items-center gap-1">
+                                {file.name} <Download className="w-3 h-3 flex-shrink-0" />
+                            </a>
+                        ))}
                     </div>
-                    <div className="grid grid-cols-6 gap-4">
-                        {RESULT_BREAKDOWN.map(({ key, label, color }) => {
-                            const value = stats.resultBreakdown[key as keyof typeof stats.resultBreakdown];
-                            const total = Object.values(stats.resultBreakdown).reduce((a, b) => a + b, 0);
-                            const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
-                            return (
-                                <div key={key} className="text-center">
-                                    <div className="h-24 flex flex-col justify-end mb-2">
-                                        <div
-                                            className={`mgr-results-bar ${color} mx-auto w-12`}
-                                            style={{ height: `${Math.max(percentage * 0.8, 8)}px` }}
-                                        />
-                                    </div>
-                                    <p className="text-2xl font-bold text-slate-900">{value}</p>
-                                    <p className="text-xs text-slate-500 mt-1">{label}</p>
-                                </div>
-                            );
-                        })}
-                    </div>
+                    <Link href="/manager/files" className="text-xs text-slate-500 hover:text-slate-700 ml-auto">Voir tout</Link>
                 </div>
             )}
         </div>

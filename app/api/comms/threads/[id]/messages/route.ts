@@ -102,9 +102,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         return NextResponse.json({ id: messageId, createdAt: createdAtIso }, { status: 201 });
     } catch (error) {
         console.error("Error adding message:", error);
+        const message = error instanceof Error ? error.message : "Erreur lors de l'envoi";
+        const isForbidden = message.includes("participant") || message.includes("autorisé");
         return NextResponse.json(
-            { error: error instanceof Error ? error.message : "Erreur lors de l'envoi" },
-            { status: 500 }
+            { error: message },
+            { status: isForbidden ? 403 : 500 }
         );
     }
 }

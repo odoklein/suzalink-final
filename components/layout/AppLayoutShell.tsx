@@ -88,6 +88,16 @@ function InnerLayout({
     // Get navigation based on role or use custom
     const navigation = customNavigation || (userRole ? getNavByRole(userRole) : []);
 
+    // Dedicated full-screen layout for email (no sidebar, Gmail-like)
+    const isEmailPage = pathname === "/sdr/email" || pathname === "/manager/email";
+    if (isEmailPage) {
+        return (
+            <div className="h-screen w-screen overflow-hidden flex flex-col bg-slate-50">
+                {children}
+            </div>
+        );
+    }
+
     // Get breadcrumb from pathname
     const pathParts = pathname.split("/").filter(Boolean);
     const currentPage = pathParts[pathParts.length - 1]?.replace(/-/g, " ") || "Dashboard";

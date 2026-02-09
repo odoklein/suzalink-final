@@ -31,6 +31,12 @@ interface Mission {
     client?: { name: string };
 }
 
+interface ListItem {
+    id: string;
+    name: string;
+    mission: { id: string; name: string };
+}
+
 interface Callback {
     id: string;
     campaignId: string;
@@ -83,9 +89,11 @@ export default function SDRCallbacksPage() {
     const [outcomeNote, setOutcomeNote] = useState("");
     const [outcomeSubmitting, setOutcomeSubmitting] = useState(false);
 
-    // Filters: date range + mission
+    // Filters: date range + mission + list
     const [missions, setMissions] = useState<Mission[]>([]);
+    const [lists, setLists] = useState<ListItem[]>([]);
     const [selectedMissionId, setSelectedMissionId] = useState<string | undefined>("");
+    const [selectedListId, setSelectedListId] = useState<string | undefined>("");
     const [dateFrom, setDateFrom] = useState<string>("");
     const [dateTo, setDateTo] = useState<string>("");
 
@@ -193,6 +201,7 @@ export default function SDRCallbacksPage() {
             setIsLoading(true);
             const params = new URLSearchParams();
             if (selectedMissionId) params.set("missionId", selectedMissionId);
+            if (selectedListId) params.set("listId", selectedListId);
             if (dateFrom) params.set("dateFrom", new Date(dateFrom).toISOString());
             if (dateTo) params.set("dateTo", new Date(dateTo + "T23:59:59.999Z").toISOString());
             const res = await fetch(`/api/sdr/callbacks?${params.toString()}`);
@@ -205,7 +214,7 @@ export default function SDRCallbacksPage() {
         } finally {
             setIsLoading(false);
         }
-    }, [selectedMissionId, dateFrom, dateTo]);
+    }, [selectedMissionId, selectedListId, dateFrom, dateTo]);
 
     useEffect(() => {
         fetch("/api/sdr/missions")
@@ -213,6 +222,17 @@ export default function SDRCallbacksPage() {
             .then((json) => {
                 if (json.success && Array.isArray(json.data)) {
                     setMissions(json.data);
+                }
+            })
+            .catch(() => {});
+    }, []);
+
+    useEffect(() => {
+        fetch("/api/sdr/lists")
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && Array.isArray(json.data)) {
+                    setLists(json.data);
                 }
             })
             .catch(() => {});
@@ -280,11 +300,30 @@ export default function SDRCallbacksPage() {
                             <label className="text-sm text-slate-600 whitespace-nowrap">Mission</label>
                             <Select
                                 value={selectedMissionId ?? ""}
-                                onChange={(v) => setSelectedMissionId(v || undefined)}
+                                onChange={(v) => {
+                                    setSelectedMissionId(v || undefined);
+                                    if (v) setSelectedListId(undefined);
+                                }}
                                 placeholder="Toutes les missions"
                                 options={[
                                     { value: "", label: "Toutes les missions" },
                                     ...missions.map((m) => ({ value: m.id, label: m.name })),
+                                ]}
+                                className="flex-1"
+                            />
+                        </div>
+                        <div className="flex items-center gap-2 min-w-[200px]">
+                            <label className="text-sm text-slate-600 whitespace-nowrap">Liste</label>
+                            <Select
+                                value={selectedListId ?? ""}
+                                onChange={(v) => setSelectedListId(v || undefined)}
+                                placeholder="Toutes les listes"
+                                options={[
+                                    { value: "", label: "Toutes les listes" },
+                                    ...(selectedMissionId
+                                        ? lists.filter((l) => l.mission.id === selectedMissionId)
+                                        : lists
+                                    ).map((l) => ({ value: l.id, label: l.name })),
                                 ]}
                                 className="flex-1"
                             />

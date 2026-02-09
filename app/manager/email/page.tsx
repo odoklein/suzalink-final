@@ -11,5 +11,5 @@ export const metadata = {
 };
 
 export default function ManagerEmailPage() {
-    return <InboxLayout showTeamInbox={true} />;
+    return <InboxLayout showTeamInbox={true} standalone />;
 }

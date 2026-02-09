@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useCallback, useEffect, useRef } from "react";
+import Link from "next/link";
+import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { MailboxSwitcher } from "./MailboxSwitcher";
 import { FolderNav } from "./FolderNav";
@@ -8,7 +10,7 @@ import { ThreadList } from "./ThreadList";
 import { ThreadView } from "./ThreadView";
 import { EmailComposer } from "./EmailComposer";
 import { EmailOnboarding } from "./EmailOnboarding";
-import { PanelLeftClose, PanelLeftOpen, Pencil, Loader2 } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, Pencil, Loader2, ArrowLeft } from "lucide-react";
 
 // ============================================
 // TYPES
@@ -19,6 +21,8 @@ export interface InboxLayoutProps {
     initialFolder?: string;
     showTeamInbox?: boolean;
     className?: string;
+    /** Full-screen layout without app chrome (no sidebar); Gmail-like */
+    standalone?: boolean;
 }
 
 export interface SelectedThread {
@@ -36,6 +40,7 @@ export function InboxLayout({
     initialFolder = "inbox",
     showTeamInbox = false,
     className,
+    standalone = false,
 }: InboxLayoutProps) {
     // Mailbox state
     const [mailboxes, setMailboxes] = useState<any[]>([]);
@@ -141,10 +146,15 @@ export function InboxLayout({
         fetchMailboxes();
     }, [fetchMailboxes]);
 
+    const containerHeight = standalone ? "h-screen" : "h-[calc(100vh-8rem)]";
+    const containerStyle = standalone
+        ? "flex flex-col bg-white overflow-hidden"
+        : "flex bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm";
+
     // Loading state
     if (isLoadingMailboxes) {
         return (
-            <div className={cn("h-[calc(100vh-8rem)] flex items-center justify-center bg-white rounded-2xl border border-slate-200 shadow-sm", className)}>
+            <div className={cn(containerHeight, "flex items-center justify-center bg-white", !standalone && "rounded-2xl border border-slate-200 shadow-sm", className)}>
                 <div className="flex flex-col items-center gap-3">
                     <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
                     <p className="text-sm text-slate-500">Chargement des boîtes mail...</p>
@@ -156,19 +166,48 @@ export function InboxLayout({
     // No mailboxes - show onboarding
     if (mailboxes.length === 0) {
         return (
-            <div className={cn("h-[calc(100vh-8rem)] bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm", className)}>
-                <EmailOnboarding onMailboxConnected={handleMailboxConnected} />
+            <div className={cn(containerHeight, "bg-white overflow-hidden flex flex-col", !standalone && "rounded-2xl border border-slate-200 shadow-sm", className)}>
+                {standalone && (
+                    <header className="h-14 flex-shrink-0 flex items-center gap-4 px-4 border-b border-slate-200 bg-white">
+                        <Link href={showTeamInbox ? "/manager/dashboard" : "/sdr"} className="flex items-center gap-2 text-slate-600 hover:text-slate-900">
+                            <ArrowLeft className="w-4 h-4" />
+                            <span className="text-sm font-medium">Retour</span>
+                        </Link>
+                        <div className="flex-1 flex items-center gap-2">
+                            <Image src="/favicon.png" alt="" width={24} height={24} />
+                            <span className="font-semibold text-slate-800">Emails</span>
+                        </div>
+                    </header>
+                )}
+                <div className="flex-1 overflow-auto">
+                    <EmailOnboarding onMailboxConnected={handleMailboxConnected} />
+                </div>
             </div>
         );
     }
 
     return (
-        <div className={cn("h-[calc(100vh-8rem)] flex bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm", className)}>
-            {/* Left Panel - Folders & Mailboxes */}
+        <div className={cn(containerHeight, containerStyle, standalone ? "flex flex-col" : "flex", className)}>
+            {/* Standalone: top bar with logo and back link */}
+            {standalone && (
+                <header className="h-14 flex-shrink-0 flex items-center gap-4 px-4 border-b border-slate-200 bg-white">
+                    <Link href={showTeamInbox ? "/manager/dashboard" : "/sdr"} className="flex items-center gap-2 text-slate-600 hover:text-slate-900 transition-colors">
+                        <ArrowLeft className="w-4 h-4" />
+                        <span className="text-sm font-medium">Retour à l&apos;app</span>
+                    </Link>
+                    <div className="flex-1 flex items-center gap-2 min-w-0">
+                        <Image src="/favicon.png" alt="" width={24} height={24} className="flex-shrink-0" />
+                        <span className="font-semibold text-slate-800 truncate">Emails</span>
+                    </div>
+                </header>
+            )}
+
+            <div className="flex flex-1 min-h-0">
+            {/* Left Panel - Folders & Mailboxes (Gmail-style width when standalone) */}
             <div
                 className={cn(
-                    "border-r border-slate-200 flex flex-col bg-slate-50/50 transition-all duration-300",
-                    isLeftPanelCollapsed ? "w-0 overflow-hidden" : "w-60"
+                    "border-r border-slate-200 flex flex-col bg-slate-50/50 transition-all duration-300 flex-shrink-0",
+                    isLeftPanelCollapsed ? "w-0 overflow-hidden" : standalone ? "w-56" : "w-60"
                 )}
             >
                 {/* Mailbox Switcher */}
@@ -231,11 +270,11 @@ export function InboxLayout({
 
                 {/* Content Area */}
                 <div className="flex-1 flex min-h-0">
-                    {/* Thread List */}
+                    {/* Thread List (wider in standalone for Gmail-like balance) */}
                     <div
                         className={cn(
                             "border-r border-slate-200 flex flex-col transition-all duration-300",
-                            selectedThread ? "w-80" : "flex-1"
+                            selectedThread ? (standalone ? "w-[380px]" : "w-80") : "flex-1"
                         )}
                     >
                         <ThreadList
@@ -259,6 +298,8 @@ export function InboxLayout({
                     )}
                 </div>
             </div>
+            </div>
+            {/* end flex-1 flex min-h-0 wrapper */}
 
             {/* Composer Modal */}
             {isComposerOpen && (

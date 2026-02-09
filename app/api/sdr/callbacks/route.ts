@@ -26,6 +26,7 @@ export async function GET(request: Request) {
         const limit = Math.min(Math.max(1, parseInt(searchParams.get("limit") || "100", 10)), 200);
         const skip = Math.max(0, parseInt(searchParams.get("skip") || "0", 10));
         const missionIdParam = searchParams.get("missionId") || undefined;
+        const listIdParam = searchParams.get("listId") || undefined;
         const dateFromParam = searchParams.get("dateFrom") || undefined;
         const dateToParam = searchParams.get("dateTo") || undefined;
 
@@ -98,6 +99,18 @@ export async function GET(request: Request) {
             } else if (dateTo) {
                 whereClause.callbackDate = { lte: dateTo };
             }
+        }
+
+        // List filter: only callbacks whose contact's company or company belongs to this list
+        if (listIdParam) {
+            (whereClause as Record<string, unknown>).AND = [
+                {
+                    OR: [
+                        { contact: { company: { listId: listIdParam } } },
+                        { company: { listId: listIdParam } },
+                    ],
+                },
+            ];
         }
 
         const callbacks = await prisma.action.findMany({
