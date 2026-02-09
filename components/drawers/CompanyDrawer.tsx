@@ -126,6 +126,7 @@ export function CompanyDrawer({
     const [showQuickEmailModal, setShowQuickEmailModal] = useState(false);
     const [missionName, setMissionName] = useState<string>("");
     const [showAddContact, setShowAddContact] = useState(false);
+    const [statusConfig, setStatusConfig] = useState<{ statuses: Array<{ code: string; label: string; requiresNote: boolean }> } | null>(null);
 
     const effectiveMissionId = company?.missionId ?? resolvedMissionId ?? undefined;
 
@@ -187,6 +188,36 @@ export function CompanyDrawer({
             })
             .catch(() => setMissionName(""));
     }, [effectiveMissionId, isCreating]);
+
+    // Fetch status config when mission is available
+    useEffect(() => {
+        if (!effectiveMissionId) {
+            setStatusConfig(null);
+            return;
+        }
+        fetch(`/api/config/action-statuses?missionId=${effectiveMissionId}`)
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data?.statuses) {
+                    setStatusConfig({ statuses: json.data.statuses });
+                } else {
+                    setStatusConfig(null);
+                }
+            })
+            .catch(() => setStatusConfig(null));
+    }, [effectiveMissionId]);
+
+    const getRequiresNote = (code: string) =>
+        statusConfig?.statuses?.find((s) => s.code === code)?.requiresNote ??
+        ["INTERESTED", "CALLBACK_REQUESTED", "ENVOIE_MAIL"].includes(code);
+
+    const statusOptions = statusConfig?.statuses?.length
+        ? statusConfig.statuses.map((s) => ({ value: s.code, label: s.label }))
+        : Object.entries(ACTION_RESULT_LABELS).map(([value, label]) => ({ value, label }));
+
+    const statusLabels: Record<string, string> = statusConfig?.statuses?.length
+        ? Object.fromEntries(statusConfig.statuses.map((s) => [s.code, s.label]))
+        : { ...ACTION_RESULT_LABELS };
 
     // Fetch actions history when drawer opens with a company
     useEffect(() => {
@@ -385,7 +416,7 @@ export function CompanyDrawer({
             setShowQuickEmailModal(true);
             return;
         }
-        const noteRequired = ["INTERESTED", "CALLBACK_REQUESTED"].includes(newActionResult);
+        const noteRequired = getRequiresNote(newActionResult);
         if (noteRequired && !newActionNote.trim()) {
             showError("Erreur", "Une note est requise pour ce résultat");
             return;
@@ -413,8 +444,8 @@ export function CompanyDrawer({
 
     if (!isCreating && !company) return null;
 
-    const statusConfig = isCreating ? null : STATUS_CONFIG[company!.status];
-    const StatusIcon = statusConfig?.icon;
+    const companyStatusConfig = isCreating ? null : STATUS_CONFIG[company!.status];
+    const StatusIcon = companyStatusConfig?.icon;
 
     return (
         <Drawer
@@ -466,16 +497,16 @@ export function CompanyDrawer({
         >
             <div className="space-y-6">
                 {/* Status Badge */}
-                {!isEditing && !isCreating && statusConfig && StatusIcon && (
+                {!isEditing && !isCreating && companyStatusConfig && StatusIcon && (
                     <div className={cn(
                         "inline-flex items-center gap-2 px-3 py-1.5 rounded-full",
-                        statusConfig.bg,
-                        statusConfig.borderColor,
+                        companyStatusConfig.bg,
+                        companyStatusConfig.borderColor,
                         "border"
                     )}>
-                        <StatusIcon className={cn("w-4 h-4", statusConfig.color)} />
-                        <span className={cn("text-sm font-medium", statusConfig.color)}>
-                            {statusConfig.label}
+                        <StatusIcon className={cn("w-4 h-4", companyStatusConfig.color)} />
+                        <span className={cn("text-sm font-medium", companyStatusConfig.color)}>
+                            {companyStatusConfig.label}
                         </span>
                     </div>
                 )}
@@ -719,7 +750,7 @@ export function CompanyDrawer({
                                 <Select
                                     label="Résultat"
                                     placeholder="Sélectionner un résultat..."
-                                    options={Object.entries(ACTION_RESULT_LABELS).map(([value, label]) => ({ value, label }))}
+                                    options={statusOptions}
                                     value={newActionResult}
                                     onChange={setNewActionResult}
                                 />
@@ -784,7 +815,7 @@ export function CompanyDrawer({
                                             disabled={
                                                 newActionSaving ||
                                                 !newActionResult ||
-                                                (["INTERESTED", "CALLBACK_REQUESTED"].includes(newActionResult) && !newActionNote.trim())
+                                                (newActionResult && getRequiresNote(newActionResult) && !newActionNote.trim())
                                             }
                                             isLoading={newActionSaving}
                                         >
@@ -838,7 +869,7 @@ export function CompanyDrawer({
                                     >
                                         <div className="flex items-center justify-between gap-2 mb-1">
                                             <span className="font-medium text-slate-700">
-                                                {ACTION_RESULT_LABELS[a.result as keyof typeof ACTION_RESULT_LABELS] ?? a.result}
+                                                {statusLabels[a.result] ?? a.result}
                                             </span>
                                             <span className="text-xs text-slate-400">
                                                 {new Date(a.createdAt).toLocaleDateString("fr-FR", {

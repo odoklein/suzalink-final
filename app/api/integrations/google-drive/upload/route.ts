@@ -14,7 +14,7 @@ import { uploadFile, refreshTokenIfNeeded } from '@/lib/google-drive';
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireAuth();
+    const session = await requireAuth(request);
 
     try {
         const formData = await request.formData();

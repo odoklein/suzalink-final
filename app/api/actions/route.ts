@@ -9,6 +9,7 @@ import {
     getPaginationParams,
 } from '@/lib/api-utils';
 import { actionService } from '@/lib/services/ActionService';
+import { statusConfigService } from '@/lib/services/StatusConfigService';
 import { z } from 'zod';
 
 // ============================================
@@ -20,15 +21,7 @@ const createActionSchema = z.object({
     companyId: z.string().min(1, 'Company requis').optional(),
     campaignId: z.string().min(1, 'Campagne requise'),
     channel: z.enum(['CALL', 'EMAIL', 'LINKEDIN']),
-    result: z.enum([
-        'NO_RESPONSE',
-        'BAD_CONTACT',
-        'INTERESTED',
-        'CALLBACK_REQUESTED',
-        'MEETING_BOOKED',
-        'DISQUALIFIED',
-        'ENVOIE_MAIL',
-    ]),
+    result: z.string().min(1, 'Résultat requis'),
     note: z.string().max(500, 'Note trop longue (max 500 caractères)').optional(),
     callbackDate: z.union([z.string(), z.date()]).optional().transform((s) => (s ? (typeof s === 'string' ? new Date(s) : s) : undefined)),
     duration: z.number().positive().max(7200, 'Durée invalide').optional(),
@@ -42,7 +35,7 @@ const createActionSchema = z.object({
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(['MANAGER', 'SDR', 'BUSINESS_DEVELOPER']);
+    const session = await requireRole(['MANAGER', 'SDR', 'BUSINESS_DEVELOPER'], request);
     const { searchParams } = new URL(request.url);
     const { page, limit } = getPaginationParams(searchParams);
 
@@ -87,11 +80,19 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(['SDR', 'MANAGER', 'BUSINESS_DEVELOPER']);
+    const session = await requireRole(['SDR', 'MANAGER', 'BUSINESS_DEVELOPER'], request);
     const data = await validateRequest(request, createActionSchema);
 
-    // Validate required note for certain results
-    if ((data.result === 'INTERESTED' || data.result === 'CALLBACK_REQUESTED' || data.result === 'ENVOIE_MAIL') && !data.note?.trim()) {
+    // Validate result against effective config
+    const allowedCodes = await statusConfigService.getAllowedResultCodes({ campaignId: data.campaignId });
+    if (!allowedCodes.includes(data.result)) {
+        return errorResponse('Résultat non autorisé pour cette campagne', 400);
+    }
+
+    // Validate required note from config
+    const config = await statusConfigService.getEffectiveStatusConfig({ campaignId: data.campaignId });
+    const statusDef = config.statuses.find((s) => s.code === data.result);
+    if (statusDef?.requiresNote && !data.note?.trim()) {
         return errorResponse('Une note est requise pour ce type de résultat', 400);
     }
 
@@ -107,7 +108,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
             note: data.note,
             callbackDate: data.callbackDate,
             duration: data.duration,
-        });
+        }, statusDef);
         return successResponse(action, 201);
     } catch (err) {
         if (err instanceof Error && err.message === 'DUPLICATE_CALLBACK') {

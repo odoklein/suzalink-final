@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { Prisma } from '@prisma/client';
 import { parseDateFromNote } from '@/lib/utils/parseDateFromNote';
+import type { EffectiveStatusDefinition } from './StatusConfigService';
 
 // ============================================
 // ACTION SERVICE
@@ -15,9 +16,9 @@ export interface CreateActionInput {
     sdrId: string;
     campaignId: string;
     channel: 'CALL' | 'EMAIL' | 'LINKEDIN';
-    result: 'NO_RESPONSE' | 'BAD_CONTACT' | 'INTERESTED' | 'CALLBACK_REQUESTED' | 'MEETING_BOOKED' | 'DISQUALIFIED';
+    result: string;
     note?: string;
-    /** When result is CALLBACK_REQUESTED: set from calendar UI; if not provided, parsed from note. */
+    /** When result triggers callback: set from calendar UI; if not provided, parsed from note. */
     callbackDate?: Date;
     duration?: number;
 }
@@ -41,7 +42,14 @@ export class ActionService {
     // ============================================
     // CREATE ACTION WITH TRANSACTION
     // ============================================
-    async createAction(input: CreateActionInput): Promise<ActionWithRelations> {
+    async createAction(
+        input: CreateActionInput,
+        statusDef?: EffectiveStatusDefinition | null
+    ): Promise<ActionWithRelations> {
+        const triggersCallback = statusDef?.triggersCallback ?? (input.result === 'CALLBACK_REQUESTED');
+        const triggersOpportunity = statusDef?.triggersOpportunity ?? 
+            (input.result === 'MEETING_BOOKED' || input.result === 'INTERESTED');
+
         // Use transaction to ensure atomicity
         return await prisma.$transaction(async (tx) => {
             // Validate that either contactId or companyId is provided
@@ -52,7 +60,7 @@ export class ActionService {
             // Callback date: from calendar (callbackDate) or parsed from note
             let callbackDate: Date | null = null;
             let noteToStore = input.note;
-            if (input.result === 'CALLBACK_REQUESTED') {
+            if (triggersCallback) {
                 if (input.callbackDate) {
                     callbackDate = input.callbackDate;
                     // Keep note in sync with calendar so note and callbackDate don't diverge
@@ -63,13 +71,13 @@ export class ActionService {
                 }
             }
 
-            // Duplicate prevention: one pending CALLBACK_REQUESTED per contact/company per campaign.
+            // Duplicate prevention: one pending callback per contact/company per campaign.
             // "Pending" = callbackDate null or <= now; we only block when such an action exists.
-            if (input.result === 'CALLBACK_REQUESTED') {
+            if (triggersCallback) {
                 const existingPending = await tx.action.findFirst({
                     where: {
                         campaignId: input.campaignId,
-                        result: 'CALLBACK_REQUESTED',
+                        result: input.result as any,
                         ...(input.contactId ? { contactId: input.contactId } : { companyId: input.companyId! }),
                         OR: [{ callbackDate: null }, { callbackDate: { lte: new Date() } }],
                     },
@@ -113,8 +121,13 @@ export class ActionService {
             });
 
             // 2. Auto-create opportunity for positive outcomes (only for contacts)
-            if (input.contactId && this.shouldCreateOpportunity(input.result, input.note)) {
-                await this.createOpportunityFromAction(tx, action, input.note!);
+            if (input.contactId && triggersOpportunity && input.note?.trim()) {
+                const existing = await tx.opportunity.findFirst({
+                    where: { contactId: input.contactId },
+                });
+                if (!existing) {
+                    await this.createOpportunityFromAction(tx, action, input.note!);
+                }
             }
 
             // 3. Update contact completeness if enriched (only for contacts)

@@ -30,7 +30,7 @@ const testRuleSchema = z.object({
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-  await requireRole(['MANAGER']);
+  await requireRole(['MANAGER'], request);
   const { condition, action } = await validateRequest(request, testRuleSchema);
 
   // Create a mock rule for testing

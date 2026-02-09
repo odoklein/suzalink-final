@@ -12,7 +12,7 @@ import { paymentMatchingService } from "@/lib/billing/payment-matching-service";
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(["MANAGER"]);
+    await requireRole(["MANAGER"], request);
     const { searchParams } = new URL(request.url);
     const sinceDate = searchParams.get("sinceDate") || undefined;
 

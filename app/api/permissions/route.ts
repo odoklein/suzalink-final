@@ -12,7 +12,7 @@ import {
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER'], request);
     
     const { searchParams } = new URL(request.url);
     const category = searchParams.get('category');

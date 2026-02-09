@@ -36,7 +36,7 @@ export const GET = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    const session = await requireRole(['MANAGER', 'CLIENT', 'SDR', 'BUSINESS_DEVELOPER']);
+    const session = await requireRole(['MANAGER', 'CLIENT', 'SDR', 'BUSINESS_DEVELOPER'], request);
     const { id } = await params;
 
     const mission = await prisma.mission.findUnique({
@@ -129,7 +129,7 @@ export const PUT = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER']);
+    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER'], request);
     const { id } = await params;
     const data = await validateRequest(request, updateMissionSchema);
 
@@ -165,7 +165,7 @@ export const DELETE = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER'], request);
     const { id } = await params;
 
     await prisma.mission.delete({
@@ -183,7 +183,7 @@ export const PATCH = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER']);
+    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER'], request);
     const { id } = await params;
     const { sdrId } = await validateRequest(request, assignSdrSchema);
 

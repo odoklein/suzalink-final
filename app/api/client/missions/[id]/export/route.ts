@@ -16,7 +16,7 @@ export const GET = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    const session = await requireRole(["CLIENT"]);
+    const session = await requireRole(["CLIENT"], request);
     const { id: missionId } = await params;
 
     const clientId = (session.user as { clientId?: string })?.clientId;

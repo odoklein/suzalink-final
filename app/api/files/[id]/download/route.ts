@@ -16,7 +16,7 @@ export const GET = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireAuth();
+    await requireAuth(request);
     const { id } = await params;
 
     // Get file metadata

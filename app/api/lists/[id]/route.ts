@@ -16,7 +16,7 @@ export const GET = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER', 'CLIENT', 'SDR']);
+    await requireRole(['MANAGER', 'CLIENT', 'SDR'], request);
     const { id } = await params;
 
     const list = await prisma.list.findUnique({
@@ -56,7 +56,7 @@ export const DELETE = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER'], request);
     const { id } = await params;
 
     // Delete list (cascade will delete companies and contacts)
@@ -75,7 +75,7 @@ export const PATCH = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER'], request);
     const { id } = await params;
     const body = await request.json();
 

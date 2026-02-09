@@ -34,7 +34,7 @@ async function verifyBDAccess(bdUserId: string, clientId: string): Promise<boole
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest, { params }: RouteParams) => {
-    const session = await requireRole(['BUSINESS_DEVELOPER']);
+    const session = await requireRole(['BUSINESS_DEVELOPER'], request);
     const { id } = await params;
 
     // Verify access
@@ -112,7 +112,7 @@ const updateClientSchema = z.object({
 });
 
 export const PUT = withErrorHandler(async (request: NextRequest, { params }: RouteParams) => {
-    const session = await requireRole(['BUSINESS_DEVELOPER']);
+    const session = await requireRole(['BUSINESS_DEVELOPER'], request);
     const { id } = await params;
     const data = await validateRequest(request, updateClientSchema);
 

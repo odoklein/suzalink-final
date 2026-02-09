@@ -20,7 +20,7 @@ const copyWeekSchema = z.object({
 });
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(['MANAGER']);
+    const session = await requireRole(['MANAGER'], request);
     const data = await validateRequest(request, copyWeekSchema);
 
     const sourceStart = new Date(data.sourceStartDate);

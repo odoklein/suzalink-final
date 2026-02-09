@@ -26,7 +26,7 @@ export const PATCH = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    const session = await requireRole(['SDR', 'BUSINESS_DEVELOPER', 'MANAGER']);
+    const session = await requireRole(['SDR', 'BUSINESS_DEVELOPER', 'MANAGER'], request);
     const { id } = await params;
     const data = await validateRequest(request, updateCallbackSchema);
 

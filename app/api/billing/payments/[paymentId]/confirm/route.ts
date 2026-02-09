@@ -15,7 +15,7 @@ export const POST = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ paymentId: string }> }
 ) => {
-    const session = await requireRole(["MANAGER"]);
+    const session = await requireRole(["MANAGER"], request);
     const { paymentId } = await params;
 
     try {

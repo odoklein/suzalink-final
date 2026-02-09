@@ -26,7 +26,7 @@ const importSchema = z.object({
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-  const session = await requireAuth();
+  const session = await requireAuth(request);
 
   try {
     const data = await validateRequest(request, importSchema);

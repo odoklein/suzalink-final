@@ -13,7 +13,7 @@ import { getAuthUrl } from '@/lib/google-drive';
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireAuth();
+    const session = await requireAuth(request);
 
     try {
         // Generate state parameter for CSRF protection

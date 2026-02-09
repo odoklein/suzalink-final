@@ -17,7 +17,7 @@ export const GET = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    const session = await requireRole(['MANAGER', 'CLIENT']);
+    const session = await requireRole(['MANAGER', 'CLIENT'], request);
     const { id: clientId } = await params;
 
     // CLIENT users can only access their own client's meetings

@@ -29,6 +29,20 @@ enum Channel {
   LINKEDIN
 }
 
+// In-app call system
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CallStatus {
+  queued
+  ringing
+  in_progress
+  completed
+  failed
+}
+
 enum ListType {
   SUZALI
   CLIENT
@@ -50,6 +64,22 @@ enum ActionResult {
   MEETING_CANCELLED
   DISQUALIFIED
   ENVOIE_MAIL
+}
+
+// Config-driven action status and workflow
+enum ActionScopeType {
+  GLOBAL
+  CLIENT
+  MISSION
+  CAMPAIGN
+}
+
+enum ActionPriorityLabel {
+  CALLBACK
+  FOLLOW_UP
+  NEW
+  RETRY
+  SKIP
 }
 
 enum SyncDirection {
@@ -264,6 +294,10 @@ model User {
   // SDR Preferences
   selectedMissionId    String?
   selectedListId       String?
+
+  // In-app telephony: unique outbound number per SDR (enforced in app logic)
+  outboundPhoneNumber  String?   @unique
+  calls                Call[]   @relation("CallUser")
   
   // Business Developer portfolio
   bdPortfolio          BusinessDeveloperClient[]
@@ -455,6 +489,7 @@ model Campaign {
   isActive      Boolean   @default(true)
   actions       Action[]
   files         File[]
+  calls         Call[]
   
   // Email Hub relations
   emailThreads  EmailThread[]
@@ -495,6 +530,7 @@ model Company {
   contacts      Contact[]
   opportunities Opportunity[]
   actions       Action[]  // Actions can be on companies too
+  calls         Call[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -515,6 +551,7 @@ model Contact {
   status        CompletenessStatus @default(INCOMPLETE)
   actions       Action[]
   opportunities Opportunity[]
+  calls         Call[]
   
   // Email Hub relations
   emailThreads         EmailThread[]
@@ -542,10 +579,78 @@ model Action {
   note          String?      @db.Text
   callbackDate  DateTime?    // Auto-detected from note for CALLBACK_REQUESTED
   duration      Int?         // Duration in seconds
+  call          Call?        // Reverse relation: Call.actionId -> this Action
   createdAt     DateTime     @default(now())
   
   @@index([companyId])
   @@index([callbackDate])
+}
+
+// Config-driven action status definitions (per scope: GLOBAL, CLIENT, MISSION, CAMPAIGN)
+model ActionStatusDefinition {
+  id                 String             @id @default(cuid())
+  scopeType          ActionScopeType
+  scopeId            String?            // Null for GLOBAL; clientId / missionId / campaignId otherwise
+  code               String             // e.g. NO_RESPONSE, CALLBACK_REQUESTED
+  label              String?            // Display label; null = inherit from parent
+  color              String?            // Optional hex for UI (e.g. #F5F5DC)
+  sortOrder          Int
+  requiresNote       Boolean            @default(false)
+  priorityLabel      ActionPriorityLabel
+  priorityOrder      Int?               // Optional numeric override; derived from priorityLabel if null
+  triggersOpportunity Boolean           @default(false)
+  triggersCallback   Boolean            @default(false)
+  isActive           Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@unique([scopeType, scopeId, code])
+  @@index([scopeType, scopeId])
+}
+
+// Config-driven next steps: "after this result, suggest this action"
+model ActionNextStep {
+  id             String         @id @default(cuid())
+  scopeType      ActionScopeType
+  scopeId        String?
+  fromResultCode String
+  actionType     String         // e.g. OPEN_BOOKING, SEND_EMAIL, OPEN_EMAIL_MODAL
+  label          String?
+  config         Json?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([scopeType, scopeId])
+}
+
+// In-app call system: one record per call, linked to User (SDR) and optionally Action after logging
+model Call {
+  id              String        @id @default(cuid())
+  direction       CallDirection
+  fromNumber      String
+  toNumber        String
+  userId          String
+  user            User          @relation("CallUser", fields: [userId], references: [id], onDelete: Cascade)
+  contactId       String?
+  contact         Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  companyId       String?
+  company         Company?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  campaignId      String?
+  campaign        Campaign?     @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  startTime       DateTime      @default(now())
+  endTime         DateTime?
+  status          CallStatus    @default(queued)
+  durationSeconds Int?
+  recordingUrl    String?       @db.Text
+  externalCallId  String?       // e.g. external provider call ID
+  actionId        String?       @unique // Set when SDR logs outcome (creates Action); link from Call -> Action
+  action          Action?       @relation(fields: [actionId], references: [id], onDelete: SetNull)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([userId])
+  @@index([startTime])
+  @@index([status])
 }
 
 model Opportunity {

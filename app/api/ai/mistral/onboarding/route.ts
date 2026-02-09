@@ -177,7 +177,7 @@ Réponds en JSON avec ce format exact:
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER']);
+    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER'], request);
 
     const apiKey = process.env.MISTRAL_API_KEY;
     if (!apiKey) {

@@ -20,7 +20,7 @@ const MISTRAL_API_URL = 'https://api.mistral.ai/v1/chat/completions';
 const MISTRAL_MODEL = 'mistral-large-latest';
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    await requireAuth();
+    await requireAuth(request);
 
     const apiKey = process.env.MISTRAL_API_KEY;
     if (!apiKey) {

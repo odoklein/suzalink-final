@@ -31,7 +31,7 @@ export const GET = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireAuth();
+    await requireAuth(request);
     const { id } = await params;
 
     const folder = await prisma.folder.findUnique({
@@ -109,7 +109,7 @@ export const PUT = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER', 'SDR']);
+    await requireRole(['MANAGER', 'SDR'], request);
     const { id } = await params;
     const data = await validateRequest(request, updateFolderSchema);
 
@@ -166,7 +166,7 @@ export const DELETE = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER'], request);
     const { id } = await params;
 
     // Check if folder exists

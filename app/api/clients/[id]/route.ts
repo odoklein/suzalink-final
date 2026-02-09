@@ -30,7 +30,7 @@ export const GET = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER', 'CLIENT']);
+    await requireRole(['MANAGER', 'CLIENT'], request);
     const { id } = await params;
 
     const client = await prisma.client.findUnique({
@@ -82,7 +82,7 @@ export const PUT = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER'], request);
     const { id } = await params;
     const data = await validateRequest(request, updateClientSchema);
 
@@ -119,7 +119,7 @@ export const DELETE = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER']);
+    await requireRole(['MANAGER'], request);
     const { id } = await params;
 
     // Check if client has missions

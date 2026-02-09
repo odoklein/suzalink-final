@@ -139,7 +139,7 @@ function buildScriptFromSuggestions(suggestions: ScriptSuggestions): Record<Scri
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER']);
+    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER'], request);
     
     // Check for API key
     const apiKey = process.env.MISTRAL_API_KEY;
