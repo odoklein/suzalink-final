@@ -15,11 +15,25 @@ const httpServer = createServer();
 
 const io = new Server(httpServer, {
   cors: {
-    origin: [
-      process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-      "http://localhost:3002",
-      "http://localhost:3005",
-    ],
+    origin: (origin, callback) => {
+      // In development, allow no origin (like mobile apps) or any origin for LAN testing
+      if (!origin || process.env.NODE_ENV !== "production") {
+        callback(null, true);
+        return;
+      }
+
+      const allowedOrigins = [
+        process.env.NEXT_PUBLIC_APP_URL,
+        "http://localhost:3000",
+        "http://localhost:3002",
+      ].filter(Boolean) as string[];
+
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -66,96 +80,125 @@ io.on("connection", (socket) => {
   });
 
   // Typing indicators
-  socket.on("typing_start", ({ threadId, userName }: any) => {
-    socket.to(`thread:${threadId}`).emit("typing_start", {
-      threadId,
-      userId,
-      userName,
-    });
-  });
+  socket.on(
+    "typing_start",
+    ({ threadId, userName }: { threadId: string; userName: string }) => {
+      socket.to(`thread:${threadId}`).emit("typing_start", {
+        threadId,
+        userId,
+        userName,
+      });
+    },
+  );
 
-  socket.on("typing_stop", ({ threadId, userName }: any) => {
-    socket.to(`thread:${threadId}`).emit("typing_stop", {
-      threadId,
-      userId,
-      userName,
-    });
-  });
+  socket.on(
+    "typing_stop",
+    ({ threadId, userName }: { threadId: string; userName: string }) => {
+      socket.to(`thread:${threadId}`).emit("typing_stop", {
+        threadId,
+        userId,
+        userName,
+      });
+    },
+  );
 
   // Handle new message (if not using API route)
   // Note: Usually we use the API route for persistence, then emit event.
   // However, if the client emits 'send_message', we can handle it here:
-  socket.on("send_message", async (payload: any) => {
-    try {
-      // Save to DB
-      const { threadId, content, attachments, replyToId } = payload;
+  socket.on(
+    "send_message",
+    async (payload: {
+      threadId: string;
+      content: string;
+      attachments?: {
+        filename: string;
+        mimeType: string;
+        size: number;
+        storageKey: string;
+        url?: string;
+      }[];
+      replyToId?: string;
+    }) => {
+      try {
+        // Save to DB
+        const { threadId, content, replyToId } = payload;
 
-      // 1. Validate thread access (omitted for brevity)
+        // 1. Validate thread access (omitted for brevity)
 
-      // 2. Create message
-      const message = await prisma.commsMessage.create({
-        data: {
+        // 2. Create message
+        const message = await prisma.commsMessage.create({
+          data: {
+            threadId,
+            authorId: userId,
+            content,
+            parentMessageId: replyToId,
+            type: "TEXT", // or infer from attachments
+          },
+          include: {
+            author: { select: { id: true, name: true, role: true } },
+          },
+        });
+
+        // 3. Broadcast to room
+        io.to(`thread:${threadId}`).emit("message_created", {
           threadId,
-          authorId: userId,
-          content,
-          parentMessageId: replyToId,
-          type: "TEXT", // or infer from attachments
-        },
-        include: {
-          author: { select: { id: true, name: true, role: true } },
-        },
-      });
+          messageId: message.id,
+          content: message.content,
+          userId: message.author.id,
+          userName: message.author.name,
+          createdAt: message.createdAt.toISOString(),
+          // ... mapping to frontend payload format
+        });
 
-      // 3. Broadcast to room
-      io.to(`thread:${threadId}`).emit("message_created", {
-        threadId,
-        messageId: message.id,
-        content: message.content,
-        userId: message.author.id,
-        userName: message.author.name,
-        createdAt: message.createdAt.toISOString(),
-        // ... mapping to frontend payload format
-      });
-
-      // 4. Update thread metadata
-      await prisma.commsThread.update({
-        where: { id: threadId },
-        data: {
-          lastMessageAt: new Date(),
-          lastMessageById: message.id,
-          messageCount: { increment: 1 },
-        },
-      });
-    } catch (error) {
-      console.error("Error sending message via socket:", error);
-      socket.emit("error", { message: "Failed to send message" });
-    }
-  });
+        // 4. Update thread metadata
+        await prisma.commsThread.update({
+          where: { id: threadId },
+          data: {
+            lastMessageAt: new Date(),
+            lastMessageById: message.id,
+            messageCount: { increment: 1 },
+          },
+        });
+      } catch (error) {
+        console.error("Error sending message via socket:", error);
+        socket.emit("error", { message: "Failed to send message" });
+      }
+    },
+  );
 
   // Message Seen
-  socket.on("message_seen", async ({ messageId, threadId }: any) => {
-    try {
-      // Update DB
-      // Check if already seen to avoid duplicates
-      // basic code:
-      await prisma.commsMessageReadReceipt.upsert({
-        where: {
-          messageId_userId: { messageId, userId },
-        },
-        create: { messageId, userId },
-        update: { readAt: new Date() }, // Update timestamp if re-read?
-      });
+  socket.on(
+    "message_seen",
+    async ({
+      messageId,
+      threadId,
+    }: {
+      messageId: string;
+      threadId: string;
+    }) => {
+      try {
+        // Update DB
+        // Check if already seen to avoid duplicates
+        // basic code:
+        await prisma.commsMessageReadReceipt.upsert({
+          where: {
+            messageId_userId: { messageId, userId },
+          },
+          create: { messageId, userId },
+          update: { readAt: new Date() }, // Update timestamp if re-read?
+        });
 
-      // Broadcast to thread that this user read this message
-      io.to(`thread:${threadId}`).emit("message_read", {
-        messageId,
-        userId,
-        readAt: new Date().toISOString(),
-      });
-    } catch (e) {
-      console.error(e);
-    }
-  });
+        // Broadcast to thread that this user read this message
+        io.to(`thread:${threadId}`).emit("message_read", {
+          messageId,
+          userId,
+          readAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    },
+  );
 
   // Disconnect
   socket.on("disconnect", () => {

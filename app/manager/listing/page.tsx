@@ -57,6 +57,9 @@ interface ListingResult {
 export default function ListingPage() {
     const { success, error: showError } = useToast();
 
+    // Provider
+    const [provider, setProvider] = useState<"apollo" | "apify">("apollo");
+
     // State
     const [results, setResults] = useState<ListingResult[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -87,6 +90,11 @@ export default function ListingPage() {
     const [departmentHeadcount, setDepartmentHeadcount] = useState("");
     const [jobPostings, setJobPostings] = useState("");
 
+    // Apify Specific State
+    const [apifyLocation, setApifyLocation] = useState("");
+    const [runId, setRunId] = useState<string | null>(null);
+    const [pollStatus, setPollStatus] = useState<string>("");
+
     const [limit, setLimit] = useState("25");
 
     // Location Logic
@@ -106,6 +114,14 @@ export default function ListingPage() {
     // ============================================
 
     const handleSearch = async () => {
+        if (provider === "apollo") {
+            handleApolloSearch();
+        } else {
+            handleApifySearch();
+        }
+    };
+
+    const handleApolloSearch = async () => {
         // Validate - at least one filter required
         const hasFilter = industry || companySize || country || state || region || keywords ||
             revenueRange || fundingMin || fundingMax || latestFundingStage ||
@@ -164,6 +180,80 @@ export default function ListingPage() {
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const handleApifySearch = async () => {
+        if (!keywords && !apifyLocation) {
+            showError("Erreur", "Veuillez renseigner un mot-clé ou une localisation");
+            return;
+        }
+
+        setIsLoading(true);
+        setResults([]);
+        setSelected(new Set());
+        setPollStatus("Initiation...");
+
+        try {
+            const runRes = await fetch("/api/prospects/listing/apify/run", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    keywords,
+                    location: apifyLocation,
+                    limit: parseInt(limit)
+                })
+            });
+
+            const runJson = await runRes.json();
+            if (!runJson.success) throw new Error(runJson.error);
+
+            setRunId(runJson.runId);
+            pollApifyRun(runJson.runId);
+        } catch (err) {
+            console.error("Apify start failed:", err);
+            showError("Erreur", err instanceof Error ? err.message : "Erreur lancement Apify");
+            setIsLoading(false);
+        }
+    };
+
+    const pollApifyRun = async (currentRunId: string) => {
+        const interval = setInterval(async () => {
+            try {
+                const res = await fetch(`/api/prospects/listing/apify/status?runId=${currentRunId}`);
+                const json = await res.json();
+
+                if (!json.success) {
+                    clearInterval(interval);
+                    throw new Error(json.error);
+                }
+
+                setPollStatus(`Statut: ${json.status}...`);
+
+                if (json.status === "SUCCEEDED") {
+                    clearInterval(interval);
+                    const resultsRes = await fetch(`/api/prospects/listing/apify/results?datasetId=${json.datasetId}`);
+                    const resultsJson = await resultsRes.json();
+
+                    if (resultsJson.success) {
+                        setResults(resultsJson.data);
+                        success("Terminé", `${resultsJson.data.length} résultats récupérés`);
+                    } else {
+                        showError("Erreur", "Erreur récupération résultats");
+                    }
+                    setIsLoading(false);
+                    setRunId(null);
+                } else if (json.status === "FAILED" || json.status === "ABORTED") {
+                    clearInterval(interval);
+                    showError("Erreur", "Le scraping a échoué");
+                    setIsLoading(false);
+                    setRunId(null);
+                }
+            } catch (err) {
+                console.error("Polling error", err);
+                clearInterval(interval);
+                setIsLoading(false);
+            }
+        }, 3000);
     };
 
     // ============================================
@@ -448,103 +538,162 @@ export default function ListingPage() {
                 <Card className="p-3 flex flex-col flex-1 min-h-0 overflow-hidden">
                     <div className="flex items-center gap-1.5 mb-3 shrink-0">
                         <Filter className="w-4 h-4 text-slate-400" />
+                        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Provider</h2>
+                    </div>
+
+                    <div className="flex flex-col gap-1 mb-4">
+                        <button
+                            onClick={() => setProvider("apollo")}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${provider === "apollo"
+                                    ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
+                                    : "text-slate-600 hover:bg-slate-50 border border-transparent"
+                                }`}
+                        >
+                            <Globe className="w-3.5 h-3.5" />
+                            Apollo.io
+                        </button>
+                        <button
+                            onClick={() => setProvider("apify")}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${provider === "apify"
+                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                                    : "text-slate-600 hover:bg-slate-50 border border-transparent"
+                                }`}
+                        >
+                            <Building2 className="w-3.5 h-3.5" />
+                            Google Maps
+                        </button>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 mb-3 shrink-0">
+                        <Filter className="w-4 h-4 text-slate-400" />
                         <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Filtres</h2>
                     </div>
                     <div className="flex-1 overflow-y-auto space-y-3 pr-0.5 text-[13px]">
-                        {/* Basic */}
-                        <div className="space-y-1.5">
-                            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1">Base</h3>
-                            <div className="space-y-1.5">
-                                <div>
-                                    <label className="block text-[11px] text-slate-500 mb-0.5">Secteur</label>
-                                    <Select options={industryOptions} value={industry} onChange={setIndustry} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
-                                </div>
-                                <div>
-                                    <label className="block text-[11px] text-slate-500 mb-0.5">Taille</label>
-                                    <Select options={sizeOptions} value={companySize} onChange={setCompanySize} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
-                                </div>
-                                <div>
-                                    <label className="block text-[11px] text-slate-500 mb-0.5">Pays</label>
-                                    <Select options={countryOptions} value={country} onChange={handleCountryChange} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
-                                </div>
-                                <div>
-                                    <label className="block text-[11px] text-slate-500 mb-0.5">Région</label>
-                                    <Select options={regionOptions} value={region} onChange={handleRegionChange} disabled={!country} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
-                                </div>
-                                <div>
-                                    <label className="block text-[11px] text-slate-500 mb-0.5">État</label>
-                                    <Select options={stateOptions} value={state} onChange={setState} disabled={!region} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
-                                </div>
-                                <div>
-                                    <label className="block text-[11px] text-slate-500 mb-0.5">Keywords</label>
-                                    <Input placeholder="SaaS, E-commerce..." value={keywords} onChange={(e) => setKeywords(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Revenue & Funding */}
-                        <div className="space-y-1.5">
-                            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1">Revenu & financement</h3>
-                            <div className="space-y-1.5">
-                                <div>
-                                    <label className="block text-[11px] text-slate-500 mb-0.5">Revenu</label>
-                                    <Select options={revenueOptions} value={revenueRange} onChange={setRevenueRange} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
-                                </div>
-                                <div>
-                                    <label className="block text-[11px] text-slate-500 mb-0.5">Financement min ($)</label>
-                                    <Input type="number" placeholder="1M" value={fundingMin} onChange={(e) => setFundingMin(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
-                                </div>
-                                <div>
-                                    <label className="block text-[11px] text-slate-500 mb-0.5">Financement max ($)</label>
-                                    <Input type="number" placeholder="10M" value={fundingMax} onChange={(e) => setFundingMax(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
-                                </div>
-                                <div>
-                                    <label className="block text-[11px] text-slate-500 mb-0.5">Dernier tour</label>
-                                    <Select options={fundingStageOptions} value={latestFundingStage} onChange={setLatestFundingStage} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Company Details */}
-                        <div className="space-y-1.5">
-                            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1">Entreprise</h3>
-                            <div className="space-y-1.5">
-                                <div>
-                                    <label className="block text-[11px] text-slate-500 mb-0.5">Année min / max</label>
-                                    <div className="flex gap-1">
-                                        <Input type="number" placeholder="2000" value={yearFoundedMin} onChange={(e) => setYearFoundedMin(e.target.value)} className="!py-1.5 !text-xs !rounded-lg flex-1" />
-                                        <Input type="number" placeholder="2023" value={yearFoundedMax} onChange={(e) => setYearFoundedMax(e.target.value)} className="!py-1.5 !text-xs !rounded-lg flex-1" />
+                        {provider === "apollo" ? (
+                            <>
+                                {/* Basic */}
+                                <div className="space-y-1.5">
+                                    <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1">Base</h3>
+                                    <div className="space-y-1.5">
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Secteur</label>
+                                            <Select options={industryOptions} value={industry} onChange={setIndustry} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Taille</label>
+                                            <Select options={sizeOptions} value={companySize} onChange={setCompanySize} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Pays</label>
+                                            <Select options={countryOptions} value={country} onChange={handleCountryChange} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Région</label>
+                                            <Select options={regionOptions} value={region} onChange={handleRegionChange} disabled={!country} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">État</label>
+                                            <Select options={stateOptions} value={state} onChange={setState} disabled={!region} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Keywords</label>
+                                            <Input placeholder="SaaS, E-commerce..." value={keywords} onChange={(e) => setKeywords(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
+                                        </div>
                                     </div>
                                 </div>
-                                <div>
-                                    <label className="block text-[11px] text-slate-500 mb-0.5">Type</label>
-                                    <Select options={companyTypeOptions} value={companyType} onChange={setCompanyType} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
-                                </div>
-                                <div>
-                                    <label className="block text-[11px] text-slate-500 mb-0.5">Technologies</label>
-                                    <Input placeholder="Salesforce, AWS..." value={technologies} onChange={(e) => setTechnologies(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
-                                </div>
-                            </div>
-                        </div>
 
-                        {/* Growth & Intent */}
-                        <div className="space-y-1.5">
-                            <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1">Croissance</h3>
-                            <div className="space-y-1.5">
-                                <div className="flex items-center gap-2">
-                                    <input type="checkbox" id="isHiring" checked={isHiring} onChange={(e) => setIsHiring(e.target.checked)} className="rounded border-slate-300 w-3.5 h-3.5" />
-                                    <label htmlFor="isHiring" className="text-[11px] text-slate-500">Recrutent</label>
+                                {/* Revenue & Funding */}
+                                <div className="space-y-1.5">
+                                    <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1">Revenu & financement</h3>
+                                    <div className="space-y-1.5">
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Revenu</label>
+                                            <Select options={revenueOptions} value={revenueRange} onChange={setRevenueRange} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Financement min ($)</label>
+                                            <Input type="number" placeholder="1M" value={fundingMin} onChange={(e) => setFundingMin(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Financement max ($)</label>
+                                            <Input type="number" placeholder="10M" value={fundingMax} onChange={(e) => setFundingMax(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Dernier tour</label>
+                                            <Select options={fundingStageOptions} value={latestFundingStage} onChange={setLatestFundingStage} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                        </div>
+                                    </div>
                                 </div>
-                                <div>
-                                    <label className="block text-[11px] text-slate-500 mb-0.5">Effectif dépt.</label>
-                                    <Input placeholder="Engineering, Sales..." value={departmentHeadcount} onChange={(e) => setDepartmentHeadcount(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
+
+                                {/* Company Details */}
+                                <div className="space-y-1.5">
+                                    <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1">Entreprise</h3>
+                                    <div className="space-y-1.5">
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Année min / max</label>
+                                            <div className="flex gap-1">
+                                                <Input type="number" placeholder="2000" value={yearFoundedMin} onChange={(e) => setYearFoundedMin(e.target.value)} className="!py-1.5 !text-xs !rounded-lg flex-1" />
+                                                <Input type="number" placeholder="2023" value={yearFoundedMax} onChange={(e) => setYearFoundedMax(e.target.value)} className="!py-1.5 !text-xs !rounded-lg flex-1" />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Type</label>
+                                            <Select options={companyTypeOptions} value={companyType} onChange={setCompanyType} className="[&_button]:!py-2 [&_button]:!text-xs [&_button]:!rounded-lg" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Technologies</label>
+                                            <Input placeholder="Salesforce, AWS..." value={technologies} onChange={(e) => setTechnologies(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
+                                        </div>
+                                    </div>
                                 </div>
-                                <div>
-                                    <label className="block text-[11px] text-slate-500 mb-0.5">Offres d&apos;emploi</label>
-                                    <Input placeholder="VP Sales..." value={jobPostings} onChange={(e) => setJobPostings(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
+
+                                {/* Growth & Intent */}
+                                <div className="space-y-1.5">
+                                    <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1">Croissance</h3>
+                                    <div className="space-y-1.5">
+                                        <div className="flex items-center gap-2">
+                                            <input type="checkbox" id="isHiring" checked={isHiring} onChange={(e) => setIsHiring(e.target.checked)} className="rounded border-slate-300 w-3.5 h-3.5" />
+                                            <label htmlFor="isHiring" className="text-[11px] text-slate-500">Recrutent</label>
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Effectif dépt.</label>
+                                            <Input placeholder="Engineering, Sales..." value={departmentHeadcount} onChange={(e) => setDepartmentHeadcount(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Offres d&apos;emploi</label>
+                                            <Input placeholder="VP Sales..." value={jobPostings} onChange={(e) => setJobPostings(e.target.value)} className="!py-1.5 !text-xs !rounded-lg" />
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                        </div>
+                            </>
+                        ) : (
+                            <>
+                                {/* Apify Filters */}
+                                <div className="space-y-3">
+                                    <h3 className="text-[10px] font-medium uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1">Google Maps</h3>
+                                    <div className="space-y-1.5">
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Activité (Mots-clés)</label>
+                                            <Input
+                                                placeholder="ex: Cabinet d'avocats, Restaurant..."
+                                                value={keywords}
+                                                onChange={(e) => setKeywords(e.target.value)}
+                                                className="!py-1.5 !text-xs !rounded-lg"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] text-slate-500 mb-0.5">Localisation</label>
+                                            <Input
+                                                placeholder="ex: Paris, Lyon, 75008..."
+                                                value={apifyLocation}
+                                                onChange={(e) => setApifyLocation(e.target.value)}
+                                                className="!py-1.5 !text-xs !rounded-lg"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        )}
 
                         <div className="pt-1.5 border-t border-slate-100">
                             <label className="block text-[11px] text-slate-500 mb-0.5">Par page</label>
@@ -556,7 +705,7 @@ export default function ListingPage() {
                             {isLoading ? (
                                 <>
                                     <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                                    Recherche...
+                                    {provider === "apify" && runId ? pollStatus : "Recherche..."}
                                 </>
                             ) : (
                                 <>
@@ -576,7 +725,12 @@ export default function ListingPage() {
                         <h1 className="text-xl font-bold text-slate-900 tracking-tight">Enterprise Listing</h1>
                         <p className="text-xs text-slate-500 mt-0.5">Découvrir et générer des leads B2B</p>
                     </div>
-                    <Badge className="bg-indigo-50 text-indigo-600 text-[11px] font-medium border border-indigo-100">Apollo.io</Badge>
+                    <Badge className={`text-[11px] font-medium border ${provider === "apollo"
+                            ? "bg-indigo-50 text-indigo-600 border-indigo-100"
+                            : "bg-emerald-50 text-emerald-600 border-emerald-100"
+                        }`}>
+                        {provider === "apollo" ? "Apollo.io" : "Google Maps"}
+                    </Badge>
                 </div>
 
                 {/* Bulk actions bar */}
@@ -597,7 +751,7 @@ export default function ListingPage() {
                 {/* Data table + pagination */}
                 <Card className="flex-1 min-h-0 flex flex-col overflow-hidden p-4">
                     {isLoading ? (
-                        <LoadingState message="Recherche en cours sur Apollo.io..." />
+                        <LoadingState message={provider === "apify" && runId ? pollStatus : `Recherche en cours sur ${provider === "apollo" ? "Apollo.io" : "Google Maps"}...`} />
                     ) : results.length === 0 ? (
                         <EmptyState
                             icon={Search}

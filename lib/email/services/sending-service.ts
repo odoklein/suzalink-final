@@ -86,11 +86,15 @@ export class EmailSendingService {
       }
 
       // Generate tracking pixel if enabled
-      // Default to true unless environment variable explicitly disables it
+      // Default to true unless environment variable or mailbox setting disables it
       const globalTrackingEnabled =
         process.env.EMAIL_TRACKING_ENABLED !== "false";
+      const mailboxTrackingEnabled = (mailbox as any).trackingEnabled !== false;
+
       const shouldTrackOpens =
-        globalTrackingEnabled && options.trackOpens !== false;
+        globalTrackingEnabled &&
+        mailboxTrackingEnabled &&
+        options.trackOpens !== false;
 
       const trackingPixelId = shouldTrackOpens
         ? options.trackingPixelId || options.trackPixelId || randomUUID()
@@ -99,8 +103,11 @@ export class EmailSendingService {
       // Inject tracking pixel into HTML
       let bodyHtml = options.bodyHtml;
       if (bodyHtml && trackingPixelId) {
-        // cast to any to avoid type error until client is regenerated
-        const trackingDomain = (mailbox as any).trackingDomain || undefined;
+        // Safe access to trackingDomain
+        const mailboxData = mailbox as Mailbox & {
+          trackingDomain?: string | null;
+        };
+        const trackingDomain = mailboxData.trackingDomain || undefined;
         bodyHtml = this.injectTrackingPixel(
           bodyHtml,
           trackingPixelId,
@@ -121,13 +128,18 @@ export class EmailSendingService {
       }
 
       // Build send params
+      const { convert } = await import("html-to-text");
+      const generatedBodyText =
+        options.bodyText || (bodyHtml ? convert(bodyHtml) : "");
+
       const sendParams: SendEmailParams = {
+        from: { email: mailbox.email, name: mailbox.displayName || undefined },
         to: options.to,
         cc: options.cc,
         bcc: options.bcc,
         subject: options.subject,
         bodyHtml,
-        bodyText: options.bodyText,
+        bodyText: generatedBodyText,
         attachments: options.attachments?.map((a) => ({
           filename: a.filename,
           mimeType: a.mimeType,
@@ -137,6 +149,13 @@ export class EmailSendingService {
         trackingPixelId: trackingPixelId || undefined,
         inReplyTo: options.inReplyTo,
         threadId: options.threadId,
+        headers: {
+          "X-Entity-Ref-ID": randomUUID(),
+          // "Precedence": "list", // Removed to keep it personal
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          // Including a standard header helps reputation, but only if we have a real link
+          // For now, only adding the X-Entity header which is common for legitimate business tools
+        },
       };
 
       let result: {
@@ -442,22 +461,26 @@ export class EmailSendingService {
     }
   }
 
-  private injectTrackingPixel(
-    html: string,
-    trackingPixelId: string,
-    customDomain?: string,
-  ): string {
-    // Prioritize mailbox-specific tracking domain
-    // Fallback to global env var, then NEXTAUTH_URL
-    const baseUrl = (
+  private getTrackingBaseUrl(customDomain?: string): string {
+    return (
       customDomain ||
       process.env.EMAIL_TRACKING_DOMAIN ||
       process.env.NEXTAUTH_URL ||
       ""
     ).replace(/\/$/, "");
+  }
+
+  private injectTrackingPixel(
+    html: string,
+    trackingPixelId: string,
+    customDomain?: string,
+  ): string {
+    const baseUrl = this.getTrackingBaseUrl(customDomain);
 
     const pixelUrl = `${baseUrl}/api/email/tracking/open?id=${trackingPixelId}`;
-    const pixel = `<img src="${pixelUrl}" width="1" height="1" style="display:none" alt="" />`;
+    // Removing display:none as it can sometimes trigger spam filters.
+    // width=1 height=1 is enough to make it invisible.
+    const pixel = `<img src="${pixelUrl}" width="1" height="1" border="0" alt="" />`;
 
     // Insert before closing body tag or at the end
     if (html.includes("</body>")) {
