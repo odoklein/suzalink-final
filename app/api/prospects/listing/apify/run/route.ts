@@ -11,7 +11,15 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { keywords, location, limit } = body;
+    const {
+      keywords,
+      location,
+      limit,
+      minScore,
+      minReviews,
+      hasWebsite,
+      hasPhone,
+    } = body;
 
     if (!keywords || !location) {
       return NextResponse.json(
@@ -20,7 +28,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const runId = await startApifyRun({ keywords, location, limit });
+    const runId = await startApifyRun({
+      keywords,
+      location,
+      limit,
+      minScore,
+      minReviews,
+      hasWebsite,
+      hasPhone,
+    });
 
     return NextResponse.json({ success: true, runId });
   } catch (error) {

@@ -92,6 +92,10 @@ export default function ListingPage() {
 
     // Apify Specific State
     const [apifyLocation, setApifyLocation] = useState("");
+    const [apifyMinScore, setApifyMinScore] = useState("");
+    const [apifyMinReviews, setApifyMinReviews] = useState("");
+    const [apifyHasWebsite, setApifyHasWebsite] = useState(false);
+    const [apifyHasPhone, setApifyHasPhone] = useState(false);
     const [runId, setRunId] = useState<string | null>(null);
     const [pollStatus, setPollStatus] = useState<string>("");
 
@@ -200,7 +204,11 @@ export default function ListingPage() {
                 body: JSON.stringify({
                     keywords,
                     location: apifyLocation,
-                    limit: parseInt(limit)
+                    limit: parseInt(limit),
+                    minScore: apifyMinScore ? parseFloat(apifyMinScore) : undefined,
+                    minReviews: apifyMinReviews ? parseInt(apifyMinReviews) : undefined,
+                    hasWebsite: apifyHasWebsite,
+                    hasPhone: apifyHasPhone
                 })
             });
 
@@ -545,8 +553,8 @@ export default function ListingPage() {
                         <button
                             onClick={() => setProvider("apollo")}
                             className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${provider === "apollo"
-                                    ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
-                                    : "text-slate-600 hover:bg-slate-50 border border-transparent"
+                                ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
+                                : "text-slate-600 hover:bg-slate-50 border border-transparent"
                                 }`}
                         >
                             <Globe className="w-3.5 h-3.5" />
@@ -555,8 +563,8 @@ export default function ListingPage() {
                         <button
                             onClick={() => setProvider("apify")}
                             className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${provider === "apify"
-                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
-                                    : "text-slate-600 hover:bg-slate-50 border border-transparent"
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                                : "text-slate-600 hover:bg-slate-50 border border-transparent"
                                 }`}
                         >
                             <Building2 className="w-3.5 h-3.5" />
@@ -690,6 +698,53 @@ export default function ListingPage() {
                                                 className="!py-1.5 !text-xs !rounded-lg"
                                             />
                                         </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div>
+                                                <label className="block text-[11px] text-slate-500 mb-0.5">Note min (0-5)</label>
+                                                <Input
+                                                    type="number"
+                                                    step="0.1"
+                                                    min="0"
+                                                    max="5"
+                                                    placeholder="4.0"
+                                                    value={apifyMinScore}
+                                                    onChange={(e) => setApifyMinScore(e.target.value)}
+                                                    className="!py-1.5 !text-xs !rounded-lg"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[11px] text-slate-500 mb-0.5">Avis min</label>
+                                                <Input
+                                                    type="number"
+                                                    placeholder="10"
+                                                    value={apifyMinReviews}
+                                                    onChange={(e) => setApifyMinReviews(e.target.value)}
+                                                    className="!py-1.5 !text-xs !rounded-lg"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2 pt-1 border-t border-slate-50">
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="checkbox"
+                                                    id="hasWebsite"
+                                                    checked={apifyHasWebsite}
+                                                    onChange={(e) => setApifyHasWebsite(e.target.checked)}
+                                                    className="rounded border-slate-300 w-3.5 h-3.5"
+                                                />
+                                                <label htmlFor="hasWebsite" className="text-[11px] text-slate-500">Avec site web</label>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="checkbox"
+                                                    id="hasPhone"
+                                                    checked={apifyHasPhone}
+                                                    onChange={(e) => setApifyHasPhone(e.target.checked)}
+                                                    className="rounded border-slate-300 w-3.5 h-3.5"
+                                                />
+                                                <label htmlFor="hasPhone" className="text-[11px] text-slate-500">Avec téléphone</label>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </>
@@ -726,8 +781,8 @@ export default function ListingPage() {
                         <p className="text-xs text-slate-500 mt-0.5">Découvrir et générer des leads B2B</p>
                     </div>
                     <Badge className={`text-[11px] font-medium border ${provider === "apollo"
-                            ? "bg-indigo-50 text-indigo-600 border-indigo-100"
-                            : "bg-emerald-50 text-emerald-600 border-emerald-100"
+                        ? "bg-indigo-50 text-indigo-600 border-indigo-100"
+                        : "bg-emerald-50 text-emerald-600 border-emerald-100"
                         }`}>
                         {provider === "apollo" ? "Apollo.io" : "Google Maps"}
                     </Badge>

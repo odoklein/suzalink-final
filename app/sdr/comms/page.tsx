@@ -331,6 +331,56 @@ export default function SDRCommsPage() {
                     }
                     debouncedFetchStats();
                     return;
+                case "message_reaction_added":
+                    setSelectedThread((prev) => {
+                        if (!prev || prev.id !== tid || !payload.messageId || !payload.emoji) return prev;
+                        const emoji = payload.emoji as string;
+                        const reactorId = payload.userId as string;
+                        return {
+                            ...prev,
+                            messages: prev.messages.map((m) => {
+                                if (m.id !== payload.messageId) return m;
+                                const reactions = m.reactions ? [...m.reactions] : [];
+                                const existing = reactions.find((r) => r.emoji === emoji);
+                                if (existing) {
+                                    if (!existing.userIds.includes(reactorId)) {
+                                        existing.userIds.push(reactorId);
+                                        existing.count++;
+                                    }
+                                } else {
+                                    reactions.push({ emoji, count: 1, userIds: [reactorId] });
+                                }
+                                return { ...m, reactions };
+                            }),
+                        };
+                    });
+                    return;
+                case "message_reaction_removed":
+                    setSelectedThread((prev) => {
+                        if (!prev || prev.id !== tid || !payload.messageId || !payload.emoji) return prev;
+                        const emoji = payload.emoji as string;
+                        const reactorId = payload.userId as string;
+                        return {
+                            ...prev,
+                            messages: prev.messages.map((m) => {
+                                if (m.id !== payload.messageId) return m;
+                                const reactions = m.reactions ? [...m.reactions] : [];
+                                const existingIndex = reactions.findIndex((r) => r.emoji === emoji);
+                                if (existingIndex !== -1) {
+                                    const existing = { ...reactions[existingIndex] }; // clone
+                                    existing.userIds = existing.userIds.filter((id) => id !== reactorId);
+                                    existing.count = existing.userIds.length;
+                                    if (existing.count === 0) {
+                                        reactions.splice(existingIndex, 1);
+                                    } else {
+                                        reactions[existingIndex] = existing;
+                                    }
+                                }
+                                return { ...m, reactions };
+                            }),
+                        };
+                    });
+                    return;
                 default:
                     break;
             }

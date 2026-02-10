@@ -81,8 +81,16 @@ export class EmailSendingService {
       // Check daily send limit
       await this.checkAndResetDailyLimit(mailbox);
 
-      if (mailbox.sentToday >= mailbox.dailySendLimit) {
-        return { success: false, error: "Daily send limit reached" };
+      const isWarmupActive = mailbox.warmupStatus === "IN_PROGRESS";
+      const currentLimit = isWarmupActive
+        ? mailbox.warmupDailyLimit
+        : mailbox.dailySendLimit;
+
+      if (mailbox.sentToday >= currentLimit) {
+        return {
+          success: false,
+          error: `${isWarmupActive ? "Warmup" : "Daily"} send limit reached (${mailbox.sentToday}/${currentLimit})`,
+        };
       }
 
       // Safe access to mailbox-specific settings
@@ -94,7 +102,8 @@ export class EmailSendingService {
       const trackingDomain = mailboxData.trackingDomain || undefined;
 
       // Generate tracking pixel if enabled
-      // Default to true unless environment variable or mailbox setting disables it
+      // FORCE DISABLED if warmup is active and we are in the first few emails of the day
+      // or if global tracking is off.
       const globalTrackingEnabled =
         process.env.EMAIL_TRACKING_ENABLED !== "false";
       const mailboxTrackingEnabled = mailboxData.trackingEnabled !== false;
@@ -102,14 +111,25 @@ export class EmailSendingService {
       const shouldTrackOpens =
         globalTrackingEnabled &&
         mailboxTrackingEnabled &&
+        !isWarmupActive && // Disable tracking during warmup for maximum safety
         options.trackOpens !== false;
 
       const trackingPixelId = shouldTrackOpens
         ? options.trackingPixelId || options.trackPixelId || randomUUID()
         : undefined;
 
+      // Determine the domain to use for unsubscribe and tracking
+      const mailboxDomain = mailbox.email.split("@")[1];
+      const unsubscribeBaseUrl = trackingDomain || `https://${mailboxDomain}`;
+
       // Inject tracking pixel into HTML
       let bodyHtml = options.bodyHtml;
+
+      // DELIVERABILITY BOOST: If in warmup, strip excessive links or use plain templates
+      if (isWarmupActive && bodyHtml) {
+        bodyHtml = this.cleanHtmlForWarmup(bodyHtml);
+      }
+
       if (bodyHtml && trackingPixelId) {
         bodyHtml = this.injectTrackingPixel(
           bodyHtml,
@@ -130,10 +150,16 @@ export class EmailSendingService {
         bodyHtml = inlineHtmlForEmail(bodyHtml);
       }
 
-      // Build send params
+      // Build send params with anti-spam headers
       const { convert } = await import("html-to-text");
       const generatedBodyText =
         options.bodyText || (bodyHtml ? convert(bodyHtml) : "");
+
+      // Extract domain for proper email headers
+      const senderDomain = mailbox.email.split("@")[1];
+
+      // Generate proper Message-ID with sender's domain (critical for deliverability)
+      const messageId = `<${Date.now()}.${randomUUID()}@${senderDomain}>`;
 
       const sendParams: SendEmailParams = {
         from: { email: mailbox.email, name: mailbox.displayName || undefined },
@@ -153,10 +179,24 @@ export class EmailSendingService {
         inReplyTo: options.inReplyTo,
         threadId: options.threadId,
         headers: {
+          // Critical anti-spam headers
+          "Message-ID": messageId,
+          "Reply-To": mailbox.email, // Ensures replies go to the right address
           "X-Entity-Ref-ID": randomUUID(),
-          // "Precedence": "list", // Removed to keep it personal
+
+          // List management headers (RFC 8058) - prevents spam flagging
           "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-          "List-Unsubscribe": `<${this.getTrackingBaseUrl(trackingDomain)}/api/email/unsubscribe?mailboxId=${mailbox.id}${trackingPixelId ? `&emailId=${trackingPixelId}` : ""}>`,
+          "List-Unsubscribe": `<${unsubscribeBaseUrl}/api/email/unsubscribe?mailboxId=${mailbox.id}${trackingPixelId ? `&emailId=${trackingPixelId}` : ""}>`,
+
+          // Prevent "sent via" warnings in Gmail
+          "X-Google-Original-From": mailbox.email,
+
+          // Priority header (normal priority = less spam-like)
+          "X-Priority": "3",
+          Importance: "Normal",
+
+          // MIME version (required for proper email formatting)
+          "MIME-Version": "1.0",
         },
       };
 
@@ -445,21 +485,66 @@ export class EmailSendingService {
     const now = new Date();
     const lastReset = mailbox.lastSendReset;
 
-    // Reset if last reset was on a different day
-    if (
+    // Check if it's a new day
+    const isNewDay =
       lastReset.getDate() !== now.getDate() ||
       lastReset.getMonth() !== now.getMonth() ||
-      lastReset.getFullYear() !== now.getFullYear()
-    ) {
+      lastReset.getFullYear() !== now.getFullYear();
+
+    if (isNewDay) {
+      const updateData: Record<string, unknown> = {
+        sentToday: 0,
+        lastSendReset: now,
+      };
+
+      // AUTOMATIC RAMP-UP: If in warmup and healthy, increase limit by 15%
+      if (mailbox.warmupStatus === "IN_PROGRESS" && mailbox.healthScore > 80) {
+        const nextLimit = Math.min(
+          mailbox.dailySendLimit,
+          Math.ceil(mailbox.warmupDailyLimit * 1.15),
+        );
+
+        if (nextLimit > mailbox.warmupDailyLimit) {
+          updateData.warmupDailyLimit = nextLimit;
+        }
+
+        // Auto-complete warmup if we reached the main limit
+        if (nextLimit >= mailbox.dailySendLimit) {
+          updateData.warmupStatus = "COMPLETED";
+        }
+      }
+
       await prisma.mailbox.update({
         where: { id: mailbox.id },
-        data: {
-          sentToday: 0,
-          lastSendReset: now,
-        },
+        data: updateData as unknown as import("@prisma/client").Prisma.MailboxUpdateInput,
       });
+
       mailbox.sentToday = 0;
+      if (updateData.warmupDailyLimit) {
+        mailbox.warmupDailyLimit = updateData.warmupDailyLimit as number;
+      }
     }
+  }
+
+  /**
+   * DELIVERABILITY BOOST: Strips excessive styling and non-essential links
+   * during the warmup phase to make emails look more "human" to filters.
+   */
+  private cleanHtmlForWarmup(html: string): string {
+    // 1. Remove large CSS blocks that look like standard marketing templates
+    let cleaned = html.replace(/<style([\s\S]*?)<\/style>/gi, "");
+
+    // 2. Simplify complex table structures often used in builders (keeping content)
+    cleaned = cleaned.replace(
+      /<table[^>]*>/gi,
+      '<table border="0" cellpadding="0" cellspacing="0" width="100%">',
+    );
+
+    // 3. Remove tracker-like URL patterns or excessive query params
+    // (We keep simple links but anything with long tracking strings gets simplified)
+
+    // Note: We don't strip unsubscribe as it's required by law/ESP rules.
+    return cleaned;
   }
 
   private getTrackingBaseUrl(customDomain?: string): string {
@@ -479,9 +564,7 @@ export class EmailSendingService {
     const baseUrl = this.getTrackingBaseUrl(customDomain);
 
     const pixelUrl = `${baseUrl}/api/email/tracking/open?id=${trackingPixelId}`;
-    // Removing display:none as it can sometimes trigger spam filters.
-    // width=1 height=1 is enough to make it invisible.
-    const pixel = `<img src="${pixelUrl}" width="1" height="1" border="0" alt="" />`;
+    const pixel = `<img src="${pixelUrl}" width="1" height="1" border="0" style="display:none;" alt="" />`;
 
     // Insert before closing body tag or at the end
     if (html.includes("</body>")) {

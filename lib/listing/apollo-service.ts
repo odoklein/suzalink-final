@@ -37,11 +37,13 @@ export interface ApolloEnrichmentResult {
     phone?: string;
     seniority?: string;
   };
-  source: "apollo";
+  source: "apollo" | "apify-google-maps";
   confidence: number; // 0-100
   metadata?: {
     apolloId?: string;
-    lastEnriched: string;
+    lastEnriched?: string;
+    rawUrl?: string;
+    reviewsCount?: number;
   };
 }
 

@@ -16,6 +16,7 @@ import {
     Eye,
     Activity,
     Trash2,
+    Flame,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
@@ -56,6 +57,8 @@ export default function MailboxSettingsPage({ params }: { params: Promise<{ id: 
     const [trackingEnabled, setTrackingEnabled] = useState(true);
     const [trackingDomain, setTrackingDomain] = useState("");
     const [dailySendLimit, setDailySendLimit] = useState(200);
+    const [warmupStatus, setWarmupStatus] = useState("NOT_STARTED");
+    const [warmupDailyLimit, setWarmupDailyLimit] = useState(20);
 
     useEffect(() => {
         const fetchMailbox = async () => {
@@ -69,6 +72,8 @@ export default function MailboxSettingsPage({ params }: { params: Promise<{ id: 
                     setTrackingEnabled(json.data.trackingEnabled);
                     setTrackingDomain(json.data.trackingDomain || "");
                     setDailySendLimit(json.data.dailySendLimit);
+                    setWarmupStatus(json.data.warmupStatus);
+                    setWarmupDailyLimit(json.data.warmupDailyLimit);
                 }
             } catch (error) {
                 console.error("Failed to fetch mailbox:", error);
@@ -92,6 +97,8 @@ export default function MailboxSettingsPage({ params }: { params: Promise<{ id: 
                     trackingEnabled,
                     trackingDomain: trackingDomain || null,
                     dailySendLimit,
+                    warmupStatus,
+                    warmupDailyLimit,
                 }),
             });
 
@@ -171,6 +178,11 @@ export default function MailboxSettingsPage({ params }: { params: Promise<{ id: 
                         <Badge variant={mailbox.isActive ? "success" : "default"}>
                             {mailbox.isActive ? "Connecté" : "Inactif"}
                         </Badge>
+                        {warmupStatus === "IN_PROGRESS" && (
+                            <Badge variant="warning" className="bg-amber-100 text-amber-700 border-amber-200">
+                                <Flame className="w-3 h-3 mr-1" /> Chauffage Actif
+                            </Badge>
+                        )}
                     </div>
                     <p className="text-slate-500">Gérez la délivrabilité et les paramètres de votre compte {mailbox.provider.toLowerCase()}</p>
                 </div>
@@ -299,9 +311,9 @@ export default function MailboxSettingsPage({ params }: { params: Promise<{ id: 
                                         <Globe className="w-5 h-5" /> Whitelabel & Tracking
                                     </div>
                                     <div className="flex items-center gap-2">
-                                        <span className="text-xs font-medium text-emerald-600 uppercase tracking-wider">Statut:</span>
+                                        <span className="text-xs font-medium text-emerald-600 uppercase tracking-wider">Tracking:</span>
                                         <Badge variant={trackingEnabled ? "success" : "default"}>
-                                            {trackingEnabled ? "Activé" : "Désactivé"}
+                                            {trackingEnabled ? (warmupStatus === "IN_PROGRESS" ? "Suspendu (Warmup)" : "Activé") : "Désactivé"}
                                         </Badge>
                                     </div>
                                 </div>

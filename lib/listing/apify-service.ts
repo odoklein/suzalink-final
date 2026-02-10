@@ -7,6 +7,10 @@ export interface ApifySearchParams {
   keywords: string;
   location: string;
   limit?: number;
+  minScore?: number;
+  minReviews?: number;
+  hasWebsite?: boolean;
+  hasPhone?: boolean;
 }
 
 export interface ApifyRunResponse {
@@ -45,9 +49,14 @@ export async function startApifyRun(
   const input = {
     searchStringsArray: [searchString],
     maxCrawledPlacesPerSearch: params.limit || 20,
-    language: "fr", // Default to French as it's a French CRM
+    language: "fr",
     maxImages: 0,
     maxReviews: 0,
+    // New Filters
+    minScore: params.minScore,
+    reviewsCount: params.minReviews,
+    onlyPlacesWithWebsite: params.hasWebsite,
+    onlyPlacesWithPhoneNumber: params.hasPhone,
   };
 
   const response = await fetch(

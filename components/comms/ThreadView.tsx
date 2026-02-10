@@ -276,8 +276,11 @@ export function ThreadView({
                     const prevDate = prevMessage ? new Date(prevMessage.createdAt).toDateString() : null;
                     const showDateSeparator = prevDate && currentDate !== prevDate;
 
+                    // Use index as part of key to handle potential duplicates during optimistic updates
+                    const messageKey = `${message.id}-${index}`;
+
                     return (
-                        <div key={message.id}>
+                        <div key={messageKey}>
                             {showDateSeparator && (
                                 <div className="flex justify-center py-3">
                                     <span className="text-xs font-medium text-slate-400 bg-slate-200 dark:bg-slate-800 px-2.5 py-0.5 rounded-full">

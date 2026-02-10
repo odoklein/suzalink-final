@@ -19,9 +19,6 @@ import {
     MessageCircle,
     Megaphone,
     Inbox,
-    Clock,
-    TrendingUp,
-    Mail,
     PanelLeftClose,
     PanelLeft,
     Loader2,
@@ -262,8 +259,8 @@ export default function ManagerCommsPage() {
             } else {
                 error("Erreur", "Impossible de charger les discussions");
             }
-        } catch (error) {
-            console.error("Error fetching threads:", error);
+        } catch (err) {
+            console.error("Error fetching threads:", err);
             error("Erreur", "Impossible de charger les discussions");
         } finally {
             setIsLoading(false);
@@ -295,8 +292,8 @@ export default function ManagerCommsPage() {
             } else {
                 error("Erreur", "Impossible de charger la discussion");
             }
-        } catch (error) {
-            console.error("Error fetching thread:", error);
+        } catch (err) {
+            console.error("Error fetching thread:", err);
             error("Erreur", "Impossible de charger la discussion");
         } finally {
             setIsLoadingThread(false);
@@ -418,6 +415,56 @@ export default function ManagerCommsPage() {
                         );
                     }
                     debouncedFetchStats();
+                    return;
+                case "message_reaction_added":
+                    setSelectedThread((prev) => {
+                        if (!prev || prev.id !== tid || !payload.messageId || !payload.emoji) return prev;
+                        const emoji = payload.emoji as string;
+                        const reactorId = payload.userId as string;
+                        return {
+                            ...prev,
+                            messages: prev.messages.map((m) => {
+                                if (m.id !== payload.messageId) return m;
+                                const reactions = m.reactions ? [...m.reactions] : [];
+                                const existing = reactions.find((r) => r.emoji === emoji);
+                                if (existing) {
+                                    if (!existing.userIds.includes(reactorId)) {
+                                        existing.userIds.push(reactorId);
+                                        existing.count++;
+                                    }
+                                } else {
+                                    reactions.push({ emoji, count: 1, userIds: [reactorId] });
+                                }
+                                return { ...m, reactions };
+                            }),
+                        };
+                    });
+                    return;
+                case "message_reaction_removed":
+                    setSelectedThread((prev) => {
+                        if (!prev || prev.id !== tid || !payload.messageId || !payload.emoji) return prev;
+                        const emoji = payload.emoji as string;
+                        const reactorId = payload.userId as string;
+                        return {
+                            ...prev,
+                            messages: prev.messages.map((m) => {
+                                if (m.id !== payload.messageId) return m;
+                                const reactions = m.reactions ? [...m.reactions] : [];
+                                const existingIndex = reactions.findIndex((r) => r.emoji === emoji);
+                                if (existingIndex !== -1) {
+                                    const existing = { ...reactions[existingIndex] }; // clone
+                                    existing.userIds = existing.userIds.filter((id) => id !== reactorId);
+                                    existing.count = existing.userIds.length;
+                                    if (existing.count === 0) {
+                                        reactions.splice(existingIndex, 1);
+                                    } else {
+                                        reactions[existingIndex] = existing;
+                                    }
+                                }
+                                return { ...m, reactions };
+                            }),
+                        };
+                    });
                     return;
                 default:
                     break;
@@ -553,12 +600,11 @@ export default function ManagerCommsPage() {
                 error("Erreur", "Impossible d'envoyer le message");
             }
         },
-        [session?.user?.id, debouncedFetchStats]
+        [selectedThread, session?.user, error, fetchStats]
     );
 
     // Real-time hook with presence
     const {
-        isConnected,
         onlineUsers,
         joinThread,
         leaveThread,
@@ -659,8 +705,8 @@ export default function ManagerCommsPage() {
             } else {
                 error("Erreur", "Impossible de créer la discussion");
             }
-        } catch (error) {
-            console.error("Error creating thread:", error);
+        } catch (err) {
+            console.error("Error creating thread:", err);
             error("Erreur", "Impossible de créer la discussion");
         }
     };

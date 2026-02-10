@@ -11,9 +11,12 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Find the email and the contact
-    const email = await prisma.email.findUnique({
-      where: { id: emailId },
+    // Find the email using either the primary ID or the trackingPixelId
+    // The sending service passes trackingPixelId as the 'emailId' parameter
+    const email = await prisma.email.findFirst({
+      where: {
+        OR: [{ id: emailId }, { trackingPixelId: emailId }],
+      },
       include: { contact: true },
     });
 
