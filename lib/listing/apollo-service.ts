@@ -6,10 +6,21 @@
 // - Never creates Contacts directly
 // - Fully stateless (no Prisma imports)
 // - Graceful degradation on failures
+// - OPTIMIZED: caching, rate limiting, credit tracking
 // ============================================
 
 import { config } from "@/lib/config";
 import { ProspectProfile } from "@prisma/client";
+import {
+  trackCreditUsage,
+  enrichmentCache,
+  searchCache,
+  orgCache,
+  enrichmentCacheKey,
+  searchCacheKey,
+  apolloRateLimiter,
+  type ApolloEndpoint,
+} from "./apollo-credits";
 
 // ============================================
 // TYPES
@@ -151,34 +162,74 @@ export async function enrichFromApollo(
 
   try {
     // Determine enrichment strategy based on available data
+    // OPTIMIZED: Try cheapest/cached strategies first, stop at first hit
     let result: ApolloEnrichmentResult | null = null;
 
-    // Strategy 1: Email-based enrichment (most reliable)
+    // Strategy 1: Email-based enrichment (most reliable, 1 credit)
     if (profile.email) {
+      const cacheKey = enrichmentCacheKey("email", profile.email);
+      const cached = enrichmentCache.get(cacheKey) as ApolloEnrichmentResult | null;
+      if (cached) {
+        trackCreditUsage("people/match", true);
+        return cached;
+      }
       result = await enrichByEmail(profile.email);
-      if (result) return result;
+      if (result) {
+        enrichmentCache.set(cacheKey, result);
+        return result;
+      }
     }
 
-    // Strategy 2: LinkedIn URL enrichment
+    // Strategy 2: LinkedIn URL enrichment (1 credit)
     if (profile.linkedin) {
+      const cacheKey = enrichmentCacheKey("linkedin", profile.linkedin);
+      const cached = enrichmentCache.get(cacheKey) as ApolloEnrichmentResult | null;
+      if (cached) {
+        trackCreditUsage("people/match", true);
+        return cached;
+      }
       result = await enrichByLinkedIn(profile.linkedin);
-      if (result) return result;
+      if (result) {
+        enrichmentCache.set(cacheKey, result);
+        return result;
+      }
     }
 
-    // Strategy 3: Company + Name enrichment
+    // Strategy 3: Company + Name enrichment (1 credit)
     if (profile.companyName && profile.firstName && profile.lastName) {
+      const cacheKey = enrichmentCacheKey(
+        "name",
+        `${profile.firstName}:${profile.lastName}:${profile.companyName}`,
+      );
+      const cached = enrichmentCache.get(cacheKey) as ApolloEnrichmentResult | null;
+      if (cached) {
+        trackCreditUsage("people/match", true);
+        return cached;
+      }
       result = await enrichByNameAndCompany(
         profile.firstName,
         profile.lastName,
         profile.companyName,
       );
-      if (result) return result;
+      if (result) {
+        enrichmentCache.set(cacheKey, result);
+        return result;
+      }
     }
 
-    // Strategy 4: Company domain enrichment only
+    // Strategy 4: Company domain enrichment only (1 credit)
     if (profile.companyWebsite) {
+      const cacheKey = enrichmentCacheKey("domain", profile.companyWebsite);
+      const cached = orgCache.get(cacheKey) as ApolloEnrichmentResult | null;
+      if (cached) {
+        trackCreditUsage("organizations/enrich", true);
+        return cached;
+      }
       result = await enrichCompanyByDomain(profile.companyWebsite);
-      if (result) return result;
+      if (result) {
+        orgCache.set(cacheKey, result);
+        return result;
+      }
     }
 
     console.log(
@@ -202,7 +253,7 @@ export async function enrichFromApollo(
 
 export async function searchFromApollo(
   params: ApolloSearchParams,
-): Promise<{ results: ApolloEnrichmentResult[]; total: number }> {
+): Promise<{ results: ApolloEnrichmentResult[]; total: number; cached?: boolean }> {
   // Pre-flight checks
   if (
     !config.integrations.apollo.enabled ||
@@ -213,6 +264,15 @@ export async function searchFromApollo(
   }
 
   try {
+    // Check search cache first (org search is free but still reduces latency)
+    const cKey = searchCacheKey(params as unknown as Record<string, unknown>);
+    const cachedResult = searchCache.get(cKey) as { results: ApolloEnrichmentResult[]; total: number } | null;
+    if (cachedResult) {
+      trackCreditUsage("organizations/search", true);
+      console.log(`[Apollo] Search cache hit — saved API call`);
+      return { ...cachedResult, cached: true };
+    }
+
     const apiParams: Record<string, any> = {
       page: params.page || 1,
       per_page: params.limit || 25,
@@ -289,10 +349,15 @@ export async function searchFromApollo(
       })
       .filter((r): r is ApolloEnrichmentResult => r !== null);
 
-    return {
+    const output = {
       results,
       total: response.pagination?.total_entries || results.length,
     };
+
+    // Cache the search results
+    searchCache.set(cKey, output);
+
+    return output;
   } catch (error) {
     console.error("[Apollo] Search failed:", error);
     return { results: [], total: 0 };
@@ -406,7 +471,14 @@ async function apolloApiCall<T>(
   endpoint: string,
   body: Record<string, any>,
 ): Promise<T> {
+  // Rate limit: wait for available token
+  await apolloRateLimiter.waitForToken();
+
   const url = `https://api.apollo.io/v1${endpoint}`;
+
+  // Track the credit usage (not cached)
+  const creditEndpoint = endpoint.replace(/^\//, "") as ApolloEndpoint;
+  trackCreditUsage(creditEndpoint, false);
 
   const response = await fetch(url, {
     method: "POST",
@@ -417,6 +489,14 @@ async function apolloApiCall<T>(
     },
     body: JSON.stringify(body),
   });
+
+  // Handle rate limit responses with retry
+  if (response.status === 429) {
+    const retryAfter = parseInt(response.headers.get("retry-after") || "5");
+    console.warn(`[Apollo] Rate limited. Retrying after ${retryAfter}s...`);
+    await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
+    return apolloApiCall<T>(endpoint, body);
+  }
 
   if (!response.ok) {
     const text = await response.text();

@@ -22,6 +22,10 @@ import {
     RefreshCw,
     MapPin,
     Loader2,
+    Zap,
+    TrendingDown,
+    Database,
+    Shield,
 } from "lucide-react";
 import { LOCATION_DATA } from "@/lib/location-data";
 import { cn } from "@/lib/utils";
@@ -530,6 +534,29 @@ export function ListingSearchTab({ onImport }: ListingSearchTabProps) {
     const pageSize = parseInt(source === "apollo" ? limit : apifyLimit, 10) || 25;
 
     // ============================================
+    // CREDIT USAGE STATE
+    // ============================================
+
+    const [creditData, setCreditData] = useState<{
+        currentMonthUsed: number;
+        currentMonthSaved: number;
+        cacheHitRate: number;
+        projectedMonthly: number;
+        monthlySavings: number;
+        savingsPercentage: number;
+        recommendations: string[];
+    } | null>(null);
+
+    useEffect(() => {
+        fetch("/api/prospects/listing/apollo/credits")
+            .then((r) => r.json())
+            .then((json) => {
+                if (json.success) setCreditData(json.data.projection);
+            })
+            .catch(() => {});
+    }, [results]);
+
+    // ============================================
     // RENDER
     // ============================================
 
@@ -563,6 +590,42 @@ export function ListingSearchTab({ onImport }: ListingSearchTabProps) {
                             Google Maps
                         </button>
                     </div>
+
+                    {/* Apollo Credit Usage Indicator */}
+                    {source === "apollo" && creditData && (
+                        <div className="mb-3 shrink-0 bg-gradient-to-br from-indigo-50 to-slate-50 border border-indigo-100 rounded-lg p-2.5 space-y-2">
+                            <div className="flex items-center gap-1.5">
+                                <Zap className="w-3.5 h-3.5 text-indigo-500" />
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600">Crédits Apollo</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-1.5">
+                                <div className="bg-white rounded-md p-1.5 text-center border border-indigo-50">
+                                    <p className="text-[10px] text-slate-400">Utilisés</p>
+                                    <p className="text-sm font-bold text-slate-900">{creditData.currentMonthUsed}</p>
+                                </div>
+                                <div className="bg-white rounded-md p-1.5 text-center border border-emerald-50">
+                                    <p className="text-[10px] text-slate-400">Économisés</p>
+                                    <p className="text-sm font-bold text-emerald-600">{creditData.currentMonthSaved}</p>
+                                </div>
+                            </div>
+                            {creditData.cacheHitRate > 0 && (
+                                <div className="flex items-center gap-1.5">
+                                    <Shield className="w-3 h-3 text-emerald-500" />
+                                    <span className="text-[10px] text-emerald-700 font-medium">
+                                        Cache: {creditData.cacheHitRate}% de hits
+                                    </span>
+                                </div>
+                            )}
+                            {creditData.savingsPercentage > 0 && (
+                                <div className="flex items-center gap-1.5">
+                                    <TrendingDown className="w-3 h-3 text-emerald-500" />
+                                    <span className="text-[10px] text-emerald-700 font-medium">
+                                        {creditData.savingsPercentage}% d&apos;économie
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     <div className="flex items-center gap-1.5 mb-3 shrink-0">
                         <Filter className="w-4 h-4 text-slate-400" />
@@ -757,18 +820,26 @@ export function ListingSearchTab({ onImport }: ListingSearchTabProps) {
                         <h2 className="text-lg font-bold text-slate-900 tracking-tight">Recherche de leads</h2>
                         <p className="text-xs text-slate-500 mt-0.5">
                             {source === "apollo"
-                                ? "Recherche B2B via Apollo.io"
+                                ? "Recherche B2B via Apollo.io — Organisation search est gratuit"
                                 : "Recherche locale via Google Maps"}
                         </p>
                     </div>
-                    <Badge className={cn(
-                        "text-[11px] font-medium border",
-                        source === "apollo"
-                            ? "bg-indigo-50 text-indigo-600 border-indigo-100"
-                            : "bg-emerald-50 text-emerald-600 border-emerald-100"
-                    )}>
-                        {source === "apollo" ? "Apollo.io" : "Google Maps"}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                        {source === "apollo" && (
+                            <Badge className="text-[11px] font-medium border bg-emerald-50 text-emerald-600 border-emerald-100 gap-1">
+                                <Database className="w-3 h-3" />
+                                0 crédit / recherche
+                            </Badge>
+                        )}
+                        <Badge className={cn(
+                            "text-[11px] font-medium border",
+                            source === "apollo"
+                                ? "bg-indigo-50 text-indigo-600 border-indigo-100"
+                                : "bg-emerald-50 text-emerald-600 border-emerald-100"
+                        )}>
+                            {source === "apollo" ? "Apollo.io" : "Google Maps"}
+                        </Badge>
+                    </div>
                 </div>
 
                 {/* Bulk actions */}
