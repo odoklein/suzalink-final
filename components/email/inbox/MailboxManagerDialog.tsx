@@ -461,7 +461,7 @@ export function MailboxManagerDialog({ isOpen, onClose, onMailboxAdded }: Mailbo
                     </button>
                 </div>
 
-                <div className="p-6 overflow-y-auto">
+                <div className="p-6 overflow-y-auto email-scrollbar">
                     {view === 'add' ? (
                         <AddMailboxView
                             onCancel={() => setView('list')}
@@ -487,8 +487,30 @@ export function MailboxManagerDialog({ isOpen, onClose, onMailboxAdded }: Mailbo
                             </div>
 
                             {isLoading ? (
-                                <div className="flex items-center justify-center py-12">
-                                    <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {[1, 2].map(i => (
+                                        <div key={i} className="border border-slate-200 rounded-2xl overflow-hidden">
+                                            <div className="h-1.5 w-full skeleton-shimmer" />
+                                            <div className="p-4 space-y-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-10 h-10 rounded-xl skeleton-shimmer" />
+                                                    <div className="space-y-2 flex-1">
+                                                        <div className="h-4 w-32 skeleton-shimmer rounded" />
+                                                        <div className="h-3 w-48 skeleton-shimmer rounded" />
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-3 gap-2">
+                                                    {[1, 2, 3].map(j => (
+                                                        <div key={j} className="h-14 skeleton-shimmer rounded-lg" />
+                                                    ))}
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <div className="h-9 flex-1 skeleton-shimmer rounded-xl" />
+                                                    <div className="h-9 flex-1 skeleton-shimmer rounded-xl" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             ) : mailboxes.length === 0 ? (
                                 <div className="text-center py-12 bg-slate-50 rounded-2xl border border-slate-100">
@@ -566,6 +588,28 @@ export function MailboxManagerDialog({ isOpen, onClose, onMailboxAdded }: Mailbo
                                                                 mailbox.healthScore > 50 ? "text-amber-500" : "text-red-500"
                                                         )}>{mailbox.healthScore}%</span>
                                                         <span className="text-[10px] text-slate-500 uppercase tracking-wide">Santé</span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Health Score Bar */}
+                                                <div className="mb-3">
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <span className="text-[10px] text-slate-400 uppercase tracking-wide font-medium">Santé du compte</span>
+                                                        <span className={cn(
+                                                            "text-[11px] font-bold",
+                                                            mailbox.healthScore > 80 ? "text-emerald-500" :
+                                                                mailbox.healthScore > 50 ? "text-amber-500" : "text-red-500"
+                                                        )}>{mailbox.healthScore}%</span>
+                                                    </div>
+                                                    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                                        <div
+                                                            className={cn(
+                                                                "h-full rounded-full transition-all duration-500",
+                                                                mailbox.healthScore > 80 ? "bg-emerald-400" :
+                                                                    mailbox.healthScore > 50 ? "bg-amber-400" : "bg-red-400"
+                                                            )}
+                                                            style={{ width: `${mailbox.healthScore}%` }}
+                                                        />
                                                     </div>
                                                 </div>
 

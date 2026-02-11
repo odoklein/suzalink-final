@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Modal, ModalFooter, ConfirmModal } from "@/components/ui/Modal";
 import { Badge } from "@/components/ui/Badge";
-import { useToast } from "@/components/ui/Toast";
+import { useToast } from "@/components/ui";
 
 // ============================================
 // TYPES

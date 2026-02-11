@@ -45,17 +45,12 @@ export interface NavSection {
 }
 
 // ============================================
-// MANAGER NAVIGATION
-// ============================================
-
-// ============================================
-// MANAGER NAVIGATION — Simplified (9 items max)
-// No section titles, no jargon, simple French
+// MANAGER NAVIGATION — Grouped Sections
 // ============================================
 
 export const MANAGER_NAV: NavSection[] = [
   {
-    // No title - flat navigation for clarity
+    // No title — top-level home
     items: [
       {
         href: "/manager/dashboard",
@@ -63,6 +58,11 @@ export const MANAGER_NAV: NavSection[] = [
         label: "Accueil",
         permission: "pages.dashboard",
       },
+    ],
+  },
+  {
+    title: "Commercial",
+    items: [
       {
         href: "/manager/clients",
         icon: Building2,
@@ -76,11 +76,22 @@ export const MANAGER_NAV: NavSection[] = [
         permission: "pages.missions",
       },
       {
-        href: "/manager/team",
-        icon: Users,
-        label: "Équipe",
-        permission: "pages.sdrs",
+        href: "/manager/listing",
+        icon: Search,
+        label: "Listing",
+        permission: "pages.prospects",
       },
+      {
+        href: "/manager/prospection",
+        icon: Phone,
+        label: "Prospection",
+        permission: "pages.missions",
+      },
+    ],
+  },
+  {
+    title: "Communication",
+    items: [
       {
         href: "/manager/email",
         icon: Mail,
@@ -93,6 +104,17 @@ export const MANAGER_NAV: NavSection[] = [
         icon: MessageSquare,
         label: "Messages",
         permission: "pages.comms",
+      },
+    ],
+  },
+  {
+    title: "Organisation",
+    items: [
+      {
+        href: "/manager/team",
+        icon: Users,
+        label: "Equipe",
+        permission: "pages.sdrs",
       },
       {
         href: "/manager/planning",
@@ -107,11 +129,16 @@ export const MANAGER_NAV: NavSection[] = [
         permission: "pages.files",
       },
       {
-        href: "/manager/listing",
-        icon: Search,
-        label: "Listing",
-        permission: "pages.prospects",
+        href: "/manager/projects",
+        icon: FolderKanban,
+        label: "Projets",
+        permission: "pages.projects",
       },
+    ],
+  },
+  {
+    title: "Administration",
+    items: [
       {
         href: "/manager/billing",
         icon: Receipt,
@@ -121,13 +148,13 @@ export const MANAGER_NAV: NavSection[] = [
       {
         href: "/manager/analytics",
         icon: BarChart3,
-        label: "Résultats",
+        label: "Resultats",
         permission: "pages.analytics",
       },
       {
         href: "/manager/users",
         icon: Settings,
-        label: "Réglages",
+        label: "Reglages",
         permission: "pages.users",
       },
     ],
@@ -135,12 +162,12 @@ export const MANAGER_NAV: NavSection[] = [
 ];
 
 // ============================================
-// SDR NAVIGATION — Simplified (7 items max)
-// Focus on daily actions, simple French words
+// SDR NAVIGATION — Grouped Sections
 // ============================================
 
 export const SDR_NAV: NavSection[] = [
   {
+    // No title — home
     items: [
       {
         href: "/sdr",
@@ -148,12 +175,34 @@ export const SDR_NAV: NavSection[] = [
         label: "Accueil",
         permission: "pages.dashboard",
       },
+    ],
+  },
+  {
+    title: "Actions",
+    items: [
       {
         href: "/sdr/action",
         icon: Phone,
         label: "Appeler",
         permission: "pages.action",
       },
+      {
+        href: "/sdr/callbacks",
+        icon: Calendar,
+        label: "Rappels",
+        permission: "pages.action",
+      },
+      {
+        href: "/sdr/meetings",
+        icon: Calendar,
+        label: "Mes RDV",
+        permission: "pages.opportunities",
+      },
+    ],
+  },
+  {
+    title: "Communication",
+    items: [
       {
         href: "/sdr/email",
         icon: Mail,
@@ -164,21 +213,8 @@ export const SDR_NAV: NavSection[] = [
       {
         href: "/sdr/emails/sent",
         icon: Send,
-        label: "Emails envoyés",
+        label: "Emails envoyes",
         permission: "pages.email",
-      },
-      {
-        href: "/sdr/callbacks",
-        icon: Calendar,
-        label: "Rappels",
-        permission: "pages.action",
-        // No permission requirement: always visible for SDR so they always see their callbacks
-      },
-      {
-        href: "/sdr/meetings",
-        icon: Calendar,
-        label: "Mes RDV",
-        permission: "pages.opportunities",
       },
       {
         href: "/sdr/comms",
@@ -186,23 +222,17 @@ export const SDR_NAV: NavSection[] = [
         label: "Messages",
         permission: "pages.comms",
       },
-      {
-        href: "/sdr/settings",
-        icon: Users,
-        label: "Mon profil",
-        permission: "pages.settings",
-      },
     ],
   },
 ];
 
 // ============================================
-// BUSINESS DEVELOPER NAVIGATION — Simplified
-// No section titles, flat structure
+// BUSINESS DEVELOPER NAVIGATION — Grouped
 // ============================================
 
 export const BD_NAV: NavSection[] = [
   {
+    // No title — home
     items: [
       {
         href: "/bd/dashboard",
@@ -210,6 +240,11 @@ export const BD_NAV: NavSection[] = [
         label: "Accueil",
         permission: "pages.dashboard",
       },
+    ],
+  },
+  {
+    title: "Commercial",
+    items: [
       {
         href: "/bd/clients",
         icon: Building2,
@@ -233,12 +268,11 @@ export const BD_NAV: NavSection[] = [
         icon: Calendar,
         label: "Rappels",
         permission: "pages.action",
-        // No permission requirement: always visible for SDR/BD
       },
       {
         href: "/sdr/opportunities",
         icon: Briefcase,
-        label: "Opportunités",
+        label: "Opportunites",
         permission: "pages.opportunities",
       },
       {
@@ -247,6 +281,11 @@ export const BD_NAV: NavSection[] = [
         label: "Nouveau client",
         permission: "pages.onboarding",
       },
+    ],
+  },
+  {
+    title: "Communication",
+    items: [
       {
         href: "/bd/comms",
         icon: MessageSquare,
@@ -264,11 +303,12 @@ export const BD_NAV: NavSection[] = [
 ];
 
 // ============================================
-// DEVELOPER NAVIGATION
+// DEVELOPER NAVIGATION — Grouped
 // ============================================
 
 export const DEVELOPER_NAV: NavSection[] = [
   {
+    // No title — home
     items: [
       {
         href: "/developer/dashboard",
@@ -276,6 +316,11 @@ export const DEVELOPER_NAV: NavSection[] = [
         label: "Dashboard",
         permission: "pages.dashboard",
       },
+    ],
+  },
+  {
+    title: "Travail",
+    items: [
       {
         href: "/developer/projects",
         icon: FolderKanban,
@@ -285,19 +330,19 @@ export const DEVELOPER_NAV: NavSection[] = [
       {
         href: "/developer/tasks",
         icon: List,
-        label: "Tâches",
+        label: "Taches",
         permission: "pages.projects",
       },
       {
         href: "/developer/integrations",
         icon: Settings,
-        label: "Intégrations",
+        label: "Integrations",
         permission: "pages.settings",
       },
       {
         href: "/developer/settings",
         icon: Settings,
-        label: "Paramètres",
+        label: "Parametres",
         permission: "pages.settings",
       },
     ],
@@ -305,8 +350,7 @@ export const DEVELOPER_NAV: NavSection[] = [
 ];
 
 // ============================================
-// CLIENT NAVIGATION — Reassurance Mode
-// Simple, 3 items max, no internal complexity
+// CLIENT NAVIGATION — Flat (only 3 items)
 // ============================================
 
 export const CLIENT_NAV: NavSection[] = [
@@ -321,7 +365,7 @@ export const CLIENT_NAV: NavSection[] = [
       {
         href: "/client/results",
         icon: BarChart3,
-        label: "Résultats",
+        label: "Resultats",
         permission: "pages.dashboard",
       },
       {

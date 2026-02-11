@@ -23,14 +23,21 @@ import {
     Filter,
     RotateCcw,
     MessageSquare,
+    SkipForward,
+    History,
+    PhoneCall,
+    Eye,
+    Copy,
+    ArrowDownUp,
+    PhoneOff,
+    MailOpen,
 } from "lucide-react";
-import { Card, Badge, Button, LoadingState, EmptyState, Tabs, Drawer, DataTable, Select } from "@/components/ui";
+import { Card, Badge, Button, LoadingState, EmptyState, Tabs, Drawer, DataTable, Select, useToast, TableSkeleton, CardSkeleton } from "@/components/ui";
 import type { Column } from "@/components/ui/DataTable";
 import { CompanyDrawer, ContactDrawer } from "@/components/drawers";
 import { UnifiedActionDrawer } from "@/components/drawers/UnifiedActionDrawer";
 import { BookingModal } from "@/components/sdr/BookingModal";
 import { QuickEmailModal } from "@/components/email/QuickEmailModal";
-import { DialerDrawer } from "@/components/calls/DialerDrawer";
 import type { ActionResult, Channel } from "@/lib/types";
 import { ACTION_RESULT_LABELS, CHANNEL_LABELS } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -99,6 +106,8 @@ interface QueueItem {
     priority: string;
     _displayName?: string;
     _companyName?: string;
+    _phone?: string | null;
+    _email?: string | null;
 }
 
 interface DrawerContact {
@@ -178,6 +187,7 @@ const SCRIPT_TABS = [
 
 export default function SDRActionPage() {
     const { data: session } = useSession();
+    const { error: showError } = useToast();
     const [currentAction, setCurrentAction] = useState<NextActionData | null>(null);
     const [selectedResult, setSelectedResult] = useState<ActionResult | null>(null);
     const [note, setNote] = useState("");
@@ -190,26 +200,63 @@ export default function SDRActionPage() {
     const [error, setError] = useState<string | null>(null);
     const [elapsedTime, setElapsedTime] = useState(0);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
+    const nextActionAbortRef = useRef<AbortController | null>(null);
+    const queueAbortRef = useRef<AbortController | null>(null);
+    const refreshQueueAbortRef = useRef<AbortController | null>(null);
 
     const [missions, setMissions] = useState<Mission[]>([]);
     const [lists, setLists] = useState<ListItem[]>([]);
     const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
-    const [selectedListId, setSelectedListId] = useState<string | null>(null);
-    const [viewType, setViewType] = useState<"all" | "companies" | "contacts">("all");
+    const [selectedListId, setSelectedListIdState] = useState<string | null>(null);
+    const setSelectedListId = useCallback((value: string | null | ((prev: string | null) => string | null)) => {
+        setSelectedListIdState((prev) => {
+            const next = typeof value === "function" ? value(prev) : value;
+            if (typeof window !== "undefined") {
+                if (next) localStorage.setItem("sdr_selected_list", next);
+                else localStorage.removeItem("sdr_selected_list");
+            }
+            return next;
+        });
+    }, []);
+    const [viewType, setViewTypeState] = useState<"all" | "companies" | "contacts">(() =>
+        (typeof window !== "undefined" && (localStorage.getItem("sdr_view_type") as "all" | "companies" | "contacts") in { all: 1, companies: 1, contacts: 1 })
+            ? (localStorage.getItem("sdr_view_type") as "all" | "companies" | "contacts")
+            : "all"
+    );
+    const setViewType = useCallback((value: "all" | "companies" | "contacts" | ((prev: "all" | "companies" | "contacts") => "all" | "companies" | "contacts")) => {
+        setViewTypeState((prev) => {
+            const next = typeof value === "function" ? value(prev) : value;
+            if (typeof window !== "undefined") localStorage.setItem("sdr_view_type", next);
+            return next;
+        });
+    }, []);
     const [activeTab, setActiveTab] = useState<string>("intro");
     const [showBookingModal, setShowBookingModal] = useState(false);
     const [isImprovingNote, setIsImprovingNote] = useState(false);
 
-    // View mode: card (current) vs table — default to table
-    const [viewMode, setViewMode] = useState<"card" | "table">("table");
+    // View mode: card vs table — persisted in localStorage
+    const [viewMode, setViewModeState] = useState<"card" | "table">(() =>
+        (typeof window !== "undefined" && localStorage.getItem("sdr_view_mode") === "card") ? "card" : "table"
+    );
+    const setViewMode = useCallback((value: "card" | "table" | ((prev: "card" | "table") => "card" | "table")) => {
+        setViewModeState((prev) => {
+            const next = typeof value === "function" ? value(prev) : value;
+            if (typeof window !== "undefined") localStorage.setItem("sdr_view_mode", next);
+            return next;
+        });
+    }, []);
     const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
     const [queueLoading, setQueueLoading] = useState(false);
+    const [queueFetchError, setQueueFetchError] = useState<string | null>(null);
     const [submittingRowKey, setSubmittingRowKey] = useState<string | null>(null);
     // Table view filters (client-side on current queue)
     const [tableFilterResult, setTableFilterResult] = useState<string>(""); // "" | ActionResult | "NONE" (no last action)
     const [tableFilterPriority, setTableFilterPriority] = useState<string>("");
     const [tableFilterChannel, setTableFilterChannel] = useState<string>("");
     const [tableFilterType, setTableFilterType] = useState<string>(""); // "" | "contact" | "company"
+    // Mission search: server-side search so contacts we already emailed (beyond first 100) can be found
+    const [tableSearchInput, setTableSearchInput] = useState("");
+    const [tableSearchApi, setTableSearchApi] = useState("");
 
     // Drawer for table view (contact/company fiche)
     const [drawerContactId, setDrawerContactId] = useState<string | null>(null);
@@ -238,33 +285,48 @@ export default function SDRActionPage() {
 
     // Load filters
     useEffect(() => {
+        const controller = new AbortController();
+        const signal = controller.signal;
         const loadFilters = async () => {
             try {
                 const [missionsRes, listsRes] = await Promise.all([
-                    fetch("/api/sdr/missions"),
-                    fetch("/api/sdr/lists"),
+                    fetch("/api/sdr/missions", { signal }),
+                    fetch("/api/sdr/lists", { signal }),
                 ]);
+                if (signal.aborted) return;
                 const missionsJson = await missionsRes.json();
                 const listsJson = await listsRes.json();
+                if (signal.aborted) return;
 
                 if (missionsJson.success) {
                     setMissions(missionsJson.data);
                     const saved = localStorage.getItem("sdr_selected_mission");
-                    if (saved && missionsJson.data.some((m: Mission) => m.id === saved)) {
-                        setSelectedMissionId(saved);
-                    } else if (missionsJson.data.length > 0) {
-                        setSelectedMissionId(missionsJson.data[0].id);
+                    const missionId = (saved && missionsJson.data.some((m: Mission) => m.id === saved))
+                        ? saved
+                        : missionsJson.data.length > 0
+                            ? missionsJson.data[0].id
+                            : null;
+                    if (missionId) setSelectedMissionId(missionId);
+                    // Restore selected list if it belongs to the selected mission
+                    if (listsJson.success && missionId) {
+                        const savedList = typeof window !== "undefined" ? localStorage.getItem("sdr_selected_list") : null;
+                        if (savedList && listsJson.data.some((l: ListItem) => l.id === savedList && l.mission.id === missionId)) {
+                            setSelectedListId(savedList);
+                        }
                     }
                 }
                 if (listsJson.success) {
                     setLists(listsJson.data);
                 }
             } catch (err) {
+                if ((err as Error).name === "AbortError") return;
                 console.error("Failed to load filters:", err);
+                showError("Impossible de charger les missions et listes");
             }
         };
         loadFilters();
-    }, []);
+        return () => controller.abort();
+    }, [showError]);
 
     // Fetch status config when mission is selected
     useEffect(() => {
@@ -272,17 +334,25 @@ export default function SDRActionPage() {
             setStatusConfig(null);
             return;
         }
-        fetch(`/api/config/action-statuses?missionId=${selectedMissionId}`)
+        const controller = new AbortController();
+        const signal = controller.signal;
+        fetch(`/api/config/action-statuses?missionId=${selectedMissionId}`, { signal })
             .then((res) => res.json())
             .then((json) => {
+                if (signal.aborted) return;
                 if (json.success && json.data?.statuses) {
                     setStatusConfig({ statuses: json.data.statuses });
                 } else {
                     setStatusConfig(null);
                 }
             })
-            .catch(() => setStatusConfig(null));
-    }, [selectedMissionId]);
+            .catch((err) => {
+                if ((err as Error).name === "AbortError") return;
+                setStatusConfig(null);
+                showError("Impossible de charger la configuration des statuts");
+            });
+        return () => controller.abort();
+    }, [selectedMissionId, showError]);
 
     const resultOptions = statusConfig?.statuses?.length
         ? statusConfig.statuses.map((s, i) => ({
@@ -298,9 +368,10 @@ export default function SDRActionPage() {
         ? Object.fromEntries(statusConfig.statuses.map((s) => [s.code, s.label]))
         : ACTION_RESULT_LABELS;
 
-    const getRequiresNote = (code: string) =>
+    const getRequiresNote = useCallback((code: string) =>
         statusConfig?.statuses?.find((s) => s.code === code)?.requiresNote ??
-        ["INTERESTED", "CALLBACK_REQUESTED", "ENVOIE_MAIL"].includes(code);
+        ["INTERESTED", "CALLBACK_REQUESTED", "ENVOIE_MAIL"].includes(code)
+    , [statusConfig]);
 
     const filteredLists = selectedMissionId
         ? lists.filter((l) => l.mission.id === selectedMissionId)
@@ -330,8 +401,23 @@ export default function SDRActionPage() {
         setTableFilterType("");
     };
 
+    // Debounce mission search so we don't refetch on every keystroke
+    useEffect(() => {
+        if (!tableSearchInput.trim()) {
+            setTableSearchApi("");
+            return;
+        }
+        const t = setTimeout(() => setTableSearchApi(tableSearchInput.trim()), 400);
+        return () => clearTimeout(t);
+    }, [tableSearchInput]);
+
     // Load next action
     const loadNextAction = useCallback(async () => {
+        nextActionAbortRef.current?.abort();
+        const controller = new AbortController();
+        nextActionAbortRef.current = controller;
+        const signal = controller.signal;
+
         setIsLoading(true);
         setError(null);
         setSelectedResult(null);
@@ -346,8 +432,9 @@ export default function SDRActionPage() {
             if (selectedMissionId) params.set("missionId", selectedMissionId);
             if (selectedListId) params.set("listId", selectedListId);
 
-            const res = await fetch(`/api/actions/next?${params.toString()}`);
+            const res = await fetch(`/api/actions/next?${params.toString()}`, { signal });
             const json = await res.json();
+            if (signal.aborted) return;
 
             if (!json.success) {
                 setError(json.error || "Erreur lors du chargement");
@@ -357,11 +444,13 @@ export default function SDRActionPage() {
                 if (timerRef.current) clearInterval(timerRef.current);
                 timerRef.current = setInterval(() => setElapsedTime((prev) => prev + 1), 1000);
             }
-        } catch {
+        } catch (err) {
+            if ((err as Error).name === "AbortError") return;
             setError("Erreur de connexion");
             setCurrentAction(null);
         } finally {
-            setIsLoading(false);
+            if (!signal.aborted) setIsLoading(false);
+            if (nextActionAbortRef.current === controller) nextActionAbortRef.current = null;
         }
     }, [selectedMissionId, selectedListId]);
 
@@ -370,21 +459,30 @@ export default function SDRActionPage() {
         return () => { if (timerRef.current) clearInterval(timerRef.current); };
     }, [selectedMissionId, selectedListId, loadNextAction]);
 
-    // Fetch queue for table view
+    // Fetch queue for table view (limit 200 by default; with search API uses 300 so emailed contacts are findable)
     useEffect(() => {
         if (viewMode !== "table" || selectedMissionId === null) {
             setQueueItems([]);
+            setQueueFetchError(null);
             return;
         }
+        queueAbortRef.current?.abort();
+        const controller = new AbortController();
+        queueAbortRef.current = controller;
+        const signal = controller.signal;
         setQueueLoading(true);
+        setQueueFetchError(null);
         const params = new URLSearchParams();
         params.set("missionId", selectedMissionId);
         if (selectedListId) params.set("listId", selectedListId);
-        params.set("limit", "100");
-        fetch(`/api/sdr/action-queue?${params.toString()}`)
+        params.set("limit", tableSearchApi ? "300" : "200");
+        if (tableSearchApi) params.set("search", tableSearchApi);
+        fetch(`/api/sdr/action-queue?${params.toString()}`, { signal })
             .then((res) => res.json())
             .then((json) => {
+                if (signal.aborted) return;
                 if (json.success && json.data?.items) {
+                    setQueueFetchError(null);
                     const items = json.data.items as QueueItem[];
                     setQueueItems(items.map((i) => ({
                         ...i,
@@ -392,14 +490,26 @@ export default function SDRActionPage() {
                             ? `${(i.contact.firstName || "").trim()} ${(i.contact.lastName || "").trim()}`.trim() || i.company.name
                             : i.company.name,
                         _companyName: i.company.name,
+                        _phone: i.contact?.phone || i.company?.phone || null,
+                        _email: i.contact?.email || null,
                     })));
                 } else {
                     setQueueItems([]);
+                    setQueueFetchError(null);
                 }
             })
-            .catch(() => setQueueItems([]))
-            .finally(() => setQueueLoading(false));
-    }, [viewMode, selectedMissionId, selectedListId]);
+            .catch((err) => {
+                if ((err as Error).name === "AbortError") return;
+                setQueueItems([]);
+                setQueueFetchError("Impossible de charger la file d'actions");
+                showError("Impossible de charger la file d'actions");
+            })
+            .finally(() => {
+                if (!signal.aborted) setQueueLoading(false);
+                if (queueAbortRef.current === controller) queueAbortRef.current = null;
+            });
+        return () => controller.abort();
+    }, [viewMode, selectedMissionId, selectedListId, tableSearchApi, showError]);
 
     // Fetch contact when opening contact drawer (table view)
     useEffect(() => {
@@ -407,10 +517,13 @@ export default function SDRActionPage() {
             setDrawerContact(null);
             return;
         }
+        const controller = new AbortController();
+        const signal = controller.signal;
         setDrawerLoading(true);
-        fetch(`/api/contacts/${drawerContactId}`)
+        fetch(`/api/contacts/${drawerContactId}`, { signal })
             .then((res) => res.json())
             .then((json) => {
+                if (signal.aborted) return;
                 if (json.success && json.data) {
                     const c = json.data;
                     setDrawerContact({
@@ -432,9 +545,16 @@ export default function SDRActionPage() {
                     setDrawerContact(null);
                 }
             })
-            .catch(() => setDrawerContact(null))
-            .finally(() => setDrawerLoading(false));
-    }, [drawerContactId]);
+            .catch((err) => {
+                if ((err as Error).name === "AbortError") return;
+                setDrawerContact(null);
+                showError("Impossible de charger le contact");
+            })
+            .finally(() => {
+                if (!signal.aborted) setDrawerLoading(false);
+            });
+        return () => controller.abort();
+    }, [drawerContactId, showError]);
 
     // Fetch company when opening company drawer (table view)
     useEffect(() => {
@@ -442,10 +562,13 @@ export default function SDRActionPage() {
             setDrawerCompany(null);
             return;
         }
+        const controller = new AbortController();
+        const signal = controller.signal;
         setDrawerLoading(true);
-        fetch(`/api/companies/${drawerCompanyId}`)
+        fetch(`/api/companies/${drawerCompanyId}`, { signal })
             .then((res) => res.json())
             .then((json) => {
+                if (signal.aborted) return;
                 if (json.success && json.data) {
                     const co = json.data;
                     setDrawerCompany({
@@ -474,9 +597,16 @@ export default function SDRActionPage() {
                     setDrawerCompany(null);
                 }
             })
-            .catch(() => setDrawerCompany(null))
-            .finally(() => setDrawerLoading(false));
-    }, [drawerCompanyId]);
+            .catch((err) => {
+                if ((err as Error).name === "AbortError") return;
+                setDrawerCompany(null);
+                showError("Impossible de charger la société");
+            })
+            .finally(() => {
+                if (!signal.aborted) setDrawerLoading(false);
+            });
+        return () => controller.abort();
+    }, [drawerCompanyId, showError]);
 
     const queueRowKey = (row: QueueItem) => row.contactId ?? row.companyId;
 
@@ -490,15 +620,21 @@ export default function SDRActionPage() {
     // Refetch queue (table view) — same API as initial load; call on drawer close and when action recorded
     const refreshQueue = useCallback(() => {
         if (selectedMissionId === null) return;
+        refreshQueueAbortRef.current?.abort();
+        const controller = new AbortController();
+        refreshQueueAbortRef.current = controller;
+        const signal = controller.signal;
         setQueueLoading(true);
         const params = new URLSearchParams();
         params.set("missionId", selectedMissionId);
         if (selectedListId) params.set("listId", selectedListId);
-        params.set("limit", "100");
+        params.set("limit", tableSearchApi ? "300" : "200");
+        if (tableSearchApi) params.set("search", tableSearchApi);
         params.set("_t", String(Date.now())); // cache-bust so we get fresh data after drawer updates
-        fetch(`/api/sdr/action-queue?${params.toString()}`, { cache: "no-store" })
+        fetch(`/api/sdr/action-queue?${params.toString()}`, { cache: "no-store", signal })
             .then((res) => res.json())
             .then((json) => {
+                if (signal.aborted) return;
                 if (json.success && json.data?.items) {
                     const items = json.data.items as QueueItem[];
                     setQueueItems(items.map((i) => ({
@@ -507,11 +643,16 @@ export default function SDRActionPage() {
                             ? `${(i.contact.firstName || "").trim()} ${(i.contact.lastName || "").trim()}`.trim() || i.company.name
                             : i.company.name,
                         _companyName: i.company.name,
+                        _phone: i.contact?.phone || i.company?.phone || null,
+                        _email: i.contact?.email || null,
                     })));
                 }
             })
-            .finally(() => setQueueLoading(false));
-    }, [selectedMissionId, selectedListId]);
+            .finally(() => {
+                if (!signal.aborted) setQueueLoading(false);
+                if (refreshQueueAbortRef.current === controller) refreshQueueAbortRef.current = null;
+            });
+    }, [selectedMissionId, selectedListId, tableSearchApi]);
 
     // Unified drawer state (table view)
     const [unifiedDrawerOpen, setUnifiedDrawerOpen] = useState(false);
@@ -540,17 +681,25 @@ export default function SDRActionPage() {
             setUnifiedDrawerClientBookingUrl("");
             return;
         }
-        fetch(`/api/missions/${unifiedDrawerMissionId}`)
+        const controller = new AbortController();
+        const signal = controller.signal;
+        fetch(`/api/missions/${unifiedDrawerMissionId}`, { signal })
             .then((res) => res.json())
             .then((json) => {
+                if (signal.aborted) return;
                 if (json.success && json.data?.client?.bookingUrl) {
                     setUnifiedDrawerClientBookingUrl(json.data.client.bookingUrl);
                 } else {
                     setUnifiedDrawerClientBookingUrl("");
                 }
             })
-            .catch(() => setUnifiedDrawerClientBookingUrl(""));
-    }, [unifiedDrawerMissionId, unifiedDrawerOpen]);
+            .catch((err) => {
+                if ((err as Error).name === "AbortError") return;
+                setUnifiedDrawerClientBookingUrl("");
+                showError("Impossible de charger l'URL de réservation");
+            });
+        return () => controller.abort();
+    }, [unifiedDrawerMissionId, unifiedDrawerOpen, showError]);
 
     const openDrawerForRow = (row: QueueItem) => {
         setDrawerRow(row);
@@ -563,47 +712,6 @@ export default function SDRActionPage() {
         setUnifiedDrawerMissionName(row.missionName);
         setUnifiedDrawerOpen(true);
     };
-
-    // Dialer: target for click-to-call from current action (card) or selected row (table)
-    const dialerInitialTarget = useMemo(() => {
-        if (viewMode === "card" && currentAction?.channel === "CALL") {
-            const phone = currentAction.contact?.phone || (currentAction.company?.phone ?? null);
-            if (!phone) return undefined;
-            const contactName = currentAction.contact
-                ? (`${currentAction.contact.firstName ?? ""} ${currentAction.contact.lastName ?? ""}`.trim() || currentAction.company?.name) ?? "Contact"
-                : currentAction.company?.name ?? "Contact";
-            const companyName = currentAction.company?.name ?? "";
-            return {
-                contactName,
-                companyName,
-                phone,
-                contactId: currentAction.contact?.id,
-                companyId: currentAction.company?.id,
-                campaignId: currentAction.campaignId,
-            };
-        }
-        if (viewMode === "table" && drawerRow) {
-            const phone = (drawerRow.contact?.phone || drawerRow.company?.phone) ?? null;
-            if (!phone) return undefined;
-            const contactName = drawerRow.contact
-                ? `${drawerRow.contact.firstName ?? ""} ${drawerRow.contact.lastName ?? ""}`.trim() || drawerRow.company.name
-                : drawerRow.company.name;
-            return {
-                contactName,
-                companyName: drawerRow.company.name,
-                phone,
-                contactId: drawerRow.contactId ?? undefined,
-                companyId: drawerRow.companyId,
-                campaignId: drawerRow.campaignId,
-            };
-        }
-        return undefined;
-    }, [viewMode, currentAction, drawerRow]);
-
-    const handleDialerCallComplete = useCallback(() => {
-        if (viewMode === "card") loadNextAction();
-        else if (viewMode === "table") refreshQueue();
-    }, [viewMode, loadNextAction, refreshQueue]);
 
     const closeUnifiedDrawer = () => {
         setUnifiedDrawerOpen(false);
@@ -698,9 +806,11 @@ export default function SDRActionPage() {
             if (json.success) {
                 setQueueItems((prev) => prev.filter((r) => queueRowKey(r) !== key));
                 setActionsCompleted((c) => c + 1);
+            } else {
+                showError(json.error || "Erreur lors de l'enregistrement");
             }
         } catch {
-            // ignore
+            showError("Erreur de connexion");
         } finally {
             setSubmittingRowKey(null);
         }
@@ -715,7 +825,7 @@ export default function SDRActionPage() {
 
         try {
             if (isCardMode && currentAction) {
-                await fetch("/api/actions", {
+                const res = await fetch("/api/actions", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -727,12 +837,17 @@ export default function SDRActionPage() {
                         note: "Email envoyé via template",
                     }),
                 });
+                const json = await res.json();
+                if (!json.success) {
+                    showError(json.error || "Erreur lors de l'enregistrement de l'email");
+                    return;
+                }
                 setActionsCompleted((c) => c + 1);
                 await loadNextAction();
             } else if (!isCardMode && "row" in pendingEmailAction) {
                 const { row } = pendingEmailAction;
                 const key = queueRowKey(row);
-                await fetch("/api/actions", {
+                const res = await fetch("/api/actions", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -744,11 +859,16 @@ export default function SDRActionPage() {
                         note: "Email envoyé via template",
                     }),
                 });
+                const json = await res.json();
+                if (!json.success) {
+                    showError(json.error || "Erreur lors de l'enregistrement de l'email");
+                    return;
+                }
                 setQueueItems((prev) => prev.filter((r) => queueRowKey(r) !== key));
                 setActionsCompleted((c) => c + 1);
             }
         } catch {
-            // ignore
+            showError("Erreur de connexion");
         }
 
         setPendingEmailAction(null);
@@ -758,8 +878,8 @@ export default function SDRActionPage() {
         setEmailModalMissionName(null);
     };
 
-    // Submit
-    const handleSubmit = async () => {
+    // Submit (wrapped in useCallback so keyboard shortcut always has latest)
+    const handleSubmit = useCallback(async () => {
         if (!selectedResult || !currentAction?.campaignId) return;
         if (!currentAction.contact && !currentAction.company) {
             setError("Aucun contact ou entreprise disponible");
@@ -815,7 +935,6 @@ export default function SDRActionPage() {
             }
             setShowSuccess(true);
             setActionsCompleted((prev) => prev + 1);
-            // Immediately load the next action and reset submitting state
             await loadNextAction();
             setShowSuccess(false);
         } catch {
@@ -823,7 +942,7 @@ export default function SDRActionPage() {
         } finally {
             setIsSubmitting(false);
         }
-    };
+    }, [selectedResult, currentAction, note, callbackDateValue, selectedMissionId, elapsedTime, loadNextAction, getRequiresNote]);
 
     // Improve note with Mistral (orthography + rephrase)
     const handleImproveNote = async () => {
@@ -880,7 +999,7 @@ export default function SDRActionPage() {
         };
         window.addEventListener("keydown", handler);
         return () => window.removeEventListener("keydown", handler);
-    }, [selectedResult, isSubmitting, resultOptions]);
+    }, [selectedResult, isSubmitting, resultOptions, handleSubmit]);
 
     // Parse script
     let scriptSections: Record<string, string> | null = null;
@@ -908,45 +1027,124 @@ export default function SDRActionPage() {
                         : row.company.name;
                     return (
                         <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
+                            <div className={cn(
+                                "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border transition-colors",
+                                row.contactId
+                                    ? "bg-indigo-50 border-indigo-100 text-indigo-600"
+                                    : "bg-slate-50 border-slate-200 text-slate-500"
+                            )}>
                                 {row.contactId ? (
-                                    <User className="w-4 h-4 text-slate-500" />
+                                    <User className="w-4.5 h-4.5" />
                                 ) : (
-                                    <Building2 className="w-4 h-4 text-slate-500" />
+                                    <Building2 className="w-4.5 h-4.5" />
                                 )}
                             </div>
-                            <div>
-                                <p className="font-medium text-slate-900 truncate max-w-[200px]">{name}</p>
-                                {row.contact && row.company.name !== name && (
-                                    <p className="text-xs text-slate-500 truncate max-w-[200px]">{row.company.name}</p>
-                                )}
+                            <div className="min-w-0">
+                                <p className="font-semibold text-slate-900 truncate max-w-[220px]">{name}</p>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                    {row.contact && row.company.name !== name && (
+                                        <span className="text-xs text-slate-500 truncate max-w-[140px] flex items-center gap-1">
+                                            <Building2 className="w-3 h-3 flex-shrink-0" />
+                                            {row.company.name}
+                                        </span>
+                                    )}
+                                    {row.contact?.title && (
+                                        <span className="text-xs text-slate-400 truncate max-w-[120px]">
+                                            · {row.contact.title}
+                                        </span>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     );
                 },
             },
             {
-                key: "missionName",
-                header: "Mission",
-                render: (v) => <span className="text-sm text-slate-600">{v}</span>,
+                key: "_phone",
+                header: "Téléphone",
+                render: (_, row) => {
+                    const phone = row._phone || row.contact?.phone || row.company?.phone;
+                    if (!phone) return (
+                        <span className="inline-flex items-center gap-1 text-xs text-slate-400 px-2 py-1 rounded-md bg-slate-50 border border-slate-100">
+                            <PhoneOff className="w-3 h-3" /> Aucun
+                        </span>
+                    );
+                    return (
+                        <a
+                            href={`tel:${phone}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/60 rounded-lg transition-all duration-150 hover:shadow-sm group"
+                            title="Cliquer pour appeler"
+                        >
+                            <PhoneCall className="w-3.5 h-3.5 text-emerald-600" />
+                            <span className="font-mono tracking-tight">{phone}</span>
+                        </a>
+                    );
+                },
+            },
+            {
+                key: "channel",
+                header: "Canal",
+                render: (v) => {
+                    const channelConfig: Record<string, { icon: React.ReactNode; color: string; label: string }> = {
+                        CALL: { icon: <Phone className="w-3.5 h-3.5" />, color: "bg-indigo-50 text-indigo-700 border-indigo-200", label: "Appel" },
+                        EMAIL: { icon: <MailOpen className="w-3.5 h-3.5" />, color: "bg-blue-50 text-blue-700 border-blue-200", label: "Email" },
+                        LINKEDIN: { icon: <Linkedin className="w-3.5 h-3.5" />, color: "bg-sky-50 text-sky-700 border-sky-200", label: "LinkedIn" },
+                    };
+                    const cfg = channelConfig[v as string] || { icon: <Globe className="w-3.5 h-3.5" />, color: "bg-slate-50 text-slate-600 border-slate-200", label: v };
+                    return (
+                        <Badge className={cn("text-xs gap-1 font-medium border", cfg.color)}>
+                            {cfg.icon}
+                            {cfg.label}
+                        </Badge>
+                    );
+                },
             },
             {
                 key: "lastAction",
                 header: "Dernière action",
-                render: (_, row) =>
-                    row.lastAction ? (
-                        <Badge className={cn("text-xs", PRIORITY_LABELS[row.priority as keyof typeof PRIORITY_LABELS]?.color ?? "bg-slate-100 text-slate-700")}>
-                            {statusLabels[row.lastAction.result] ?? row.lastAction.result}
-                        </Badge>
-                    ) : (
-                        <span className="text-xs text-slate-400">—</span>
-                    ),
+                render: (_, row) => {
+                    if (!row.lastAction) {
+                        return (
+                            <span className="inline-flex items-center gap-1.5 text-xs text-slate-400 italic px-2 py-1 rounded-lg bg-slate-50 border border-slate-100">
+                                <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                                Jamais contacté
+                            </span>
+                        );
+                    }
+                    const resultColor: Record<string, { badge: string; dot: string }> = {
+                        NO_RESPONSE: { badge: "bg-slate-50 text-slate-600 border-slate-200", dot: "bg-slate-400" },
+                        BAD_CONTACT: { badge: "bg-red-50 text-red-600 border-red-200", dot: "bg-red-400" },
+                        INTERESTED: { badge: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-400" },
+                        CALLBACK_REQUESTED: { badge: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-400" },
+                        MEETING_BOOKED: { badge: "bg-indigo-50 text-indigo-700 border-indigo-200", dot: "bg-indigo-400" },
+                        DISQUALIFIED: { badge: "bg-slate-100 text-slate-500 border-slate-200", dot: "bg-slate-400" },
+                        ENVOIE_MAIL: { badge: "bg-blue-50 text-blue-700 border-blue-200", dot: "bg-blue-400" },
+                    };
+                    const color = resultColor[row.lastAction.result] || { badge: "bg-slate-100 text-slate-600 border-slate-200", dot: "bg-slate-400" };
+                    return (
+                        <div className="space-y-1.5">
+                            <Badge className={cn("text-xs border font-medium", color.badge)}>
+                                {RESULT_ICON_MAP[row.lastAction.result]}
+                                <span className="ml-1">{statusLabels[row.lastAction.result] ?? row.lastAction.result}</span>
+                            </Badge>
+                            {row.lastAction.note && (
+                                <div className="flex items-start gap-1.5 max-w-[220px]" title={row.lastAction.note}>
+                                    <MessageSquare className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
+                                    <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed">
+                                        {row.lastAction.note}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    );
+                },
             },
             {
                 key: "priority",
                 header: "Priorité",
                 render: (v) => (
-                    <Badge className={PRIORITY_LABELS[v as keyof typeof PRIORITY_LABELS]?.color ?? "bg-slate-100 text-slate-700"}>
+                    <Badge className={cn("text-xs font-medium border", PRIORITY_LABELS[v as keyof typeof PRIORITY_LABELS]?.color ?? "bg-slate-100 text-slate-700 border-slate-200")}>
                         {PRIORITY_LABELS[v as keyof typeof PRIORITY_LABELS]?.label ?? v}
                     </Badge>
                 ),
@@ -957,32 +1155,59 @@ export default function SDRActionPage() {
                 render: (_, row) => {
                     const key = queueRowKey(row);
                     const submitting = submittingRowKey === key;
+                    // Show only the most common 4 actions inline, rest via drawer  
+                    const primaryActions = resultOptions.slice(0, 5);
                     return (
-                        <div className="flex items-center gap-1 flex-wrap">
+                        <div className="flex items-center gap-1">
                             {submitting && (
                                 <span className="flex items-center justify-center w-8 h-8 text-indigo-500">
                                     <Loader2 className="w-4 h-4 animate-spin" />
                                 </span>
                             )}
-                            {resultOptions.map((opt) => (
-                                <button
-                                    key={opt.value}
-                                    type="button"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleQuickAction(row, opt.value);
-                                    }}
-                                    disabled={submitting}
-                                    title={opt.label}
-                                    className={cn(
-                                        "w-8 h-8 rounded-lg border flex items-center justify-center transition-colors",
-                                        "border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600",
-                                        submitting && "opacity-50 pointer-events-none"
-                                    )}
-                                >
-                                    {opt.icon}
-                                </button>
-                            ))}
+                            {primaryActions.map((opt) => {
+                                const actionColors: Record<string, string> = {
+                                    NO_RESPONSE: "hover:border-slate-400 hover:bg-slate-50 hover:text-slate-700 hover:shadow-sm",
+                                    BAD_CONTACT: "hover:border-red-300 hover:bg-red-50 hover:text-red-600 hover:shadow-sm hover:shadow-red-100",
+                                    INTERESTED: "hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600 hover:shadow-sm hover:shadow-emerald-100",
+                                    CALLBACK_REQUESTED: "hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600 hover:shadow-sm hover:shadow-amber-100",
+                                    MEETING_BOOKED: "hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600 hover:shadow-sm hover:shadow-indigo-100",
+                                    DISQUALIFIED: "hover:border-slate-400 hover:bg-slate-100 hover:text-slate-600 hover:shadow-sm",
+                                    ENVOIE_MAIL: "hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 hover:shadow-sm hover:shadow-blue-100",
+                                };
+                                return (
+                                    <button
+                                        key={opt.value}
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleQuickAction(row, opt.value);
+                                        }}
+                                        disabled={submitting}
+                                        title={`${opt.label} (${opt.key})`}
+                                        className={cn(
+                                            "w-8 h-8 rounded-lg border flex items-center justify-center transition-all duration-150",
+                                            "border-slate-200 text-slate-400 bg-white",
+                                            actionColors[opt.value] || "hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600",
+                                            submitting && "opacity-40 pointer-events-none",
+                                            "active:scale-95"
+                                        )}
+                                    >
+                                        {opt.icon}
+                                    </button>
+                                );
+                            })}
+                            {/* Open drawer for full control */}
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    openDrawerForRow(row);
+                                }}
+                                title="Voir la fiche complète"
+                                className="w-8 h-8 rounded-lg border border-dashed border-slate-200 flex items-center justify-center text-slate-400 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600 transition-all duration-150 active:scale-95"
+                            >
+                                <Eye className="w-4 h-4" />
+                            </button>
                         </div>
                     );
                 },
@@ -1057,9 +1282,8 @@ export default function SDRActionPage() {
                     </div>
                 </div>
 
-                {/* Modern filter header */}
                 {/* Modern Filter Card */}
-                <div className="bg-white/80 backdrop-blur-xl rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
+                <div className="bg-white/90 backdrop-blur-xl rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
                     <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50/80 to-white">
                         <div className="flex flex-wrap items-center justify-between gap-4">
                             <div className="flex items-center gap-3">
@@ -1117,6 +1341,17 @@ export default function SDRActionPage() {
                                     <option value="all">Toutes les listes</option>
                                     {filteredLists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                                 </select>
+                            </div>
+                            {/* Recherche dans la mission (serveur) — pour retrouver un contact déjà contacté / email envoyé */}
+                            <div className="space-y-1.5 sm:col-span-2">
+                                <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Rechercher dans la mission</label>
+                                <input
+                                    type="text"
+                                    value={tableSearchInput}
+                                    onChange={(e) => setTableSearchInput(e.target.value)}
+                                    placeholder="Nom contact ou société… (retrouver même après envoi email)"
+                                    className="w-full h-10 px-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 transition-shadow"
+                                />
                             </div>
                             {/* Statut */}
                             <div className="space-y-1.5">
@@ -1179,7 +1414,9 @@ export default function SDRActionPage() {
                         {/* Results summary */}
                         <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between">
                             <span className="text-xs text-slate-500">
-                                {hasTableFiltersActive ? (
+                                {tableSearchApi ? (
+                                    <span><span className="font-medium text-indigo-600">{queueItems.length}</span> résultat{queueItems.length !== 1 ? "s" : ""} pour « {tableSearchApi} »</span>
+                                ) : hasTableFiltersActive ? (
                                     <span><span className="font-medium text-indigo-600">{filteredQueueItems.length}</span> résultat{filteredQueueItems.length !== 1 ? "s" : ""} sur {queueItems.length}</span>
                                 ) : (
                                     <span><span className="font-medium text-slate-700">{queueItems.length}</span> dans la file</span>
@@ -1199,25 +1436,48 @@ export default function SDRActionPage() {
                 </div>
 
                 {/* Data Table */}
-                <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
-                    <DataTable
-                        data={filteredQueueItems}
-                        columns={queueColumns}
-                        keyField={(row) => queueRowKey(row)}
-                        searchable
-                        searchPlaceholder="Rechercher contact ou société..."
-                        searchFields={["_displayName", "_companyName", "missionName"]}
-                        pagination
-                        pageSize={15}
-                        loading={queueLoading}
-                        emptyMessage="Aucun contact dans la file. Changez de mission ou liste."
-                        onRowClick={openDrawerForRow}
-                        getRowClassName={(row) =>
-                            recentlyUpdatedRowKeys.has(queueRowKey(row))
-                                ? "bg-emerald-50/80 border-l-4 border-l-emerald-500"
-                                : ""
-                        }
-                    />
+                <div className="bg-white rounded-2xl border border-slate-200/60 shadow-lg shadow-slate-200/50 overflow-hidden">
+                    {queueLoading ? (
+                        <TableSkeleton columns={6} rows={12} className="rounded-2xl" />
+                    ) : queueFetchError ? (
+                        <EmptyState
+                            icon={RefreshCw}
+                            title={queueFetchError}
+                            description="Vérifiez votre connexion et réessayez."
+                            action={
+                                <Button
+                                    variant="secondary"
+                                    onClick={() => {
+                                        setQueueFetchError(null);
+                                        refreshQueue();
+                                    }}
+                                    className="gap-2"
+                                >
+                                    <RefreshCw className="w-4 h-4" />
+                                    Réessayer
+                                </Button>
+                            }
+                            className="rounded-2xl border-0"
+                        />
+                    ) : (
+                        <DataTable
+                            data={filteredQueueItems}
+                            columns={queueColumns}
+                            keyField={(row) => queueRowKey(row)}
+                            searchable
+                            searchPlaceholder="Rechercher contact ou société..."
+                            searchFields={["_displayName", "_companyName", "missionName"]}
+                            pagination
+                            pageSize={15}
+                            emptyMessage="Aucun contact dans la file. Changez de mission ou liste."
+                            onRowClick={openDrawerForRow}
+                            getRowClassName={(row) =>
+                                recentlyUpdatedRowKeys.has(queueRowKey(row))
+                                    ? "!bg-emerald-50/80 border-l-4 border-l-emerald-500 animate-fade-in"
+                                    : ""
+                            }
+                        />
+                    )}
                 </div>
 
                 {/* Unified Action Drawer */}
@@ -1233,19 +1493,10 @@ export default function SDRActionPage() {
                             clientBookingUrl={unifiedDrawerClientBookingUrl || undefined}
                             onOpenEmailModal={openEmailModalFromDrawer}
                             onActionRecorded={() => {
-                                // Mark this row as recently updated for table highlight
                                 const rowKey = unifiedDrawerContactId ?? unifiedDrawerCompanyId ?? "";
                                 if (rowKey) {
-                                    setRecentlyUpdatedRowKeys((prev) => new Set([...prev, rowKey]));
-                                    if (recentlyUpdatedTimeoutRef.current) clearTimeout(recentlyUpdatedTimeoutRef.current);
-                                    recentlyUpdatedTimeoutRef.current = setTimeout(() => {
-                                        setRecentlyUpdatedRowKeys((prev) => {
-                                            const next = new Set(prev);
-                                            next.delete(rowKey);
-                                            return next;
-                                        });
-                                        recentlyUpdatedTimeoutRef.current = null;
-                                    }, 5000);
+                                    setQueueItems((prev) => prev.filter((r) => queueRowKey(r) !== rowKey));
+                                    setActionsCompleted((c) => c + 1);
                                 }
                                 refreshQueue();
                             }}
@@ -1253,22 +1504,13 @@ export default function SDRActionPage() {
                                 if (!drawerRow) return;
                                 const key = queueRowKey(drawerRow);
                                 const idx = filteredQueueItems.findIndex((row) => queueRowKey(row) === key);
+                                setQueueItems((prev) => prev.filter((r) => queueRowKey(r) !== key));
+                                setActionsCompleted((c) => c + 1);
                                 if (idx >= 0 && idx < filteredQueueItems.length - 1) {
                                     const nextRow = filteredQueueItems[idx + 1];
                                     openDrawerForRow(nextRow);
-                                }
-                                const rowKey = unifiedDrawerContactId ?? unifiedDrawerCompanyId ?? "";
-                                if (rowKey) {
-                                    setRecentlyUpdatedRowKeys((prev) => new Set([...prev, rowKey]));
-                                    if (recentlyUpdatedTimeoutRef.current) clearTimeout(recentlyUpdatedTimeoutRef.current);
-                                    recentlyUpdatedTimeoutRef.current = setTimeout(() => {
-                                        setRecentlyUpdatedRowKeys((prev) => {
-                                            const next = new Set(prev);
-                                            next.delete(rowKey);
-                                            return next;
-                                        });
-                                        recentlyUpdatedTimeoutRef.current = null;
-                                    }, 5000);
+                                } else {
+                                    closeUnifiedDrawer();
                                 }
                                 refreshQueue();
                             }}
@@ -1299,10 +1541,14 @@ export default function SDRActionPage() {
     // Loading (card view)
     if (isLoading && !currentAction) {
         return (
-            <>
-                <LoadingState message="Chargement du prochain contact..." />
-                <DialerDrawer onCallComplete={loadNextAction} />
-            </>
+            <div className="space-y-6 max-w-2xl mx-auto">
+                <CardSkeleton hasHeader hasImage={false} lines={4} />
+                <CardSkeleton hasHeader={false} lines={3} />
+                <div className="flex gap-4">
+                    <CardSkeleton hasHeader className="flex-1" lines={2} />
+                    <CardSkeleton hasHeader className="flex-1" lines={2} />
+                </div>
+            </div>
         );
     }
 
@@ -1357,7 +1603,7 @@ export default function SDRActionPage() {
                                     </button>
                                 </div>
 
-                                    <Select
+                                <Select
                                     variant="header-dark"
                                     value={selectedMissionId || ""}
                                     onChange={(id) => {
@@ -1399,7 +1645,6 @@ export default function SDRActionPage() {
                         }
                     />
                 </div>
-                <DialerDrawer onCallComplete={loadNextAction} />
             </div>
         );
     }
@@ -1715,11 +1960,34 @@ export default function SDRActionPage() {
                             </>
                         ) : null}
 
-                        {/* Previous Note */}
-                        {currentAction.lastAction?.note && (
-                            <div className="mt-4 p-4 bg-amber-50 border border-amber-100 rounded-xl">
-                                <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-2">Note précédente</p>
-                                <p className="text-sm text-amber-900">{currentAction.lastAction.note}</p>
+                        {/* Previous Action Context */}
+                        {currentAction.lastAction && (
+                            <div className="mt-4 p-4 bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200/60 rounded-xl">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <History className="w-4 h-4 text-amber-600" />
+                                    <p className="text-xs font-bold text-amber-800 uppercase tracking-wide">Dernière interaction</p>
+                                </div>
+                                <div className="flex items-center gap-2 mb-2">
+                                    <Badge className={cn("text-xs border font-medium", {
+                                        "bg-slate-100 text-slate-600 border-slate-200": currentAction.lastAction.result === "NO_RESPONSE",
+                                        "bg-red-50 text-red-600 border-red-200": currentAction.lastAction.result === "BAD_CONTACT",
+                                        "bg-emerald-50 text-emerald-700 border-emerald-200": currentAction.lastAction.result === "INTERESTED",
+                                        "bg-amber-100 text-amber-700 border-amber-200": currentAction.lastAction.result === "CALLBACK_REQUESTED",
+                                        "bg-indigo-50 text-indigo-700 border-indigo-200": currentAction.lastAction.result === "MEETING_BOOKED",
+                                        "bg-blue-50 text-blue-700 border-blue-200": currentAction.lastAction.result === "ENVOIE_MAIL",
+                                    })}>
+                                        {RESULT_ICON_MAP[currentAction.lastAction.result]}
+                                        <span className="ml-1">{statusLabels[currentAction.lastAction.result] ?? currentAction.lastAction.result}</span>
+                                    </Badge>
+                                    <span className="text-[10px] text-amber-600 font-medium">
+                                        {new Date(currentAction.lastAction.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                </div>
+                                {currentAction.lastAction.note && (
+                                    <div className="mt-2 pl-3 border-l-2 border-amber-300">
+                                        <p className="text-sm text-amber-900 italic">"{currentAction.lastAction.note}"</p>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </Card>
@@ -1910,7 +2178,47 @@ export default function SDRActionPage() {
             )}
 
             {/* Submit */}
-            <div className="flex justify-end pt-2">
+            <div className="flex items-center justify-between pt-2 gap-4">
+                {/* Skip / Passer button */}
+                <Button
+                    variant="ghost"
+                    size="lg"
+                    onClick={async () => {
+                        // Skip this contact: record NO_RESPONSE silently and load next
+                        if (!currentAction?.campaignId) return;
+                        setIsSubmitting(true);
+                        try {
+                            const res = await fetch("/api/actions", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                    contactId: currentAction.contact?.id,
+                                    companyId: !currentAction.contact && currentAction.company ? currentAction.company.id : undefined,
+                                    campaignId: currentAction.campaignId,
+                                    channel: currentAction.channel,
+                                    result: "NO_RESPONSE",
+                                    note: "Passé (skip)",
+                                }),
+                            });
+                            const json = await res.json();
+                            if (!json.success) {
+                                showError(json.error || "Erreur lors du passage");
+                                return;
+                            }
+                            await loadNextAction();
+                        } catch {
+                            showError("Erreur de connexion");
+                        } finally {
+                            setIsSubmitting(false);
+                        }
+                    }}
+                    disabled={isSubmitting}
+                    className="gap-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 border border-slate-200"
+                >
+                    <SkipForward className="w-4 h-4" />
+                    Passer
+                </Button>
+
                 <Button
                     variant="primary"
                     size="lg"
@@ -1957,11 +2265,6 @@ export default function SDRActionPage() {
                 />
             )}
 
-            {/* Floating dialer: always visible on action page; target from current card or selected table row */}
-            <DialerDrawer
-                initialTarget={dialerInitialTarget}
-                onCallComplete={handleDialerCallComplete}
-            />
         </div>
     );
 }

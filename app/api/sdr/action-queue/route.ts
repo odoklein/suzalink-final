@@ -6,15 +6,31 @@ import { statusConfigService } from "@/lib/services/StatusConfigService";
 // ============================================
 // GET /api/sdr/action-queue
 // Returns a list of queue items (same pool as /api/actions/next) for table view.
-// Query: missionId?, listId?, limit (default 100, max 200)
+// Query: missionId?, listId?, limit (default 200, max 500), search (optional - filter by name/company)
+// When search is used, limit defaults to 300 so "emailed" contacts (low priority) can be found.
 // ============================================
+
+function escapeIlikePattern(raw: string): string {
+    return raw
+        .replace(/\\/g, "\\\\")
+        .replace(/%/g, "\\%")
+        .replace(/_/g, "\\_");
+}
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
     const session = await requireRole(["SDR", "BUSINESS_DEVELOPER"], request);
     const { searchParams } = new URL(request.url);
     const missionId = searchParams.get("missionId");
     const listId = searchParams.get("listId");
-    const limit = Math.min(parseInt(searchParams.get("limit") || "100", 10) || 100, 200);
+    const search = searchParams.get("search")?.trim() ?? "";
+    const hasSearch = search.length > 0;
+    // When searching, use higher limit so contacts we already emailed (pushed to end by priority) are included
+    const defaultLimit = hasSearch ? 300 : 200;
+    const maxLimit = hasSearch ? 500 : 300;
+    const limit = Math.min(
+        parseInt(searchParams.get("limit") || String(defaultLimit), 10) || defaultLimit,
+        maxLimit
+    );
 
     const COOLDOWN_HOURS = 24;
     const cooldownDate = new Date(Date.now() - COOLDOWN_HOURS * 60 * 60 * 1000);
@@ -165,8 +181,14 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
             LEFT JOIN last_actions_companies lac2 ON at.contact_id IS NULL AND at.company_id = lac2."companyId"
         )
         SELECT * FROM targets_with_last_action
+        ${hasSearch ? `
+        WHERE (
+            (contact_first_name IS NOT NULL AND contact_first_name ILIKE $2)
+            OR (contact_last_name IS NOT NULL AND contact_last_name ILIKE $2)
+            OR (company_name IS NOT NULL AND company_name ILIKE $2)
+        )` : ""}
     `,
-        sdrId
+        ...(hasSearch ? [sdrId, `%${escapeIlikePattern(search)}%`] : [sdrId])
     );
 
     // Resolve missionId for config

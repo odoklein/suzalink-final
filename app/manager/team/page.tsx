@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useToast } from "@/components/ui";
-import { resolveActivityStatus, getStatusConfig } from "@/lib/activity/status-resolver";
 import {
     Users,
     Clock,
@@ -16,32 +15,21 @@ import {
     ChevronRight,
     RefreshCw,
     Loader2,
-    Timer,
     Zap,
-    Star,
     Trophy,
     Medal,
     Crown,
     Flame,
-    CheckCircle,
-    XCircle,
-    Pause,
-    Play,
-    MoreVertical,
     Eye,
     UserPlus,
     Mail,
-    ExternalLink,
     ArrowUpRight,
     ArrowDownRight,
-    Minus,
-    CalendarDays,
-    PieChart,
-    Settings,
-    Download,
     Search,
-    Filter,
-    ChevronDown,
+    LayoutGrid,
+    List,
+    Download,
+    AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -60,38 +48,26 @@ interface TeamMember {
         assignedMissions: number;
         actions: number;
     };
-    // Computed metrics
     metrics?: TeamMemberMetrics;
 }
 
 interface TeamMemberMetrics {
-    // Time metrics
     scheduledHoursThisWeek: number;
     scheduledHoursThisMonth: number;
     completedHoursThisWeek: number;
     completedHoursThisMonth: number;
-
-    // Performance metrics
     callsToday: number;
     callsThisWeek: number;
     callsThisMonth: number;
     avgCallsPerHour: number;
-
-    // Results
     meetingsBooked: number;
     meetingsBookedThisWeek: number;
     conversionRate: number;
-
-    // Activity
     lastActiveAt: string | null;
     currentMission: string | null;
     activeBlockId: string | null;
     status: "online" | "busy" | "away" | "offline";
-
-    // Weekly breakdown
     dailyHours: { day: string; scheduled: number; completed: number }[];
-
-    // Streak and gamification
     currentStreak: number;
     weeklyRank: number;
     monthlyScore: number;
@@ -128,17 +104,10 @@ interface TeamStats {
 // ============================================
 
 const STATUS_CONFIG = {
-    online: { color: "bg-emerald-500", label: "En ligne", pulse: true },
-    busy: { color: "bg-amber-500", label: "Occupé", pulse: true },
-    away: { color: "bg-slate-400", label: "Absent", pulse: false },
-    offline: { color: "bg-slate-300", label: "Hors ligne", pulse: false },
-};
-
-const ROLE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-    SDR: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
-    BUSINESS_DEVELOPER: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200" },
-    MANAGER: { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200" },
-    DEVELOPER: { bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200" },
+    online: { color: "bg-emerald-500", ring: "ring-emerald-500/20", label: "En ligne", pulse: true },
+    busy: { color: "bg-amber-500", ring: "ring-amber-500/20", label: "Occupé", pulse: true },
+    away: { color: "bg-slate-400", ring: "ring-slate-400/20", label: "Absent", pulse: false },
+    offline: { color: "bg-slate-300", ring: "ring-slate-300/20", label: "Hors ligne", pulse: false },
 };
 
 const ROLE_LABELS: Record<string, string> = {
@@ -146,6 +115,13 @@ const ROLE_LABELS: Record<string, string> = {
     BUSINESS_DEVELOPER: "Business Dev",
     MANAGER: "Manager",
     DEVELOPER: "Développeur",
+};
+
+const ROLE_STYLES: Record<string, { bg: string; text: string }> = {
+    SDR: { bg: "bg-blue-50", text: "text-blue-700" },
+    BUSINESS_DEVELOPER: { bg: "bg-emerald-50", text: "text-emerald-700" },
+    MANAGER: { bg: "bg-indigo-50", text: "text-indigo-700" },
+    DEVELOPER: { bg: "bg-purple-50", text: "text-purple-700" },
 };
 
 // ============================================
@@ -158,7 +134,6 @@ function getWeekDates(): Date[] {
     const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
     const monday = new Date(today);
     monday.setDate(today.getDate() + mondayOffset);
-
     return Array.from({ length: 5 }, (_, i) => {
         const d = new Date(monday);
         d.setDate(monday.getDate() + i);
@@ -187,7 +162,7 @@ function getInitials(name: string): string {
 }
 
 // ============================================
-// STAT CARD COMPONENT
+// PREMIUM STAT CARD
 // ============================================
 
 function StatCard({
@@ -196,61 +171,47 @@ function StatCard({
     value,
     subValue,
     trend,
-    color,
+    accent,
 }: {
     icon: React.ElementType;
     label: string;
     value: string | number;
     subValue?: string;
     trend?: { value: number; isPositive: boolean };
-    color: "indigo" | "emerald" | "amber" | "rose" | "blue" | "purple";
+    accent: string; // gradient classes
 }) {
-    const colors = {
-        indigo: "from-indigo-500 to-indigo-600",
-        emerald: "from-emerald-500 to-emerald-600",
-        amber: "from-amber-500 to-amber-600",
-        rose: "from-rose-500 to-rose-600",
-        blue: "from-blue-500 to-blue-600",
-        purple: "from-purple-500 to-purple-600",
-    };
-
     return (
-        <div className="relative overflow-hidden bg-white rounded-2xl border border-slate-200 p-5 group hover:shadow-lg hover:shadow-slate-200/50 transition-all duration-300">
+        <div className="team-stat-card group">
             <div className="flex items-start justify-between">
-                <div>
-                    <p className="text-sm font-medium text-slate-500 mb-1">{label}</p>
-                    <p className="text-3xl font-bold text-slate-900">{value}</p>
+                <div className="min-w-0">
+                    <p className="text-[13px] font-medium text-slate-500">{label}</p>
+                    <p className="text-[2rem] font-extrabold text-slate-900 leading-tight tracking-tight mt-1">{value}</p>
                     {subValue && (
-                        <p className="text-sm text-slate-400 mt-1">{subValue}</p>
+                        <p className="text-[13px] text-slate-400 mt-1">{subValue}</p>
                     )}
                     {trend && (
                         <div className={cn(
-                            "flex items-center gap-1 mt-2 text-sm font-medium",
-                            trend.isPositive ? "text-emerald-600" : "text-rose-600"
+                            "inline-flex items-center gap-1 mt-2 text-[13px] font-semibold px-2 py-0.5 rounded-md",
+                            trend.isPositive
+                                ? "text-emerald-700 bg-emerald-50"
+                                : "text-rose-700 bg-rose-50"
                         )}>
                             {trend.isPositive ? (
-                                <ArrowUpRight className="w-4 h-4" />
+                                <ArrowUpRight className="w-3.5 h-3.5" />
                             ) : (
-                                <ArrowDownRight className="w-4 h-4" />
+                                <ArrowDownRight className="w-3.5 h-3.5" />
                             )}
-                            <span>{trend.value}%</span>
-                            <span className="text-slate-400 font-normal">vs semaine dernière</span>
+                            {trend.value}%
                         </div>
                     )}
                 </div>
                 <div className={cn(
-                    "w-12 h-12 rounded-xl bg-gradient-to-br flex items-center justify-center shadow-lg",
-                    colors[color]
+                    "w-12 h-12 rounded-2xl bg-gradient-to-br flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300",
+                    accent
                 )}>
-                    <Icon className="w-6 h-6 text-white" />
+                    <Icon className="w-5.5 h-5.5 text-white" />
                 </div>
             </div>
-
-            {/* Decorative gradient */}
-            <div className={cn(
-                "absolute -right-4 -bottom-4 w-24 h-24 rounded-full opacity-10 bg-gradient-to-br",
-                colors[color]
-            )} />
         </div>
     );
 }
@@ -259,7 +220,7 @@ function StatCard({
 // HOURS BREAKDOWN BAR
 // ============================================
 
-function HoursBreakdownBar({
+function HoursBar({
     scheduled,
     completed,
     maxHours = 40,
@@ -268,27 +229,25 @@ function HoursBreakdownBar({
     completed: number;
     maxHours?: number;
 }) {
-    const scheduledPercent = Math.min((scheduled / maxHours) * 100, 100);
-    const completedPercent = Math.min((completed / maxHours) * 100, 100);
+    const scheduledPct = Math.min((scheduled / maxHours) * 100, 100);
+    const completedPct = Math.min((completed / maxHours) * 100, 100);
 
     return (
-        <div className="space-y-2">
+        <div className="space-y-1.5">
             <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500">Heures cette semaine</span>
-                <span className="font-medium text-slate-700">
+                <span className="text-slate-500">Heures</span>
+                <span className="font-medium text-slate-700 tabular-nums">
                     {formatHours(completed)} / {formatHours(scheduled)}
                 </span>
             </div>
             <div className="relative h-2 bg-slate-100 rounded-full overflow-hidden">
-                {/* Scheduled (background) */}
                 <div
-                    className="absolute inset-y-0 left-0 bg-indigo-200 rounded-full transition-all duration-500"
-                    style={{ width: `${scheduledPercent}%` }}
+                    className="absolute inset-y-0 left-0 bg-indigo-200 rounded-full transition-all duration-700"
+                    style={{ width: `${scheduledPct}%` }}
                 />
-                {/* Completed (foreground) */}
                 <div
-                    className="absolute inset-y-0 left-0 bg-gradient-to-r from-indigo-500 to-indigo-600 rounded-full transition-all duration-500"
-                    style={{ width: `${completedPercent}%` }}
+                    className="absolute inset-y-0 left-0 bg-gradient-to-r from-indigo-500 to-indigo-400 rounded-full transition-all duration-700"
+                    style={{ width: `${completedPct}%` }}
                 />
             </div>
         </div>
@@ -296,30 +255,24 @@ function HoursBreakdownBar({
 }
 
 // ============================================
-// DAILY HOURS CHART
+// MINI DAILY CHART
 // ============================================
 
-function DailyHoursChart({
-    data,
-}: {
-    data: { day: string; scheduled: number; completed: number }[];
-}) {
-    const maxHours = Math.max(...data.map(d => Math.max(d.scheduled, d.completed)), 8);
+function MiniDailyChart({ data }: { data: { day: string; scheduled: number; completed: number }[] }) {
+    const max = Math.max(...data.map(d => Math.max(d.scheduled, d.completed)), 4);
 
     return (
-        <div className="flex items-end justify-between gap-1 h-16">
+        <div className="flex items-end justify-between gap-1.5 h-14">
             {data.map((d, i) => (
                 <div key={`${d.day}-${i}`} className="flex-1 flex flex-col items-center gap-1">
-                    <div className="w-full flex items-end justify-center gap-0.5 h-12">
-                        {/* Scheduled bar */}
+                    <div className="w-full flex items-end justify-center gap-px h-10">
                         <div
-                            className="w-2 bg-indigo-100 rounded-t transition-all duration-300"
-                            style={{ height: `${(d.scheduled / maxHours) * 100}%` }}
+                            className="w-[5px] bg-indigo-100 rounded-t-sm transition-all duration-500"
+                            style={{ height: `${Math.max((d.scheduled / max) * 100, 4)}%` }}
                         />
-                        {/* Completed bar */}
                         <div
-                            className="w-2 bg-gradient-to-t from-indigo-500 to-indigo-400 rounded-t transition-all duration-300"
-                            style={{ height: `${(d.completed / maxHours) * 100}%` }}
+                            className="w-[5px] bg-gradient-to-t from-indigo-500 to-indigo-400 rounded-t-sm transition-all duration-500"
+                            style={{ height: `${Math.max((d.completed / max) * 100, 4)}%` }}
                         />
                     </div>
                     <span className="text-[10px] text-slate-400 font-medium">{d.day}</span>
@@ -336,7 +289,7 @@ function DailyHoursChart({
 function RankBadge({ rank }: { rank: number }) {
     if (rank === 1) {
         return (
-            <div className="flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-amber-400 to-yellow-400 rounded-full text-white text-xs font-bold shadow-lg shadow-amber-200">
+            <div className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-amber-400 to-yellow-400 rounded-full text-white text-xs font-bold shadow-md shadow-amber-300/30">
                 <Crown className="w-3 h-3" />
                 <span>#1</span>
             </div>
@@ -344,7 +297,7 @@ function RankBadge({ rank }: { rank: number }) {
     }
     if (rank === 2) {
         return (
-            <div className="flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-slate-300 to-slate-400 rounded-full text-white text-xs font-bold">
+            <div className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-slate-300 to-slate-400 rounded-full text-white text-xs font-bold">
                 <Medal className="w-3 h-3" />
                 <span>#2</span>
             </div>
@@ -352,36 +305,21 @@ function RankBadge({ rank }: { rank: number }) {
     }
     if (rank === 3) {
         return (
-            <div className="flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-amber-600 to-amber-700 rounded-full text-white text-xs font-bold">
+            <div className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-orange-400 to-amber-500 rounded-full text-white text-xs font-bold">
                 <Award className="w-3 h-3" />
                 <span>#3</span>
             </div>
         );
     }
     return (
-        <div className="px-2 py-1 bg-slate-100 rounded-full text-slate-600 text-xs font-medium">
+        <div className="px-2.5 py-1 bg-slate-100 rounded-full text-slate-500 text-xs font-semibold">
             #{rank}
         </div>
     );
 }
 
 // ============================================
-// STREAK BADGE
-// ============================================
-
-function StreakBadge({ streak }: { streak: number }) {
-    if (streak === 0) return null;
-
-    return (
-        <div className="flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-orange-500 to-red-500 rounded-full text-white text-xs font-bold">
-            <Flame className="w-3 h-3" />
-            <span>{streak}j</span>
-        </div>
-    );
-}
-
-// ============================================
-// MEMBER CARD
+// MEMBER CARD — Apple-inspired design
 // ============================================
 
 function MemberCard({
@@ -395,6 +333,7 @@ function MemberCard({
         scheduledHoursThisWeek: 0,
         completedHoursThisWeek: 0,
         callsThisWeek: 0,
+        callsToday: 0,
         avgCallsPerHour: 0,
         meetingsBookedThisWeek: 0,
         conversionRate: 0,
@@ -411,122 +350,199 @@ function MemberCard({
         ],
     };
 
-    const roleConfig = ROLE_COLORS[member.role] || ROLE_COLORS.SDR;
-    const statusConfig = STATUS_CONFIG[metrics.status] ?? STATUS_CONFIG.offline;
+    const roleStyle = ROLE_STYLES[member.role] || ROLE_STYLES.SDR;
+    const statusCfg = STATUS_CONFIG[metrics.status] ?? STATUS_CONFIG.offline;
+
+    // Avatar gradient per role
+    const avatarGradient = member.role === "BUSINESS_DEVELOPER"
+        ? "from-emerald-100 to-emerald-200 text-emerald-700"
+        : "from-indigo-100 to-indigo-200 text-indigo-700";
 
     return (
-        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-xl hover:shadow-slate-200/50 transition-all duration-300 group">
-            {/* Header with status */}
-            <div className="relative p-5 pb-3">
-                <div className="flex items-start gap-4">
-                    {/* Avatar + status dot */}
-                    <div className="relative flex-shrink-0">
-                        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center text-lg font-bold text-indigo-600">
-                            {getInitials(member.name)}
-                        </div>
-                        {/* Status indicator (En ligne / Hors ligne from activity chrono) */}
-                        <span
-                            className={cn(
-                                "absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-2 border-white shadow-sm",
-                                statusConfig.color,
-                                statusConfig.pulse && "animate-pulse"
-                            )}
-                            title={statusConfig.label}
-                            aria-hidden
-                        />
+        <div
+            onClick={onViewDetails}
+            className="team-member-card group cursor-pointer"
+        >
+            {/* Top section: avatar + basic info */}
+            <div className="flex items-start gap-4 p-5 pb-4">
+                {/* Avatar + status */}
+                <div className="relative flex-shrink-0">
+                    <div className={cn(
+                        "w-14 h-14 rounded-2xl bg-gradient-to-br flex items-center justify-center text-lg font-bold transition-transform duration-300 group-hover:scale-105",
+                        avatarGradient
+                    )}>
+                        {getInitials(member.name)}
                     </div>
-
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                            <h3 className="font-semibold text-slate-900 truncate">{member.name}</h3>
-                            {metrics.weeklyRank > 0 && metrics.weeklyRank <= 3 && (
-                                <RankBadge rank={metrics.weeklyRank} />
-                            )}
-                            <StreakBadge streak={metrics.currentStreak} />
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span className={cn(
-                                "px-2 py-0.5 rounded-full text-xs font-medium",
-                                roleConfig.bg, roleConfig.text
-                            )}>
-                                {ROLE_LABELS[member.role] || member.role}
-                            </span>
-                            <span className="text-xs text-slate-400">{statusConfig.label}</span>
-                        </div>
-                    </div>
-
-                    {/* Actions */}
-                    <button
-                        onClick={onViewDetails}
-                        className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 opacity-0 group-hover:opacity-100 transition-all"
-                    >
-                        <Eye className="w-4 h-4" />
-                    </button>
+                    <span
+                        className={cn(
+                            "absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[2.5px] border-white",
+                            statusCfg.color,
+                            statusCfg.pulse && "animate-pulse"
+                        )}
+                        title={statusCfg.label}
+                    />
                 </div>
 
-                {/* Current mission */}
-                {metrics.currentMission && (
-                    <div className="mt-3 px-3 py-2 bg-indigo-50 rounded-lg border border-indigo-100">
-                        <div className="flex items-center gap-2 text-sm">
-                            <Activity className="w-4 h-4 text-indigo-500 animate-pulse" />
-                            <span className="text-indigo-700 font-medium truncate">
-                                {metrics.currentMission}
-                            </span>
-                        </div>
+                {/* Name + role + status */}
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                        <h3 className="text-[15px] font-bold text-slate-900 truncate">{member.name}</h3>
+                        {metrics.weeklyRank > 0 && metrics.weeklyRank <= 3 && (
+                            <RankBadge rank={metrics.weeklyRank} />
+                        )}
                     </div>
-                )}
+                    <div className="flex items-center gap-2">
+                        <span className={cn(
+                            "px-2 py-0.5 rounded-md text-[11px] font-semibold",
+                            roleStyle.bg, roleStyle.text
+                        )}>
+                            {ROLE_LABELS[member.role] || member.role}
+                        </span>
+                        <span className="text-xs text-slate-400">{statusCfg.label}</span>
+                    </div>
+                </div>
+
+                {/* View details arrow */}
+                <div className="p-2 rounded-xl text-slate-300 group-hover:text-indigo-500 group-hover:bg-indigo-50 transition-all duration-200 opacity-0 group-hover:opacity-100">
+                    <ChevronRight className="w-4 h-4" />
+                </div>
             </div>
 
-            {/* Stats grid */}
-            <div className="px-5 pb-4">
-                <div className="grid grid-cols-3 gap-3 mb-4">
-                    {/* Calls */}
-                    <div className="text-center p-3 bg-blue-50 rounded-xl">
-                        <Phone className="w-4 h-4 text-blue-500 mx-auto mb-1" />
-                        <p className="text-lg font-bold text-slate-900">{metrics.callsThisWeek}</p>
-                        <p className="text-[10px] text-slate-500">Appels</p>
-                    </div>
-                    {/* Meetings */}
-                    <div className="text-center p-3 bg-emerald-50 rounded-xl">
-                        <Calendar className="w-4 h-4 text-emerald-500 mx-auto mb-1" />
-                        <p className="text-lg font-bold text-slate-900">{metrics.meetingsBookedThisWeek}</p>
-                        <p className="text-[10px] text-slate-500">RDV</p>
-                    </div>
-                    {/* Conversion */}
-                    <div className="text-center p-3 bg-amber-50 rounded-xl">
-                        <TrendingUp className="w-4 h-4 text-amber-500 mx-auto mb-1" />
-                        <p className="text-lg font-bold text-slate-900">{metrics.conversionRate}%</p>
-                        <p className="text-[10px] text-slate-500">Conversion</p>
+            {/* Current mission banner */}
+            {metrics.currentMission && (
+                <div className="mx-5 mb-3 px-3 py-2 bg-indigo-50 rounded-xl border border-indigo-100/50">
+                    <div className="flex items-center gap-2">
+                        <Activity className="w-3.5 h-3.5 text-indigo-500 animate-pulse flex-shrink-0" />
+                        <span className="text-[13px] text-indigo-700 font-medium truncate">
+                            {metrics.currentMission}
+                        </span>
                     </div>
                 </div>
+            )}
 
-                {/* Hours breakdown */}
-                <HoursBreakdownBar
+            {/* Quick stats — 3 columns */}
+            <div className="px-5 pb-4">
+                <div className="grid grid-cols-3 gap-2">
+                    <div className="text-center py-2.5 bg-slate-50 rounded-xl">
+                        <div className="flex items-center justify-center mb-1">
+                            <Phone className="w-3.5 h-3.5 text-blue-500" />
+                        </div>
+                        <p className="text-lg font-bold text-slate-900 leading-none">{metrics.callsThisWeek}</p>
+                        <p className="text-[11px] text-slate-400 mt-1">Appels</p>
+                    </div>
+                    <div className="text-center py-2.5 bg-slate-50 rounded-xl">
+                        <div className="flex items-center justify-center mb-1">
+                            <Calendar className="w-3.5 h-3.5 text-emerald-500" />
+                        </div>
+                        <p className="text-lg font-bold text-slate-900 leading-none">{metrics.meetingsBookedThisWeek}</p>
+                        <p className="text-[11px] text-slate-400 mt-1">RDV</p>
+                    </div>
+                    <div className="text-center py-2.5 bg-slate-50 rounded-xl">
+                        <div className="flex items-center justify-center mb-1">
+                            <TrendingUp className="w-3.5 h-3.5 text-amber-500" />
+                        </div>
+                        <p className="text-lg font-bold text-slate-900 leading-none">{metrics.conversionRate}%</p>
+                        <p className="text-[11px] text-slate-400 mt-1">Conv.</p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Hours + mini chart */}
+            <div className="px-5 pb-4 space-y-3">
+                <HoursBar
                     scheduled={metrics.scheduledHoursThisWeek}
                     completed={metrics.completedHoursThisWeek}
                 />
+                <MiniDailyChart data={metrics.dailyHours} />
             </div>
 
-            {/* Daily chart */}
-            <div className="px-5 pb-4 border-t border-slate-100 pt-4">
-                <DailyHoursChart data={metrics.dailyHours} />
-            </div>
-
-            {/* Footer with actions */}
-            <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+            {/* Footer */}
+            <div className="px-5 py-3 bg-slate-50/80 border-t border-slate-100 flex items-center justify-between rounded-b-2xl">
                 <div className="flex items-center gap-2 text-xs text-slate-400">
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>{formatHours(metrics.avgCallsPerHour)} appels/h</span>
+                    <Zap className="w-3.5 h-3.5" />
+                    <span className="tabular-nums">{metrics.avgCallsPerHour} appels/h</span>
                 </div>
-                <button
-                    onClick={onViewDetails}
-                    className="flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 transition-colors"
-                >
+                <span className="text-xs font-semibold text-indigo-600 group-hover:text-indigo-700 transition-colors flex items-center gap-1">
                     Voir détails
-                    <ChevronRight className="w-3.5 h-3.5" />
-                </button>
+                    <ChevronRight className="w-3 h-3" />
+                </span>
             </div>
+        </div>
+    );
+}
+
+// ============================================
+// MEMBER LIST ROW — Compact alternative view
+// ============================================
+
+function MemberListRow({
+    member,
+    onViewDetails,
+}: {
+    member: TeamMember;
+    onViewDetails: () => void;
+}) {
+    const metrics = member.metrics;
+    const statusCfg = STATUS_CONFIG[metrics?.status ?? "offline"];
+    const roleStyle = ROLE_STYLES[member.role] || ROLE_STYLES.SDR;
+
+    return (
+        <div
+            onClick={onViewDetails}
+            className="team-list-row group cursor-pointer"
+        >
+            {/* Avatar */}
+            <div className="relative flex-shrink-0">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center text-sm font-bold text-indigo-700">
+                    {getInitials(member.name)}
+                </div>
+                <span className={cn(
+                    "absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white",
+                    statusCfg.color
+                )} />
+            </div>
+
+            {/* Name + role */}
+            <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                    <span className="text-[14px] font-semibold text-slate-900 truncate">{member.name}</span>
+                    {metrics?.weeklyRank && metrics.weeklyRank <= 3 && (
+                        <RankBadge rank={metrics.weeklyRank} />
+                    )}
+                </div>
+                <div className="flex items-center gap-2 mt-0.5">
+                    <span className={cn("text-[11px] font-semibold px-1.5 py-0.5 rounded", roleStyle.bg, roleStyle.text)}>
+                        {ROLE_LABELS[member.role] || member.role}
+                    </span>
+                    {metrics?.currentMission && (
+                        <span className="text-xs text-indigo-600 truncate max-w-[140px]">
+                            {metrics.currentMission}
+                        </span>
+                    )}
+                </div>
+            </div>
+
+            {/* Stats */}
+            <div className="flex items-center gap-6">
+                <div className="text-center">
+                    <p className="text-[15px] font-bold text-slate-900 tabular-nums">{metrics?.callsThisWeek ?? 0}</p>
+                    <p className="text-[10px] text-slate-400">Appels</p>
+                </div>
+                <div className="text-center">
+                    <p className="text-[15px] font-bold text-slate-900 tabular-nums">{metrics?.meetingsBookedThisWeek ?? 0}</p>
+                    <p className="text-[10px] text-slate-400">RDV</p>
+                </div>
+                <div className="text-center">
+                    <p className="text-[15px] font-bold text-slate-900 tabular-nums">{metrics?.conversionRate ?? 0}%</p>
+                    <p className="text-[10px] text-slate-400">Conv.</p>
+                </div>
+                <div className="text-center min-w-[60px]">
+                    <p className="text-[15px] font-bold text-slate-900 tabular-nums">{formatHours(metrics?.completedHoursThisWeek ?? 0)}</p>
+                    <p className="text-[10px] text-slate-400">Heures</p>
+                </div>
+            </div>
+
+            <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 transition-colors flex-shrink-0" />
         </div>
     );
 }
@@ -549,14 +565,10 @@ function Leaderboard({
                 const am = a.metrics!;
                 const bm = b.metrics!;
                 switch (metric) {
-                    case "calls":
-                        return bm.callsThisWeek - am.callsThisWeek;
-                    case "meetings":
-                        return bm.meetingsBookedThisWeek - am.meetingsBookedThisWeek;
-                    case "hours":
-                        return bm.completedHoursThisWeek - am.completedHoursThisWeek;
-                    default:
-                        return 0;
+                    case "calls": return bm.callsThisWeek - am.callsThisWeek;
+                    case "meetings": return bm.meetingsBookedThisWeek - am.meetingsBookedThisWeek;
+                    case "hours": return bm.completedHoursThisWeek - am.completedHoursThisWeek;
+                    default: return 0;
                 }
             })
             .slice(0, 5);
@@ -564,12 +576,17 @@ function Leaderboard({
 
     const getValue = (m: TeamMemberMetrics) => {
         switch (metric) {
-            case "calls":
-                return m.callsThisWeek;
-            case "meetings":
-                return m.meetingsBookedThisWeek;
-            case "hours":
-                return formatHours(m.completedHoursThisWeek);
+            case "calls": return m.callsThisWeek;
+            case "meetings": return m.meetingsBookedThisWeek;
+            case "hours": return formatHours(m.completedHoursThisWeek);
+        }
+    };
+
+    const getUnit = () => {
+        switch (metric) {
+            case "calls": return "appels";
+            case "meetings": return "RDV";
+            case "hours": return "";
         }
     };
 
@@ -577,12 +594,9 @@ function Leaderboard({
         ...sorted.map(m => {
             const metrics = m.metrics!;
             switch (metric) {
-                case "calls":
-                    return metrics.callsThisWeek;
-                case "meetings":
-                    return metrics.meetingsBookedThisWeek;
-                case "hours":
-                    return metrics.completedHoursThisWeek;
+                case "calls": return metrics.callsThisWeek;
+                case "meetings": return metrics.meetingsBookedThisWeek;
+                case "hours": return metrics.completedHoursThisWeek;
             }
         }),
         1
@@ -590,6 +604,9 @@ function Leaderboard({
 
     return (
         <div className="space-y-3">
+            {sorted.length === 0 && (
+                <p className="text-[13px] text-slate-400 py-4 text-center">Pas encore de données</p>
+            )}
             {sorted.map((member, index) => {
                 const metrics = member.metrics!;
                 const numericValue = metric === "hours"
@@ -600,23 +617,28 @@ function Leaderboard({
                 const percentage = (numericValue / maxValue) * 100;
 
                 return (
-                    <div key={member.id} className="flex items-center gap-3">
+                    <div key={member.id} className="flex items-center gap-3 py-1.5">
                         <RankBadge rank={index + 1} />
-                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center text-xs font-bold text-indigo-600">
+                        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center text-xs font-bold text-indigo-700 flex-shrink-0">
                             {getInitials(member.name)}
                         </div>
                         <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between mb-1">
-                                <span className="text-sm font-medium text-slate-900 truncate">
+                            <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-[13px] font-semibold text-slate-900 truncate">
                                     {member.name}
                                 </span>
-                                <span className="text-sm font-bold text-indigo-600">
-                                    {getValue(metrics)}
-                                </span>
+                                <div className="flex items-center gap-1.5">
+                                    <span className="text-[14px] font-bold text-indigo-600 tabular-nums">
+                                        {getValue(metrics)}
+                                    </span>
+                                    {getUnit() && (
+                                        <span className="text-[11px] text-slate-400">{getUnit()}</span>
+                                    )}
+                                </div>
                             </div>
                             <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
                                 <div
-                                    className="h-full bg-gradient-to-r from-indigo-500 to-indigo-400 rounded-full transition-all duration-500"
+                                    className="h-full bg-gradient-to-r from-indigo-500 to-indigo-400 rounded-full transition-all duration-700"
                                     style={{ width: `${percentage}%` }}
                                 />
                             </div>
@@ -634,63 +656,60 @@ function Leaderboard({
 
 function UtilizationHeatmap({
     members,
-    weekDates,
 }: {
     members: TeamMember[];
-    weekDates: Date[];
 }) {
-    const dayLabels = ["L", "M", "M", "J", "V"];
+    const dayLabels = ["Lun", "Mar", "Mer", "Jeu", "Ven"];
 
     return (
-        <div className="space-y-2">
+        <div className="space-y-2.5">
             {/* Header */}
-            <div className="flex items-center gap-2 pl-24">
+            <div className="flex items-center gap-2 pl-28">
                 {dayLabels.map((day, i) => (
-                    <div key={i} className="flex-1 text-center text-xs font-medium text-slate-400">
+                    <div key={i} className="flex-1 text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
                         {day}
                     </div>
                 ))}
             </div>
 
             {/* Rows */}
-            {members.slice(0, 6).map((member) => {
+            {members.slice(0, 8).map((member) => {
                 const dailyHours = member.metrics?.dailyHours || [];
 
                 return (
                     <div key={member.id} className="flex items-center gap-2">
-                        <div className="w-24 flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center text-[10px] font-bold text-indigo-600">
+                        <div className="w-28 flex items-center gap-2.5">
+                            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center text-[10px] font-bold text-indigo-700 flex-shrink-0">
                                 {getInitials(member.name)}
                             </div>
-                            <span className="text-xs text-slate-600 truncate">
+                            <span className="text-[13px] text-slate-700 truncate font-medium">
                                 {member.name.split(" ")[0]}
                             </span>
                         </div>
                         {dailyHours.map((d, i) => {
-                            const utilizationPercent = d.scheduled > 0
+                            const pct = d.scheduled > 0
                                 ? (d.completed / d.scheduled) * 100
                                 : 0;
 
-                            let bgColor = "bg-slate-50";
+                            let bgClass = "bg-slate-50 text-slate-400";
                             if (d.scheduled > 0) {
-                                if (utilizationPercent >= 100) bgColor = "bg-emerald-400";
-                                else if (utilizationPercent >= 75) bgColor = "bg-emerald-300";
-                                else if (utilizationPercent >= 50) bgColor = "bg-amber-300";
-                                else if (utilizationPercent >= 25) bgColor = "bg-amber-200";
-                                else bgColor = "bg-rose-200";
+                                if (pct >= 100) bgClass = "bg-emerald-400 text-white";
+                                else if (pct >= 75) bgClass = "bg-emerald-200 text-emerald-800";
+                                else if (pct >= 50) bgClass = "bg-amber-200 text-amber-800";
+                                else if (pct >= 25) bgClass = "bg-amber-100 text-amber-700";
+                                else bgClass = "bg-rose-100 text-rose-700";
                             }
 
                             return (
                                 <div
                                     key={i}
                                     className={cn(
-                                        "flex-1 h-8 rounded-md flex items-center justify-center text-[10px] font-medium transition-colors",
-                                        bgColor,
-                                        d.scheduled > 0 ? "text-white" : "text-slate-400"
+                                        "flex-1 h-9 rounded-lg flex items-center justify-center text-[11px] font-semibold transition-colors",
+                                        bgClass
                                     )}
-                                    title={`${d.completed}h / ${d.scheduled}h`}
+                                    title={`${formatHours(d.completed)} / ${formatHours(d.scheduled)}`}
                                 >
-                                    {d.scheduled > 0 ? `${Math.round(utilizationPercent)}%` : "-"}
+                                    {d.scheduled > 0 ? `${Math.round(pct)}%` : "–"}
                                 </div>
                             );
                         })}
@@ -699,28 +718,20 @@ function UtilizationHeatmap({
             })}
 
             {/* Legend */}
-            <div className="flex items-center justify-end gap-4 pt-2 border-t border-slate-100 mt-3">
-                <span className="text-[10px] text-slate-400">Utilisation:</span>
-                <div className="flex items-center gap-1">
-                    <div className="w-4 h-4 rounded bg-rose-200" />
-                    <span className="text-[10px] text-slate-500">0-25%</span>
-                </div>
-                <div className="flex items-center gap-1">
-                    <div className="w-4 h-4 rounded bg-amber-200" />
-                    <span className="text-[10px] text-slate-500">25-50%</span>
-                </div>
-                <div className="flex items-center gap-1">
-                    <div className="w-4 h-4 rounded bg-amber-300" />
-                    <span className="text-[10px] text-slate-500">50-75%</span>
-                </div>
-                <div className="flex items-center gap-1">
-                    <div className="w-4 h-4 rounded bg-emerald-300" />
-                    <span className="text-[10px] text-slate-500">75-100%</span>
-                </div>
-                <div className="flex items-center gap-1">
-                    <div className="w-4 h-4 rounded bg-emerald-400" />
-                    <span className="text-[10px] text-slate-500">100%+</span>
-                </div>
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <span className="text-[11px] text-slate-400">Utilisation :</span>
+                {[
+                    { bg: "bg-rose-100", label: "<25%" },
+                    { bg: "bg-amber-100", label: "25-50%" },
+                    { bg: "bg-amber-200", label: "50-75%" },
+                    { bg: "bg-emerald-200", label: "75-100%" },
+                    { bg: "bg-emerald-400", label: "100%+" },
+                ].map(item => (
+                    <div key={item.label} className="flex items-center gap-1">
+                        <div className={cn("w-3.5 h-3.5 rounded", item.bg)} />
+                        <span className="text-[10px] text-slate-500">{item.label}</span>
+                    </div>
+                ))}
             </div>
         </div>
     );
@@ -742,26 +753,29 @@ function ActivityFeed({
     };
 
     return (
-        <div className="space-y-3">
+        <div className="space-y-2">
+            {activities.length === 0 && (
+                <p className="text-[13px] text-slate-400 py-4 text-center">Aucune activité récente</p>
+            )}
             {activities.map((activity) => {
                 const config = typeConfig[activity.type];
                 const Icon = config.icon;
 
                 return (
-                    <div key={activity.id} className="flex items-start gap-3">
+                    <div key={activity.id} className="flex items-center gap-3 py-2 px-2 -mx-2 rounded-xl hover:bg-slate-50 transition-colors">
                         <div className={cn(
-                            "w-8 h-8 rounded-lg flex items-center justify-center",
+                            "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0",
                             config.bg
                         )}>
-                            <Icon className={cn("w-4 h-4", config.color)} />
+                            <Icon className={cn("w-3.5 h-3.5", config.color)} />
                         </div>
-                        <div className="flex-1">
-                            <p className="text-sm text-slate-700">
-                                <span className="font-medium">{activity.user}</span>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-[13px] text-slate-700 truncate">
+                                <span className="font-semibold">{activity.user}</span>
                                 {" "}{activity.action}
                             </p>
-                            <p className="text-xs text-slate-400">{activity.time}</p>
                         </div>
+                        <span className="text-[12px] text-slate-400 tabular-nums whitespace-nowrap">{activity.time}</span>
                     </div>
                 );
             })}
@@ -782,8 +796,9 @@ export default function TeamDashboardPage() {
     const [searchQuery, setSearchQuery] = useState("");
     const [roleFilter, setRoleFilter] = useState<string>("all");
     const [leaderboardMetric, setLeaderboardMetric] = useState<"calls" | "meetings" | "hours">("calls");
+    const [viewMode, setViewMode] = useState<"cards" | "list">("cards");
+    const [mounted, setMounted] = useState(false);
 
-    // Trend data state
     const [trendData, setTrendData] = useState<{
         hours: { change: number; isPositive: boolean };
         calls: { change: number; isPositive: boolean };
@@ -792,6 +807,8 @@ export default function TeamDashboardPage() {
 
     const weekDates = useMemo(() => getWeekDates(), []);
 
+    useEffect(() => { setMounted(true); }, []);
+
     // ============================================
     // FETCH DATA
     // ============================================
@@ -799,7 +816,6 @@ export default function TeamDashboardPage() {
     const fetchData = useCallback(async () => {
         setIsLoading(true);
         try {
-            // Fetch team members (SDRs and BDs), trend data, and daily activity
             const [usersRes, blocksRes, actionsRes, activitiesRes, trendsRes, dailyActivityRes] = await Promise.all([
                 fetch("/api/users?role=SDR,BUSINESS_DEVELOPER"),
                 fetch(`/api/planning?startDate=${formatDate(weekDates[0])}&endDate=${formatDate(weekDates[4])}`),
@@ -824,28 +840,23 @@ export default function TeamDashboardPage() {
             if (usersJson.success) {
                 teamMembers = usersJson.data.users || usersJson.data || [];
             }
-
             if (blocksJson.success) {
                 scheduleBlocks = blocksJson.data.blocks || blocksJson.data || [];
             }
-
             if (actionsJson.success) {
                 actionStats = actionsJson.data || {};
             }
-
             if (trendsJson.success) {
                 setTrendData(trendsJson.data);
             }
-
             if (dailyActivityJson.success) {
                 dailyActivityData = dailyActivityJson.data || {};
             }
-
             if (activitiesJson.success) {
                 setRecentActivities(activitiesJson.data || []);
             }
 
-            // Fetch SDR activity status in one batch call (avoids N+1)
+            // Fetch SDR activity status
             const sdrAndBd = teamMembers.filter(m => ["SDR", "BUSINESS_DEVELOPER"].includes(m.role));
             const activityByUserId = new Map<string, boolean>();
             if (sdrAndBd.length > 0) {
@@ -858,9 +869,7 @@ export default function TeamDashboardPage() {
                             activityByUserId.set(uid, v?.isActive ?? false);
                         }
                     }
-                } catch {
-                    // Fallback: all offline
-                }
+                } catch { /* fallback: all offline */ }
             }
 
             // Compute metrics for each member
@@ -868,13 +877,10 @@ export default function TeamDashboardPage() {
                 const memberBlocks = scheduleBlocks.filter(b => b.sdrId === member.id);
                 const memberStats = actionStats[member.id] || {};
 
-                // Calculate scheduled hours and REAL completed hours per day
                 const dailyHours = weekDates.map((date, dayIndex) => {
                     const dateStr = formatDate(date);
                     const dayBlocks = memberBlocks.filter(b => b.date.split("T")[0] === dateStr);
                     const scheduled = dayBlocks.reduce((sum, b) => sum + calcHours(b.startTime, b.endTime), 0);
-
-                    // Get REAL completed hours from activity data
                     const memberActivityData = dailyActivityData[member.id] || {};
                     const completed = memberActivityData[dateStr] || 0;
 
@@ -889,7 +895,6 @@ export default function TeamDashboardPage() {
                 const scheduledHoursThisWeek = dailyHours.reduce((sum, d) => sum + d.scheduled, 0);
                 const completedHoursThisWeek = dailyHours.reduce((sum, d) => sum + d.completed, 0);
 
-                // Determine status: prefer real-time chrono (activity API), then schedule blocks
                 const now = new Date();
                 const currentDateStr = formatDate(now);
                 const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
@@ -914,7 +919,6 @@ export default function TeamDashboardPage() {
                     status = hasBlockToday ? "away" : "offline";
                 }
 
-                // Use REAL data from the API - fallback to member._count if no stats
                 const callsThisWeek = memberStats.callsThisWeek || member._count?.actions || 0;
                 const meetingsBookedThisWeek = memberStats.meetingsThisWeek || 0;
                 const callsToday = memberStats.callsToday || 0;
@@ -942,21 +946,20 @@ export default function TeamDashboardPage() {
                         activeBlockId: activeBlock?.id || null,
                         status,
                         dailyHours,
-                        currentStreak: 0, // Would need streak tracking in DB
+                        currentStreak: 0,
                         weeklyRank: index + 1,
                         monthlyScore: memberStats.monthlyScore || (callsThisWeek + meetingsBookedThisWeek * 10),
                     },
                 };
             });
 
-            // Sort by weekly performance for ranking
+            // Sort by weekly performance
             membersWithMetrics.sort((a, b) => {
                 const aScore = (a.metrics?.callsThisWeek || 0) + (a.metrics?.meetingsBookedThisWeek || 0) * 10;
                 const bScore = (b.metrics?.callsThisWeek || 0) + (b.metrics?.meetingsBookedThisWeek || 0) * 10;
                 return bScore - aScore;
             });
 
-            // Update ranks
             membersWithMetrics.forEach((m, i) => {
                 if (m.metrics) m.metrics.weeklyRank = i + 1;
             });
@@ -1004,7 +1007,6 @@ export default function TeamDashboardPage() {
         if (stats.totalScheduledHours > 0) {
             stats.utilizationRate = Math.round((stats.totalCompletedHours / stats.totalScheduledHours) * 100);
         }
-
         if (stats.totalCalls > 0) {
             stats.avgConversionRate = Number(((stats.totalMeetings / stats.totalCalls) * 100).toFixed(1));
         }
@@ -1013,55 +1015,70 @@ export default function TeamDashboardPage() {
     }, [members]);
 
     // ============================================
-    // RENDER
+    // LOADING STATE
     // ============================================
 
     if (isLoading && members.length === 0) {
         return (
-            <div className="flex items-center justify-center py-20">
-                <div className="flex flex-col items-center gap-3">
-                    <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
-                    <p className="text-sm text-slate-500">Chargement de l'équipe...</p>
+            <div className="flex items-center justify-center py-32">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                        <Loader2 className="w-7 h-7 text-white animate-spin" />
+                    </div>
+                    <div className="text-center">
+                        <p className="text-base font-medium text-slate-700">Chargement de l'équipe</p>
+                        <p className="text-sm text-slate-400 mt-1">Récupération des données...</p>
+                    </div>
                 </div>
             </div>
         );
     }
 
+    // ============================================
+    // RENDER
+    // ============================================
+
     return (
-        <div className="space-y-6 pb-10">
-            {/* Header */}
+        <div className={`team-page space-y-6 pb-10 max-w-[1520px] mx-auto ${mounted ? "team-page-mounted" : ""}`}>
+
+            {/* ═══════════════════════════════════════
+                HEADER — Clean, Apple-style
+               ═══════════════════════════════════════ */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-900">Équipe</h1>
-                    <p className="text-sm text-slate-500 mt-1">
-                        Suivi temps réel & performance de votre équipe commerciale
+                    <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Équipe</h1>
+                    <p className="text-[14px] text-slate-500 mt-1">
+                        Suivi temps réel et performance de votre équipe commerciale
                     </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2.5">
                     <button
                         onClick={fetchData}
-                        className="p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
+                        className="p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all"
+                        title="Rafraîchir"
                     >
                         <RefreshCw className={cn("w-4 h-4 text-slate-500", isLoading && "animate-spin")} />
                     </button>
-                    <button className="p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors">
+                    <button className="p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all">
                         <Download className="w-4 h-4 text-slate-500" />
                     </button>
-                    <button className="mgr-btn-primary flex items-center gap-2 h-10 px-5 text-sm font-medium">
+                    <button className="inline-flex items-center gap-2 text-sm font-semibold px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 text-white hover:from-indigo-500 hover:to-indigo-400 shadow-md shadow-indigo-500/20 hover:shadow-lg hover:shadow-indigo-500/30 transition-all duration-200 hover:-translate-y-0.5">
                         <UserPlus className="w-4 h-4" />
-                        Ajouter un membre
+                        Ajouter
                     </button>
                 </div>
             </div>
 
-            {/* Top Stats */}
+            {/* ═══════════════════════════════════════
+                STAT CARDS — 4 KPIs
+               ═══════════════════════════════════════ */}
             <div className="grid grid-cols-4 gap-5">
                 <StatCard
                     icon={Users}
                     label="Équipe active"
                     value={`${teamStats.activeMembers}/${teamStats.totalMembers}`}
                     subValue="membres en ligne"
-                    color="indigo"
+                    accent="from-indigo-500 to-indigo-600"
                 />
                 <StatCard
                     icon={Clock}
@@ -1069,7 +1086,7 @@ export default function TeamDashboardPage() {
                     value={formatHours(teamStats.totalCompletedHours)}
                     subValue={`${teamStats.utilizationRate}% utilisation`}
                     trend={trendData?.hours ? { value: trendData.hours.change, isPositive: trendData.hours.isPositive } : undefined}
-                    color="emerald"
+                    accent="from-emerald-500 to-emerald-600"
                 />
                 <StatCard
                     icon={Phone}
@@ -1077,109 +1094,168 @@ export default function TeamDashboardPage() {
                     value={teamStats.totalCalls}
                     subValue="cette semaine"
                     trend={trendData?.calls ? { value: trendData.calls.change, isPositive: trendData.calls.isPositive } : undefined}
-                    color="blue"
+                    accent="from-blue-500 to-blue-600"
                 />
                 <StatCard
                     icon={Calendar}
-                    label="RDV bookés"
+                    label="RDV décrochés"
                     value={teamStats.totalMeetings}
-                    subValue={`${teamStats.avgConversionRate}% taux conv.`}
+                    subValue={`${teamStats.avgConversionRate}% conversion`}
                     trend={trendData?.meetings ? { value: trendData.meetings.change, isPositive: trendData.meetings.isPositive } : undefined}
-                    color="amber"
+                    accent="from-amber-500 to-amber-600"
                 />
             </div>
 
-            {/* Main content grid */}
-            <div className="grid grid-cols-3 gap-6">
-                {/* Left: Leaderboard & Heatmap */}
-                <div className="space-y-6">
+            {/* ═══════════════════════════════════════
+                MAIN CONTENT — 1/3 sidebar + 2/3 main
+               ═══════════════════════════════════════ */}
+            <div className="grid grid-cols-[1fr_2fr] gap-6">
+
+                {/* LEFT SIDEBAR: Leaderboard + Activity */}
+                <div className="space-y-5">
                     {/* Leaderboard */}
-                    <div className="bg-white rounded-2xl border border-slate-200 p-5">
+                    <div className="team-panel">
                         <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-2">
-                                <Trophy className="w-5 h-5 text-amber-500" />
-                                <h2 className="font-semibold text-slate-900">Classement</h2>
+                            <div className="flex items-center gap-2.5">
+                                <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center">
+                                    <Trophy className="w-4.5 h-4.5 text-amber-600" />
+                                </div>
+                                <h2 className="text-[15px] font-bold text-slate-900">Classement</h2>
                             </div>
-                            <select
-                                value={leaderboardMetric}
-                                onChange={(e) => setLeaderboardMetric(e.target.value as any)}
-                                className="text-xs px-2 py-1 border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500"
-                            >
-                                <option value="calls">Appels</option>
-                                <option value="meetings">RDV</option>
-                                <option value="hours">Heures</option>
-                            </select>
+                            <div className="flex items-center bg-slate-100 rounded-lg p-0.5">
+                                {(["calls", "meetings", "hours"] as const).map((m) => (
+                                    <button
+                                        key={m}
+                                        onClick={() => setLeaderboardMetric(m)}
+                                        className={cn(
+                                            "text-[11px] px-2.5 py-1.5 rounded-md font-semibold transition-all",
+                                            leaderboardMetric === m
+                                                ? "bg-white text-slate-900 shadow-sm"
+                                                : "text-slate-500 hover:text-slate-700"
+                                        )}
+                                    >
+                                        {m === "calls" ? "Appels" : m === "meetings" ? "RDV" : "Heures"}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                         <Leaderboard members={members} metric={leaderboardMetric} />
                     </div>
 
                     {/* Activity Feed */}
-                    <div className="bg-white rounded-2xl border border-slate-200 p-5">
-                        <div className="flex items-center gap-2 mb-4">
-                            <Activity className="w-5 h-5 text-indigo-500" />
-                            <h2 className="font-semibold text-slate-900">Activité récente</h2>
+                    <div className="team-panel">
+                        <div className="flex items-center gap-2.5 mb-4">
+                            <div className="w-9 h-9 rounded-xl bg-violet-50 flex items-center justify-center">
+                                <Activity className="w-4.5 h-4.5 text-violet-600" />
+                            </div>
+                            <h2 className="text-[15px] font-bold text-slate-900">Activité récente</h2>
                         </div>
                         <ActivityFeed activities={recentActivities} />
                     </div>
                 </div>
 
-                {/* Center & Right: Utilization + Team Cards */}
-                <div className="col-span-2 space-y-6">
+                {/* RIGHT MAIN: Heatmap + Search + Members */}
+                <div className="space-y-5">
+
                     {/* Utilization Heatmap */}
-                    <div className="bg-white rounded-2xl border border-slate-200 p-5">
-                        <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-2">
-                                <BarChart3 className="w-5 h-5 text-emerald-500" />
-                                <h2 className="font-semibold text-slate-900">Utilisation hebdomadaire</h2>
+                    <div className="team-panel">
+                        <div className="flex items-center justify-between mb-5">
+                            <div className="flex items-center gap-2.5">
+                                <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center">
+                                    <BarChart3 className="w-4.5 h-4.5 text-emerald-600" />
+                                </div>
+                                <h2 className="text-[15px] font-bold text-slate-900">Utilisation hebdomadaire</h2>
                             </div>
-                            <span className="text-xs text-slate-400">
+                            <span className="text-[13px] text-slate-400 font-medium">
                                 Semaine du {weekDates[0].toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
                             </span>
                         </div>
-                        <UtilizationHeatmap members={members} weekDates={weekDates} />
+                        <UtilizationHeatmap members={members} />
                     </div>
 
-                    {/* Filters */}
+                    {/* Search + Filter bar */}
                     <div className="flex items-center gap-3">
                         <div className="relative flex-1">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                             <input
                                 type="text"
                                 placeholder="Rechercher un membre..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-[14px] bg-white hover:border-slate-300 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 focus:outline-none transition-all"
                             />
                         </div>
                         <select
                             value={roleFilter}
                             onChange={(e) => setRoleFilter(e.target.value)}
-                            className="px-4 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-indigo-500"
+                            className="px-4 py-2.5 border border-slate-200 rounded-xl text-[14px] bg-white hover:border-slate-300 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 focus:outline-none transition-all min-w-[150px]"
                         >
                             <option value="all">Tous les rôles</option>
                             <option value="SDR">SDR</option>
                             <option value="BUSINESS_DEVELOPER">Business Dev</option>
                         </select>
+
+                        {/* View toggle — Apple segmented control */}
+                        <div className="flex items-center bg-slate-100 rounded-xl p-1">
+                            <button
+                                onClick={() => setViewMode("cards")}
+                                className={cn(
+                                    "p-2 rounded-lg transition-all",
+                                    viewMode === "cards"
+                                        ? "bg-white text-slate-900 shadow-sm"
+                                        : "text-slate-400 hover:text-slate-600"
+                                )}
+                                title="Vue grille"
+                            >
+                                <LayoutGrid className="w-4 h-4" />
+                            </button>
+                            <button
+                                onClick={() => setViewMode("list")}
+                                className={cn(
+                                    "p-2 rounded-lg transition-all",
+                                    viewMode === "list"
+                                        ? "bg-white text-slate-900 shadow-sm"
+                                        : "text-slate-400 hover:text-slate-600"
+                                )}
+                                title="Vue liste"
+                            >
+                                <List className="w-4 h-4" />
+                            </button>
+                        </div>
                     </div>
 
-                    {/* Team Cards Grid */}
-                    <div className="grid grid-cols-2 gap-4">
-                        {filteredMembers.map((member) => (
-                            <MemberCard
-                                key={member.id}
-                                member={member}
-                                onViewDetails={() => {
-                                    // Navigate to member details
-                                    window.location.href = `/manager/team/${member.id}`;
-                                }}
-                            />
-                        ))}
-                    </div>
+                    {/* Team members — card or list view */}
+                    {viewMode === "cards" ? (
+                        <div className="grid grid-cols-2 gap-4">
+                            {filteredMembers.map((member) => (
+                                <MemberCard
+                                    key={member.id}
+                                    member={member}
+                                    onViewDetails={() => {
+                                        window.location.href = `/manager/team/${member.id}`;
+                                    }}
+                                />
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="team-panel !p-0 divide-y divide-slate-100">
+                            {filteredMembers.map((member) => (
+                                <MemberListRow
+                                    key={member.id}
+                                    member={member}
+                                    onViewDetails={() => {
+                                        window.location.href = `/manager/team/${member.id}`;
+                                    }}
+                                />
+                            ))}
+                        </div>
+                    )}
 
                     {filteredMembers.length === 0 && (
-                        <div className="text-center py-12 bg-white rounded-2xl border border-slate-200">
-                            <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                            <p className="text-slate-500">Aucun membre trouvé</p>
+                        <div className="text-center py-16 team-panel">
+                            <Users className="w-14 h-14 text-slate-200 mx-auto mb-4" />
+                            <p className="text-[15px] font-medium text-slate-500 mb-1">Aucun membre trouvé</p>
+                            <p className="text-[13px] text-slate-400">Essayez de modifier vos filtres</p>
                         </div>
                     )}
                 </div>

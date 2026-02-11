@@ -4,19 +4,18 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { cn } from "@/lib/utils";
 import {
     Star,
-    Paperclip,
     Clock,
     Building2,
-    User,
     AlertCircle,
     Archive,
     Trash2,
-    MailOpen,
     Loader2,
     Inbox,
     Search,
+    X,
+    RefreshCw,
 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { format, isToday, isYesterday, isThisWeek } from "date-fns";
 import { fr } from "date-fns/locale";
 
 // ============================================
@@ -60,6 +59,88 @@ interface ThreadListProps {
     folder: string;
     selectedThreadId?: string;
     onSelectThread: (thread: { id: string; subject: string; mailboxId: string }) => void;
+    refreshKey?: number;
+}
+
+// ============================================
+// HELPERS
+// ============================================
+
+function formatSmartDate(dateStr: string): string {
+    const date = new Date(dateStr);
+    if (isToday(date)) {
+        return format(date, "HH:mm", { locale: fr });
+    }
+    if (isYesterday(date)) {
+        return "Hier";
+    }
+    if (isThisWeek(date)) {
+        return format(date, "EEEE", { locale: fr });
+    }
+    return format(date, "d MMM", { locale: fr });
+}
+
+function getAvatarColor(name: string): string {
+    const colors = [
+        "from-violet-400 to-violet-600",
+        "from-blue-400 to-blue-600",
+        "from-emerald-400 to-emerald-600",
+        "from-amber-400 to-amber-600",
+        "from-rose-400 to-rose-600",
+        "from-teal-400 to-teal-600",
+        "from-indigo-400 to-indigo-600",
+        "from-pink-400 to-pink-600",
+        "from-cyan-400 to-cyan-600",
+        "from-orange-400 to-orange-600",
+    ];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+        hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return colors[Math.abs(hash) % colors.length];
+}
+
+function getInitials(name: string): string {
+    const parts = name.split(/[\s@.]+/).filter(Boolean);
+    if (parts.length >= 2) {
+        return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    return (parts[0]?.[0] || "?").toUpperCase();
+}
+
+// ============================================
+// DEBOUNCE HOOK
+// ============================================
+
+function useDebounce<T>(value: T, delay: number): T {
+    const [debouncedValue, setDebouncedValue] = useState(value);
+    useEffect(() => {
+        const timer = setTimeout(() => setDebouncedValue(value), delay);
+        return () => clearTimeout(timer);
+    }, [value, delay]);
+    return debouncedValue;
+}
+
+// ============================================
+// SKELETON LOADER
+// ============================================
+
+function ThreadSkeleton() {
+    return (
+        <div className="px-5 py-4 border-b border-slate-100/80">
+            <div className="flex items-start gap-3.5">
+                <div className="w-11 h-11 rounded-full skeleton-shimmer flex-shrink-0" />
+                <div className="flex-1 min-w-0 space-y-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="h-4 w-32 skeleton-shimmer rounded" />
+                        <div className="h-3 w-12 skeleton-shimmer rounded" />
+                    </div>
+                    <div className="h-3.5 w-48 skeleton-shimmer rounded" />
+                    <div className="h-3 w-64 skeleton-shimmer rounded" />
+                </div>
+            </div>
+        </div>
+    );
 }
 
 // ============================================
@@ -71,17 +152,35 @@ export function ThreadList({
     folder,
     selectedThreadId,
     onSelectThread,
+    refreshKey = 0,
 }: ThreadListProps) {
     const [threads, setThreads] = useState<Thread[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [hasMore, setHasMore] = useState(false);
     const [page, setPage] = useState(1);
-    const [searchQuery, setSearchQuery] = useState("");
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const [searchInput, setSearchInput] = useState("");
+    const [isSearchFocused, setIsSearchFocused] = useState(false);
     const listRef = useRef<HTMLDivElement>(null);
+    const searchRef = useRef<HTMLInputElement>(null);
+    const fetchingRef = useRef(false);
+
+    // Debounce search by 400ms
+    const debouncedSearch = useDebounce(searchInput, 400);
 
     // Fetch threads
     const fetchThreads = useCallback(async (pageNum: number, append: boolean = false) => {
-        if (pageNum === 1) setIsLoading(true);
+        // Pagination guard - prevent duplicate fetches
+        if (fetchingRef.current && append) return;
+        fetchingRef.current = true;
+
+        if (!append) {
+            setIsLoading(true);
+            setError(null);
+        } else {
+            setIsLoadingMore(true);
+        }
 
         try {
             const params = new URLSearchParams({
@@ -93,11 +192,16 @@ export function ThreadList({
             if (mailboxId) {
                 params.set("mailboxId", mailboxId);
             }
-            if (searchQuery) {
-                params.set("search", searchQuery);
+            if (debouncedSearch) {
+                params.set("search", debouncedSearch);
             }
 
-            const res = await fetch(`/api/email/threads?${params}`);
+            const res = await fetch(`/api/email/threads?${params.toString()}`);
+
+            if (!res.ok) {
+                throw new Error(`Erreur ${res.status}`);
+            }
+
             const json = await res.json();
 
             if (json.success) {
@@ -107,101 +211,157 @@ export function ThreadList({
                     setThreads(json.data.threads);
                 }
                 setHasMore(json.data.hasMore);
+            } else {
+                throw new Error(json.error || "Erreur inconnue");
             }
-        } catch (error) {
-            console.error("Failed to fetch threads:", error);
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "Erreur de chargement";
+            if (!append) {
+                setError(message);
+            }
+            console.error("Failed to fetch threads:", err);
         } finally {
             setIsLoading(false);
+            setIsLoadingMore(false);
+            fetchingRef.current = false;
         }
-    }, [mailboxId, folder, searchQuery]);
+    }, [mailboxId, folder, debouncedSearch]);
 
-    // Initial fetch
+    // Reset and refetch on filter change
     useEffect(() => {
         setPage(1);
         fetchThreads(1, false);
-    }, [mailboxId, folder, searchQuery, fetchThreads]);
+    }, [mailboxId, folder, debouncedSearch, refreshKey, fetchThreads]);
 
-    // Load more on scroll
+    // Scroll-based pagination
     const handleScroll = useCallback(() => {
-        if (!listRef.current || !hasMore || isLoading) return;
+        if (!listRef.current || !hasMore || isLoadingMore || fetchingRef.current) return;
 
         const { scrollTop, scrollHeight, clientHeight } = listRef.current;
-        if (scrollTop + clientHeight >= scrollHeight - 100) {
+        if (scrollTop + clientHeight >= scrollHeight - 150) {
             const nextPage = page + 1;
             setPage(nextPage);
             fetchThreads(nextPage, true);
         }
-    }, [hasMore, isLoading, page, fetchThreads]);
+    }, [hasMore, isLoadingMore, page, fetchThreads]);
 
-    // Thread actions
+    // Thread actions with optimistic updates and rollback
     const handleStar = async (e: React.MouseEvent, threadId: string, isStarred: boolean) => {
         e.stopPropagation();
+        const prevThreads = threads;
+        setThreads(prev => prev.map(t =>
+            t.id === threadId ? { ...t, isStarred: !isStarred } : t
+        ));
         try {
-            setThreads(prev => prev.map(t =>
-                t.id === threadId ? { ...t, isStarred: !isStarred } : t
-            ));
-            await fetch(`/api/email/threads/${threadId}`, {
+            const res = await fetch(`/api/email/threads/${threadId}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ isStarred: !isStarred }),
             });
-        } catch (error) {
-            console.error("Failed to star thread:", error);
-            // Revert on error
-            setThreads(prev => prev.map(t =>
-                t.id === threadId ? { ...t, isStarred: isStarred } : t
-            ));
+            if (!res.ok) throw new Error();
+        } catch {
+            setThreads(prevThreads); // Rollback
         }
     };
 
     const handleArchive = async (e: React.MouseEvent, threadId: string) => {
         e.stopPropagation();
+        const prevThreads = threads;
+        setThreads(prev => prev.filter(t => t.id !== threadId));
         try {
-            setThreads(prev => prev.filter(t => t.id !== threadId));
-            await fetch(`/api/email/threads/${threadId}`, {
+            const res = await fetch(`/api/email/threads/${threadId}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ isArchived: true }),
             });
-        } catch (error) {
-            console.error("Failed to archive thread:", error);
-            // Revert on error - this one is harder to revert perfectly without keeping the thread data, 
-            // but for now let's just re-fetch or log error. 
-            // Better to assume success or accept a blip. 
-            // For simplicity in optimistic UI, if it fails, maybe toast an error and reload.
-            // But let's at least allow the UI to feel "instant".
-            // To revert properly we'd need the deleted thread.
-            // Let's just catch and log for now, as re-inserting is complex without the object.
+            if (!res.ok) throw new Error();
+        } catch {
+            setThreads(prevThreads); // Rollback
         }
     };
 
     const handleTrash = async (e: React.MouseEvent, threadId: string) => {
         e.stopPropagation();
+        const prevThreads = threads;
+        setThreads(prev => prev.filter(t => t.id !== threadId));
         try {
-            setThreads(prev => prev.filter(t => t.id !== threadId));
-            await fetch(`/api/email/threads/${threadId}`, {
+            const res = await fetch(`/api/email/threads/${threadId}`, {
                 method: "DELETE",
             });
-        } catch (error) {
-            console.error("Failed to trash thread:", error);
+            if (!res.ok) throw new Error();
+        } catch {
+            setThreads(prevThreads); // Rollback
         }
     };
 
-    // Render empty state
+    // Error state
+    if (error && threads.length === 0) {
+        return (
+            <div className="flex-1 flex flex-col min-h-0">
+                <SearchBar
+                    searchInput={searchInput}
+                    setSearchInput={setSearchInput}
+                    isSearchFocused={isSearchFocused}
+                    setIsSearchFocused={setIsSearchFocused}
+                    searchRef={searchRef}
+                />
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+                    <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center mb-4">
+                        <AlertCircle className="w-7 h-7 text-red-400" />
+                    </div>
+                    <h3 className="text-[15px] font-semibold text-slate-800 mb-1.5">
+                        Erreur de chargement
+                    </h3>
+                    <p className="text-sm text-slate-400 max-w-[260px] leading-relaxed mb-4">
+                        {error}
+                    </p>
+                    <button
+                        onClick={() => {
+                            setPage(1);
+                            fetchThreads(1, false);
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors"
+                    >
+                        <RefreshCw className="w-4 h-4" />
+                        Réessayer
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    // Empty state
     if (!isLoading && threads.length === 0) {
         return (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-                <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
-                    <Inbox className="w-8 h-8 text-slate-400" />
+            <div className="flex-1 flex flex-col min-h-0">
+                <SearchBar
+                    searchInput={searchInput}
+                    setSearchInput={setSearchInput}
+                    isSearchFocused={isSearchFocused}
+                    setIsSearchFocused={setIsSearchFocused}
+                    searchRef={searchRef}
+                />
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+                    <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center mb-5">
+                        <Inbox className="w-8 h-8 text-slate-400" />
+                    </div>
+                    <h3 className="text-[15px] font-semibold text-slate-800 mb-1.5">
+                        {searchInput ? "Aucun résultat" : "Boîte vide"}
+                    </h3>
+                    <p className="text-sm text-slate-400 max-w-[240px] leading-relaxed">
+                        {searchInput
+                            ? "Essayez de modifier votre recherche"
+                            : "Aucun message dans ce dossier"}
+                    </p>
+                    {searchInput && (
+                        <button
+                            onClick={() => setSearchInput("")}
+                            className="mt-4 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors"
+                        >
+                            Effacer la recherche
+                        </button>
+                    )}
                 </div>
-                <h3 className="text-lg font-semibold text-slate-900 mb-1">
-                    Aucun message
-                </h3>
-                <p className="text-sm text-slate-500 max-w-xs">
-                    {searchQuery
-                        ? "Aucun résultat pour votre recherche"
-                        : "Votre boîte de réception est vide"}
-                </p>
             </div>
         );
     }
@@ -209,31 +369,28 @@ export function ThreadList({
     return (
         <div className="flex-1 flex flex-col min-h-0">
             {/* Search */}
-            <div className="p-3 border-b border-slate-200">
-                <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <input
-                        type="text"
-                        placeholder="Rechercher..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-9 pr-4 py-2 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white transition-all"
-                    />
-                </div>
-            </div>
+            <SearchBar
+                searchInput={searchInput}
+                setSearchInput={setSearchInput}
+                isSearchFocused={isSearchFocused}
+                setIsSearchFocused={setIsSearchFocused}
+                searchRef={searchRef}
+            />
 
             {/* Thread List */}
             <div
                 ref={listRef}
                 onScroll={handleScroll}
-                className="flex-1 overflow-y-auto"
+                className="flex-1 overflow-y-auto email-scrollbar"
             >
                 {isLoading && threads.length === 0 ? (
-                    <div className="flex items-center justify-center py-12">
-                        <Loader2 className="w-6 h-6 text-slate-400 animate-spin" />
+                    <div>
+                        {Array.from({ length: 8 }).map((_, i) => (
+                            <ThreadSkeleton key={i} />
+                        ))}
                     </div>
                 ) : (
-                    <div className="divide-y divide-slate-100">
+                    <div className="email-entrance">
                         {threads.map((thread) => (
                             <ThreadListItem
                                 key={thread.id}
@@ -252,11 +409,63 @@ export function ThreadList({
                     </div>
                 )}
 
-                {/* Loading more indicator */}
-                {isLoading && threads.length > 0 && (
+                {/* Load more indicator */}
+                {isLoadingMore && (
                     <div className="flex items-center justify-center py-4">
-                        <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />
+                        <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
                     </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ============================================
+// SEARCH BAR
+// ============================================
+
+function SearchBar({
+    searchInput,
+    setSearchInput,
+    isSearchFocused,
+    setIsSearchFocused,
+    searchRef,
+}: {
+    searchInput: string;
+    setSearchInput: (q: string) => void;
+    isSearchFocused: boolean;
+    setIsSearchFocused: (f: boolean) => void;
+    searchRef: React.RefObject<HTMLInputElement | null>;
+}) {
+    return (
+        <div className="p-3">
+            <div className={cn(
+                "relative rounded-xl transition-all duration-200",
+                isSearchFocused
+                    ? "ring-2 ring-indigo-500/20 shadow-sm"
+                    : ""
+            )}>
+                <Search className={cn(
+                    "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors",
+                    isSearchFocused ? "text-indigo-500" : "text-slate-400"
+                )} />
+                <input
+                    ref={searchRef}
+                    type="text"
+                    placeholder="Rechercher des emails..."
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    onFocus={() => setIsSearchFocused(true)}
+                    onBlur={() => setIsSearchFocused(false)}
+                    className="w-full pl-9 pr-9 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all"
+                />
+                {searchInput && (
+                    <button
+                        onClick={() => setSearchInput("")}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                    >
+                        <X className="w-3.5 h-3.5" />
+                    </button>
                 )}
             </div>
         </div>
@@ -286,102 +495,113 @@ function ThreadListItem({
 }: ThreadListItemProps) {
     const sender = thread.latestEmail?.fromName || thread.latestEmail?.fromAddress || "Inconnu";
     const isOutbound = thread.latestEmail?.direction === "OUTBOUND";
-    const timeAgo = formatDistanceToNow(new Date(thread.lastEmailAt), {
-        addSuffix: true,
-        locale: fr
-    });
+    const smartDate = formatSmartDate(thread.lastEmailAt);
+    const avatarColor = getAvatarColor(sender);
+    const initials = getInitials(sender);
 
     return (
         <div
             onClick={onSelect}
             className={cn(
-                "group relative px-4 py-3 cursor-pointer transition-all",
+                "group relative px-5 py-4 cursor-pointer transition-all duration-150 border-b border-slate-100/80",
                 isSelected
-                    ? "bg-indigo-50 border-l-2 border-indigo-600"
-                    : "hover:bg-slate-50 border-l-2 border-transparent",
-                !thread.isRead && "bg-white"
+                    ? "bg-indigo-50/60"
+                    : "hover:bg-slate-50/80",
+                !thread.isRead && !isSelected && "bg-white"
             )}
         >
-            <div className="flex items-start gap-3">
-                {/* Avatar / Read indicator */}
-                <div className="relative flex-shrink-0">
+            {/* Selected indicator */}
+            {isSelected && (
+                <div className="absolute left-0 top-3 bottom-3 w-[3px] bg-indigo-500 rounded-r-full" />
+            )}
+
+            <div className="flex items-start gap-3.5">
+                {/* Avatar */}
+                <div className="relative flex-shrink-0 mt-[1px]">
                     <div className={cn(
-                        "w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold",
+                        "w-11 h-11 rounded-full flex items-center justify-center text-[13px] font-semibold bg-gradient-to-br text-white shadow-sm",
                         thread.clientId
-                            ? "bg-gradient-to-br from-emerald-400 to-emerald-600 text-white"
-                            : "bg-gradient-to-br from-slate-200 to-slate-300 text-slate-600"
+                            ? "from-emerald-400 to-emerald-600"
+                            : avatarColor
                     )}>
-                        {sender[0]?.toUpperCase()}
+                        {initials}
                     </div>
                     {!thread.isRead && (
-                        <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-2 bg-indigo-600 rounded-full" />
+                        <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-indigo-500 rounded-full ring-2 ring-white" />
                     )}
                 </div>
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                        <span className={cn(
-                            "text-sm truncate",
-                            thread.isRead ? "text-slate-600" : "font-semibold text-slate-900"
-                        )}>
-                            {isOutbound ? `À: ${thread.participantEmails[0]}` : sender}
-                        </span>
-                        {thread.messageCount > 1 && (
-                            <span className="text-xs text-slate-400">
-                                ({thread.messageCount})
+                    {/* Row 1: Sender + Date */}
+                    <div className="flex items-center justify-between gap-3 mb-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                            <span className={cn(
+                                "text-[14px] truncate",
+                                thread.isRead ? "text-slate-600 font-medium" : "font-semibold text-slate-900"
+                            )}>
+                                {isOutbound ? `À: ${thread.participantEmails[0] || ""}` : sender}
                             </span>
-                        )}
-                        {thread.clientId && (
-                            <Building2 className="w-3 h-3 text-emerald-500 flex-shrink-0" />
-                        )}
-                        {thread.assignedTo && (
-                            <User className="w-3 h-3 text-indigo-500 flex-shrink-0" />
-                        )}
+                            {thread.messageCount > 1 && (
+                                <span className="flex-shrink-0 text-[11px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md font-medium tabular-nums">
+                                    {thread.messageCount}
+                                </span>
+                            )}
+                        </div>
+                        <span className={cn(
+                            "text-[11px] flex-shrink-0 tabular-nums pr-1",
+                            thread.isRead ? "text-slate-400" : "text-indigo-600 font-semibold"
+                        )}>
+                            {smartDate}
+                        </span>
                     </div>
 
+                    {/* Row 2: Subject */}
                     <p className={cn(
-                        "text-sm truncate mt-0.5",
-                        thread.isRead ? "text-slate-500" : "text-slate-800"
+                        "text-[13px] truncate leading-snug pr-2",
+                        thread.isRead ? "text-slate-500" : "text-slate-800 font-medium"
                     )}>
                         {thread.subject || "(Sans objet)"}
                     </p>
 
-                    <p className="text-xs text-slate-400 truncate mt-0.5">
-                        {thread.snippet}
-                    </p>
-                </div>
-
-                {/* Right side */}
-                <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                    <span className={cn(
-                        "text-xs",
-                        thread.isRead ? "text-slate-400" : "text-indigo-600 font-medium"
-                    )}>
-                        {timeAgo}
-                    </span>
-
-                    {/* Priority / SLA indicators */}
-                    <div className="flex items-center gap-1">
-                        {thread.priority === "high" && (
-                            <AlertCircle className="w-3 h-3 text-red-500" />
-                        )}
-                        {thread.slaDeadline && new Date(thread.slaDeadline) < new Date() && (
-                            <Clock className="w-3 h-3 text-amber-500" />
-                        )}
+                    {/* Row 3: Snippet + badges */}
+                    <div className="flex items-center gap-3 mt-1">
+                        <p className="text-[12px] text-slate-400 truncate flex-1 pr-2">
+                            {thread.snippet}
+                        </p>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                            {thread.clientId && (
+                                <div className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-100" title="Lié à un client">
+                                    <Building2 className="w-3 h-3 text-emerald-500" />
+                                </div>
+                            )}
+                            {thread.priority === "high" && (
+                                <div className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-red-50 border border-red-100" title="Haute priorité">
+                                    <AlertCircle className="w-3 h-3 text-red-500" />
+                                </div>
+                            )}
+                            {thread.slaDeadline && new Date(thread.slaDeadline) < new Date() && (
+                                <div className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-50 border border-amber-100" title="SLA dépassé">
+                                    <Clock className="w-3 h-3 text-amber-500" />
+                                </div>
+                            )}
+                            {thread.isStarred && (
+                                <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400 flex-shrink-0" />
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
 
             {/* Hover actions */}
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-1 bg-white shadow-sm border border-slate-200 rounded-lg px-1 py-0.5">
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-0.5 bg-white/95 backdrop-blur-sm shadow-lg border border-slate-200 rounded-xl px-1.5 py-1 z-10">
                 <button
                     onClick={onStar}
                     className={cn(
-                        "p-1.5 rounded-md transition-colors",
+                        "p-1.5 rounded-lg transition-colors",
                         thread.isStarred
-                            ? "text-amber-500 hover:bg-amber-50"
-                            : "text-slate-400 hover:text-amber-500 hover:bg-slate-50"
+                            ? "text-amber-400 hover:bg-amber-50"
+                            : "text-slate-400 hover:text-amber-400 hover:bg-slate-50"
                     )}
                     title={thread.isStarred ? "Retirer des favoris" : "Ajouter aux favoris"}
                 >
@@ -389,14 +609,14 @@ function ThreadListItem({
                 </button>
                 <button
                     onClick={onArchive}
-                    className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-colors"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-colors"
                     title="Archiver"
                 >
                     <Archive className="w-4 h-4" />
                 </button>
                 <button
                     onClick={onTrash}
-                    className="p-1.5 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
                     title="Supprimer"
                 >
                     <Trash2 className="w-4 h-4" />

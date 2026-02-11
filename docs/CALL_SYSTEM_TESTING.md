@@ -29,26 +29,7 @@ Use a user with role **SDR** or **MANAGER** (or **BUSINESS_DEVELOPER**).
 
 ---
 
-## 4. Test the dialer on the SDR action page
-
-1. Go to **Appeler** (or **http://localhost:3000/sdr/action**).
-2. You should see the **floating dialer** in the bottom-right (draggable, collapsible).
-3. **Card view** (one contact at a time):
-   - Select a mission/list that has CALL actions.
-   - If the current action is a call and has a phone number, the dialer shows **"Appeler [Contact name]"**.
-   - Click it to start a call → Call is created in the DB, UI goes to ringing then in-progress (simulated).
-   - Click the red **End** button → Post-call form appears.
-   - Choose a result (e.g. "Pas de réponse"), add a note, optionally a callback date, click **Enregistrer et fermer** → Action is created and linked to the call; next contact loads (card) or queue refreshes (table).
-4. **Table view**:
-   - Click a row to open the contact/company drawer.
-   - The dialer gets that row as target: **"Appeler [name]"** if the row has a phone number.
-   - Same flow: start call → end → log result → queue refreshes.
-5. **Nouvel appel** (no target):
-   - Opens a list of mock numbers; picking one starts a simulated call (no contact/company/campaign linked unless you add them later).
-
----
-
-## 5. (Optional) Set your outbound number
+## 4. (Optional) Set your outbound number
 
 Calls are stored with a "from" number. If no number is set, the app uses a mock value. To set a real one (e.g. for display or future telephony):
 
@@ -65,13 +46,13 @@ Uniqueness is enforced: two users cannot share the same outbound number.
 
 ---
 
-## 6. Call data (API only)
+## 5. Call data (API only)
 
 Call history and stats are available via **API** only: `GET /api/calls`, `GET /api/calls/stats` (manager/SDR visibility). There is no dedicated manager "Appels" page in the UI.
 
 ---
 
-## 7. What is actually tested
+## 6. What is actually tested
 
 | Step                    | What happens today |
 |-------------------------|--------------------|
@@ -84,18 +65,17 @@ The app does **not** place real phone calls; it only stores call records and out
 
 ---
 
-## 8. Quick checklist
+## 7. Quick checklist
 
 - [ ] Migration applied, Prisma client generated.
 - [ ] Logged in as SDR (or Manager).
-- [ ] On **Appeler**, dialer is visible (bottom-right).
-- [ ] Card or table view: "Appeler [name]" appears when there is a phone number.
-- [ ] Start call → end → fill form → submit → next contact or refreshed queue.
+- [ ] Call APIs work: `POST /api/calls/initiate`, `PATCH /api/calls/[id]`, `GET /api/calls`, `GET /api/calls/stats`.
+
 If something fails, check the browser Network tab for failing API calls and the terminal for server errors.
 
 ---
 
-## 9. Troubleshooting: 401 after login
+## 8. Troubleshooting: 401 after login
 
 If you get **401 Unauthorized** when opening the app or right after logging in:
 

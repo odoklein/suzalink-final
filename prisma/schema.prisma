@@ -259,6 +259,9 @@ model User {
   assignedTasks    Task[]          @relation("TaskAssignee")
   createdTasks     Task[]          @relation("TaskCreator")
   taskComments     TaskComment[]   @relation("TaskCommenter")
+  projectActivities ProjectActivity[] @relation("ProjectActivityUser")
+  taskTimeEntries  TaskTimeEntry[]   @relation("TaskTimeEntryUser")
+  projectTemplates ProjectTemplate[] @relation("ProjectTemplateCreator")
   
   // Email Accounts (legacy)
   emailAccounts    EmailAccount[]
@@ -294,6 +297,11 @@ model User {
   // SDR Preferences
   selectedMissionId    String?
   selectedListId       String?
+
+  // Profile (all roles)
+  phone                String?
+  timezone             String?   @default("Europe/Paris")
+  preferences          Json?     // notifications, appearance, workingHours
 
   // In-app telephony: unique outbound number per SDR (enforced in app logic)
   outboundPhoneNumber  String?   @unique
@@ -557,7 +565,10 @@ model Contact {
   emailThreads         EmailThread[]
   sequenceEnrollments  EmailSequenceEnrollment[]
   sentEmails           Email[]
-  
+
+  // Email consent: when true, contact has unsubscribed from emails
+  unsubscribed          Boolean   @default(false)
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -820,9 +831,18 @@ model Project {
   clientId    String?
   client      Client?       @relation(fields: [clientId], references: [id])
   
+  // Enhanced fields
+  startDate   DateTime?
+  endDate     DateTime?
+  color       String?       @default("#6366f1")
+  icon        String?       @default("folder")
+  archivedAt  DateTime?
+  
   // Relations
   tasks       Task[]
   members     ProjectMember[]
+  activities  ProjectActivity[]
+  milestones  ProjectMilestone[]
   
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
@@ -856,6 +876,7 @@ model Task {
   status      TaskStatus   @default(TODO)
   priority    TaskPriority @default(MEDIUM)
   dueDate     DateTime?
+  startDate   DateTime?
   
   // Assignment
   assigneeId  String?
@@ -865,7 +886,14 @@ model Task {
   createdById String
   createdBy   User         @relation("TaskCreator", fields: [createdById], references: [id])
   
-  // Details
+  // Enhanced fields
+  estimatedHours Float?
+  loggedHours    Float?
+  position       Int          @default(0)
+  completedAt    DateTime?
+  labels         String[]     @default([])
+  
+  // Details (legacy)
   tags        String[]     @default([])
   
   // Subtasks (Self Relation)
@@ -873,9 +901,19 @@ model Task {
   parentTask   Task?       @relation("Subtasks", fields: [parentTaskId], references: [id], onDelete: SetNull)
   subtasks     Task[]      @relation("Subtasks")
   
+  // Milestone
+  milestoneId String?
+  milestone   ProjectMilestone? @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+  
+  // Dependencies
+  dependentOn   TaskDependency[] @relation("TaskDependentOn")
+  blockedBy     TaskDependency[] @relation("TaskBlockedBy")
+  
   // Relations
   comments    TaskComment[]
   files       File[]
+  activities  ProjectActivity[]
+  timeEntries TaskTimeEntry[]
   
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
@@ -885,6 +923,8 @@ model Task {
   @@index([status])
   @@index([priority])
   @@index([parentTaskId])
+  @@index([position])
+  @@index([milestoneId])
 }
 
 model TaskComment {
@@ -899,6 +939,80 @@ model TaskComment {
   
   @@index([taskId])
   @@index([userId])
+}
+
+model TaskDependency {
+  id              String   @id @default(cuid())
+  taskId          String
+  task            Task     @relation("TaskDependentOn", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOnTaskId String
+  dependsOnTask   Task     @relation("TaskBlockedBy", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  
+  @@unique([taskId, dependsOnTaskId])
+  @@index([taskId])
+  @@index([dependsOnTaskId])
+}
+
+model ProjectActivity {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  taskId    String?
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  userId    String
+  user      User     @relation("ProjectActivityUser", fields: [userId], references: [id])
+  action    String   // "task_created", "status_changed", "assigned", "commented", "ai_decomposed", etc.
+  details   Json?    // { from: "TODO", to: "IN_PROGRESS" }
+  createdAt DateTime @default(now())
+  
+  @@index([projectId, createdAt])
+  @@index([taskId])
+  @@index([userId])
+}
+
+model ProjectMilestone {
+  id          String    @id @default(cuid())
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title       String
+  description String?   @db.Text
+  dueDate     DateTime?
+  completedAt DateTime?
+  position    Int       @default(0)
+  tasks       Task[]
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([projectId])
+}
+
+model TaskTimeEntry {
+  id          String   @id @default(cuid())
+  taskId      String
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation("TaskTimeEntryUser", fields: [userId], references: [id])
+  hours       Float
+  description String?
+  date        DateTime
+  createdAt   DateTime @default(now())
+  
+  @@index([taskId])
+  @@index([userId])
+  @@index([date])
+}
+
+model ProjectTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String?  @db.Text
+  structure   Json     // { tasks: [{ title, description, priority, subtasks: [...] }] }
+  createdById String
+  createdBy   User     @relation("ProjectTemplateCreator", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 // ============================================

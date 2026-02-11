@@ -153,10 +153,12 @@ function SidebarSection({
     section, 
     isCollapsed,
     onMobileClose,
+    isFirst,
 }: { 
     section: NavSection;
     isCollapsed: boolean;
     onMobileClose?: () => void;
+    isFirst?: boolean;
 }) {
     const { hasPermission } = usePermissions();
     
@@ -170,13 +172,29 @@ function SidebarSection({
 
     return (
         <div className="space-y-0.5">
-            {/* Section title */}
-            {section.title && !isCollapsed && (
-                <div className="px-2.5 pt-3 pb-1.5">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500/80">
-                        {section.title}
-                    </span>
-                </div>
+            {/* Section divider + title */}
+            {section.title && (
+                <>
+                    {/* Subtle divider line between groups */}
+                    {!isFirst && (
+                        <div className={cn(
+                            "mx-2 border-t border-white/[0.06]",
+                            isCollapsed ? "my-2" : "mt-3 mb-1"
+                        )} />
+                    )}
+                    {!isCollapsed ? (
+                        <div className="px-2.5 pt-1.5 pb-1">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500/70">
+                                {section.title}
+                            </span>
+                        </div>
+                    ) : (
+                        /* Collapsed: small dot indicator for section boundary */
+                        <div className="flex justify-center py-1">
+                            <div className="w-1 h-1 rounded-full bg-slate-600/50" />
+                        </div>
+                    )}
+                </>
             )}
             
             {/* Section items */}
@@ -355,6 +373,7 @@ export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
                             section={section}
                             isCollapsed={isCollapsed}
                             onMobileClose={closeMobile}
+                            isFirst={idx === 0}
                         />
                     ))}
                 </nav>

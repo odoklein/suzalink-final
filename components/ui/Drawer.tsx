@@ -86,22 +86,22 @@ export function Drawer({
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex">
-            {/* Overlay — click here to close */}
+        <div className="fixed inset-0 z-40 flex">
+            {/* Overlay */}
             <div
-                className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in cursor-pointer"
+                className="absolute inset-0 bg-black/30 backdrop-blur-[2px] animate-fade-in cursor-pointer transition-opacity duration-300"
                 onClick={handleOverlayClickClose}
                 aria-hidden="true"
             />
 
-            {/* Drawer panel — clicks don't close */}
+            {/* Drawer panel */}
             <div
                 ref={drawerRef}
                 tabIndex={-1}
                 role="dialog"
                 aria-modal="true"
                 className={cn(
-                    "fixed top-0 bottom-0 w-full flex flex-col bg-white shadow-2xl z-[51]",
+                    "fixed top-0 bottom-0 w-full flex flex-col bg-white shadow-2xl shadow-black/10 z-[41]",
                     side === "right"
                         ? "right-0 animate-slide-in-right"
                         : "left-0 animate-slide-in-left",
@@ -111,15 +111,15 @@ export function Drawer({
             >
                 {/* Header */}
                 {(title || showCloseButton) && (
-                    <div className="flex items-start justify-between p-6 pb-4 border-b border-slate-100 bg-slate-50/50">
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-white sticky top-0 z-10">
                         <div className="flex-1 min-w-0 pr-4">
                             {title && (
-                                <h2 className="text-xl font-bold text-slate-900 truncate">
+                                <h2 className="text-lg font-bold text-slate-900 truncate leading-tight">
                                     {title}
                                 </h2>
                             )}
                             {description && (
-                                <p className="text-sm text-slate-500 mt-1">
+                                <p className="text-xs text-slate-500 mt-0.5 font-medium">
                                     {description}
                                 </p>
                             )}
@@ -127,7 +127,7 @@ export function Drawer({
                         {showCloseButton && (
                             <button
                                 onClick={onClose}
-                                className="p-2 -m-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors flex-shrink-0"
+                                className="p-2 -m-1 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all duration-150 flex-shrink-0"
                             >
                                 <X className="w-5 h-5" />
                             </button>
@@ -136,13 +136,13 @@ export function Drawer({
                 )}
 
                 {/* Content */}
-                <div className="flex-1 overflow-y-auto p-6">
+                <div className="flex-1 overflow-y-auto p-6 drawer-scrollbar">
                     {children}
                 </div>
 
                 {/* Footer */}
                 {footer && (
-                    <div className="p-6 pt-4 border-t border-slate-100 bg-slate-50/30">
+                    <div className="px-6 py-4 border-t border-slate-100 bg-white sticky bottom-0 z-10">
                         {footer}
                     </div>
                 )}

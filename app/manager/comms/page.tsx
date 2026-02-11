@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useSession } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { useCommsRealtime } from "@/hooks/useCommsRealtime";
-import { useToast } from "@/components/ui/Toast";
+import { useToast } from "@/components/ui";
 import type { CommsRealtimePayload } from "@/lib/comms/events";
 import {
     MessageSquare,

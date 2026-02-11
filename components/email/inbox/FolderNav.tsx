@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import {
     Inbox,
@@ -9,9 +9,9 @@ import {
     Archive,
     Trash2,
     Star,
-    Mail,
     Tag,
     ChevronRight,
+    MailOpen,
 } from "lucide-react";
 
 // ============================================
@@ -56,34 +56,45 @@ export function FolderNav({
     const [showLabels, setShowLabels] = useState(true);
 
     // Fetch folder counts
-    useEffect(() => {
-        const fetchCounts = async () => {
-            try {
-                const params = mailboxId ? `?mailboxId=${mailboxId}` : "";
-                // In a real app, you'd have a dedicated endpoint for counts
-                // For now, we'll estimate from the threads API
-                const [inboxRes, unreadRes] = await Promise.all([
-                    fetch(`/api/email/threads${params}&folder=inbox&limit=1`),
-                    fetch(`/api/email/threads${params}&folder=unread&limit=1`),
-                ]);
-                
-                const [inboxJson, unreadJson] = await Promise.all([
-                    inboxRes.json(),
-                    unreadRes.json(),
-                ]);
-
-                setCounts(prev => ({
-                    ...prev,
-                    inbox: inboxJson.data?.total || 0,
-                    unread: unreadJson.data?.total || 0,
-                }));
-            } catch (error) {
-                console.error("Failed to fetch folder counts:", error);
+    const fetchCounts = useCallback(async () => {
+        try {
+            const baseParams = new URLSearchParams();
+            if (mailboxId) {
+                baseParams.set("mailboxId", mailboxId);
             }
-        };
 
-        fetchCounts();
+            // Fetch inbox and unread counts in parallel
+            const inboxParams = new URLSearchParams(baseParams);
+            inboxParams.set("folder", "inbox");
+            inboxParams.set("limit", "1");
+
+            const unreadParams = new URLSearchParams(baseParams);
+            unreadParams.set("folder", "unread");
+            unreadParams.set("limit", "1");
+
+            const [inboxRes, unreadRes] = await Promise.all([
+                fetch(`/api/email/threads?${inboxParams.toString()}`),
+                fetch(`/api/email/threads?${unreadParams.toString()}`),
+            ]);
+
+            const [inboxJson, unreadJson] = await Promise.all([
+                inboxRes.json(),
+                unreadRes.json(),
+            ]);
+
+            setCounts(prev => ({
+                ...prev,
+                inbox: inboxJson.data?.total || 0,
+                unread: unreadJson.data?.total || 0,
+            }));
+        } catch (error) {
+            console.error("Failed to fetch folder counts:", error);
+        }
     }, [mailboxId]);
+
+    useEffect(() => {
+        fetchCounts();
+    }, [fetchCounts]);
 
     const folders = [
         {
@@ -131,66 +142,118 @@ export function FolderNav({
     ];
 
     return (
-        <div className="py-2">
+        <div className="py-1">
+            {/* Section Label */}
+            <div className="px-4 pt-2 pb-1.5">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                    Dossiers
+                </span>
+            </div>
+
             {/* Main Folders */}
             <nav className="space-y-0.5 px-2">
-                {folders.map((folder) => (
+                {folders.map((folder) => {
+                    const isSelected = selectedFolder === folder.id;
+                    return (
+                        <button
+                            key={folder.id}
+                            onClick={() => onSelectFolder(folder.id)}
+                            className={cn(
+                                "w-full flex items-center gap-2.5 px-3 py-[9px] rounded-xl text-[13px] font-medium transition-all duration-200 group relative",
+                                isSelected
+                                    ? "bg-indigo-50/80 text-indigo-700 shadow-sm shadow-indigo-500/5"
+                                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-800"
+                            )}
+                        >
+                            {isSelected && (
+                                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-indigo-500 rounded-r-full" />
+                            )}
+                            <folder.icon className={cn(
+                                "w-[18px] h-[18px] flex-shrink-0 transition-colors",
+                                isSelected ? "text-indigo-500" : "text-slate-400 group-hover:text-slate-500"
+                            )} />
+                            <span className="flex-1 text-left truncate">{folder.label}</span>
+                            {folder.showCount && folder.count > 0 && (
+                                <span className={cn(
+                                    "min-w-[20px] h-5 flex items-center justify-center px-1.5 text-[11px] font-bold rounded-full tabular-nums",
+                                    isSelected
+                                        ? "bg-indigo-500 text-white"
+                                        : "bg-slate-200/80 text-slate-600"
+                                )}>
+                                    {folder.count > 99 ? "99+" : folder.count}
+                                </span>
+                            )}
+                        </button>
+                    );
+                })}
+            </nav>
+
+            {/* Quick Filters */}
+            <div className="mt-3 px-2">
+                <div className="px-2 pt-2 pb-1.5">
+                    <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                        Filtres rapides
+                    </span>
+                </div>
+                <div className="space-y-0.5">
                     <button
-                        key={folder.id}
-                        onClick={() => onSelectFolder(folder.id)}
+                        onClick={() => onSelectFolder("unread")}
                         className={cn(
-                            "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all",
-                            selectedFolder === folder.id
-                                ? "bg-indigo-50 text-indigo-700"
-                                : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                            "w-full flex items-center gap-2.5 px-3 py-[9px] rounded-xl text-[13px] font-medium transition-all duration-200 group relative",
+                            selectedFolder === "unread"
+                                ? "bg-indigo-50/80 text-indigo-700 shadow-sm shadow-indigo-500/5"
+                                : "text-slate-600 hover:bg-slate-50 hover:text-slate-800"
                         )}
                     >
-                        <folder.icon className={cn(
-                            "w-4 h-4 flex-shrink-0",
-                            selectedFolder === folder.id ? "text-indigo-600" : "text-slate-400"
+                        {selectedFolder === "unread" && (
+                            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-indigo-500 rounded-r-full" />
+                        )}
+                        <MailOpen className={cn(
+                            "w-[18px] h-[18px] flex-shrink-0 transition-colors",
+                            selectedFolder === "unread" ? "text-indigo-500" : "text-slate-400 group-hover:text-slate-500"
                         )} />
-                        <span className="flex-1 text-left truncate">{folder.label}</span>
-                        {folder.showCount && folder.count > 0 && (
+                        <span className="flex-1 text-left">Non lus</span>
+                        {counts.unread > 0 && (
                             <span className={cn(
-                                "px-2 py-0.5 text-xs font-semibold rounded-full",
-                                selectedFolder === folder.id
-                                    ? "bg-indigo-600 text-white"
-                                    : "bg-slate-200 text-slate-600"
+                                "min-w-[20px] h-5 flex items-center justify-center px-1.5 text-[11px] font-bold rounded-full tabular-nums",
+                                selectedFolder === "unread"
+                                    ? "bg-indigo-500 text-white"
+                                    : "bg-indigo-100 text-indigo-600"
                             )}>
-                                {folder.count > 99 ? "99+" : folder.count}
+                                {counts.unread > 99 ? "99+" : counts.unread}
                             </span>
                         )}
                     </button>
-                ))}
-            </nav>
+                </div>
+            </div>
 
             {/* Labels Section */}
             {customLabels.length > 0 && (
-                <div className="mt-4 px-2">
+                <div className="mt-3 px-2">
                     <button
                         onClick={() => setShowLabels(!showLabels)}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide hover:text-slate-700"
+                        className="w-full flex items-center gap-2 px-2 pt-2 pb-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider hover:text-slate-600 transition-colors"
                     >
                         <ChevronRight className={cn(
-                            "w-3 h-3 transition-transform",
+                            "w-3 h-3 transition-transform duration-200",
                             showLabels && "rotate-90"
                         )} />
                         Labels
                     </button>
                     {showLabels && (
-                        <div className="space-y-0.5 mt-1">
+                        <div className="space-y-0.5 mt-0.5">
                             {customLabels.map((label) => (
                                 <button
                                     key={label}
                                     onClick={() => onSelectFolder(`label:${label}`)}
                                     className={cn(
-                                        "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all",
+                                        "w-full flex items-center gap-2.5 px-3 py-[9px] rounded-xl text-[13px] font-medium transition-all duration-200",
                                         selectedFolder === `label:${label}`
-                                            ? "bg-indigo-50 text-indigo-700"
-                                            : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                                            ? "bg-indigo-50/80 text-indigo-700"
+                                            : "text-slate-600 hover:bg-slate-50 hover:text-slate-800"
                                     )}
                                 >
-                                    <Tag className="w-4 h-4 text-slate-400" />
+                                    <Tag className="w-[18px] h-[18px] text-slate-400" />
                                     <span className="flex-1 text-left truncate">{label}</span>
                                 </button>
                             ))}
@@ -198,40 +261,6 @@ export function FolderNav({
                     )}
                 </div>
             )}
-
-            {/* Quick Filters */}
-            <div className="mt-4 px-2">
-                <div className="px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                    Filtres rapides
-                </div>
-                <div className="space-y-0.5 mt-1">
-                    <button
-                        onClick={() => onSelectFolder("unread")}
-                        className={cn(
-                            "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all",
-                            selectedFolder === "unread"
-                                ? "bg-indigo-50 text-indigo-700"
-                                : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                        )}
-                    >
-                        <Mail className={cn(
-                            "w-4 h-4 flex-shrink-0",
-                            selectedFolder === "unread" ? "text-indigo-600" : "text-slate-400"
-                        )} />
-                        <span className="flex-1 text-left">Non lus</span>
-                        {counts.unread > 0 && (
-                            <span className={cn(
-                                "px-2 py-0.5 text-xs font-semibold rounded-full",
-                                selectedFolder === "unread"
-                                    ? "bg-indigo-600 text-white"
-                                    : "bg-indigo-100 text-indigo-700"
-                            )}>
-                                {counts.unread}
-                            </span>
-                        )}
-                    </button>
-                </div>
-            </div>
         </div>
     );
 }

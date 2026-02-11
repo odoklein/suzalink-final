@@ -1,346 +1,629 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useSession } from "next-auth/react";
-import Link from "next/link";
+import { useState, useEffect, useCallback } from "react";
 import {
-    Plus,
-    FolderKanban,
-    Users,
-    CheckSquare,
-    Search,
-    Loader2,
-    Sparkles,
-    ArrowRight,
-    X,
-    RefreshCw,
+    Plus, FolderKanban, LayoutGrid, LayoutList, Search, Filter,
+    MoreHorizontal, Copy, Archive, Trash2, Users, Calendar,
+    CheckCircle2, Clock, AlertTriangle, Loader2, Sparkles,
+    ChevronDown, X
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { PageHeader, Badge, Modal, ModalFooter, EmptyState, LoadingState } from "@/components/ui";
+
+// ============================================
+// TYPES
+// ============================================
 
 interface Project {
     id: string;
     name: string;
     description: string | null;
     status: "ACTIVE" | "COMPLETED" | "ARCHIVED";
+    color: string | null;
+    icon: string | null;
+    startDate: string | null;
+    endDate: string | null;
     owner: { id: string; name: string; email: string };
     client: { id: string; name: string } | null;
-    members: Array<{ id: string; userId: string; role: string; user: { id: string; name: string; email: string } }>;
+    members: { user: { id: string; name: string; email: string }; role: string }[];
     _count: { tasks: number };
+    taskStats: {
+        TODO: number;
+        IN_PROGRESS: number;
+        IN_REVIEW: number;
+        DONE: number;
+        total: number;
+        overdue: number;
+        completionPercent: number;
+    };
     createdAt: string;
     updatedAt: string;
 }
 
-const STATUS_STYLES: Record<string, { bg: string; text: string; label: string; gradient: string }> = {
-    ACTIVE: { bg: "bg-emerald-50", text: "text-emerald-700", label: "Actif", gradient: "from-emerald-400 to-emerald-500" },
-    COMPLETED: { bg: "bg-blue-50", text: "text-blue-700", label: "Terminé", gradient: "from-blue-400 to-blue-500" },
-    ARCHIVED: { bg: "bg-gray-100", text: "text-gray-600", label: "Archivé", gradient: "from-gray-400 to-gray-500" },
-};
+// ============================================
+// PAGE
+// ============================================
 
 export default function ManagerProjectsPage() {
-    const { data: session } = useSession();
     const [projects, setProjects] = useState<Project[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const [loading, setLoading] = useState(true);
+    const [view, setView] = useState<"grid" | "list">("grid");
     const [search, setSearch] = useState("");
-    const [showNewModal, setShowNewModal] = useState(false);
-    const [newProject, setNewProject] = useState({ name: "", description: "" });
-    const [isCreating, setIsCreating] = useState(false);
+    const [statusFilter, setStatusFilter] = useState<string>("");
+    const [showCreate, setShowCreate] = useState(false);
+    const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
+    const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
+
+    // Create form
+    const [createForm, setCreateForm] = useState({
+        name: "",
+        description: "",
+        clientId: "",
+        color: "#6366f1",
+        startDate: "",
+        endDate: "",
+        memberIds: [] as string[],
+    });
+    const [creating, setCreating] = useState(false);
+
+    const fetchProjects = useCallback(async () => {
+        setLoading(true);
+        try {
+            const params = new URLSearchParams();
+            if (search) params.set("search", search);
+            if (statusFilter) params.set("status", statusFilter);
+
+            const res = await fetch(`/api/projects?${params}`);
+            const json = await res.json();
+            if (json.success) setProjects(json.data);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoading(false);
+        }
+    }, [search, statusFilter]);
 
     useEffect(() => {
-        loadProjects();
+        fetchProjects();
+    }, [fetchProjects]);
+
+    useEffect(() => {
+        // Load clients & users for create modal
+        Promise.all([
+            fetch("/api/clients").then((r) => r.json()),
+            fetch("/api/users?role=MANAGER,SDR,DEVELOPER,BUSINESS_DEVELOPER&limit=200").then((r) => r.json()),
+        ]).then(([clientsJson, usersJson]) => {
+            if (clientsJson.success) setClients(clientsJson.data || []);
+            if (usersJson.success) setUsers(usersJson.data?.users?.map((u: { id: string; name: string }) => ({ id: u.id, name: u.name })) || []);
+        }).catch(console.error);
     }, []);
 
-    const loadProjects = async () => {
-        setIsLoading(true);
-        try {
-            const res = await fetch("/api/projects");
-            const json = await res.json();
-            if (json.success) {
-                setProjects(json.data);
-            }
-        } catch (error) {
-            console.error("Failed to load projects:", error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const handleCreateProject = async () => {
-        if (!newProject.name.trim()) return;
-
-        setIsCreating(true);
+    const handleCreate = async () => {
+        if (!createForm.name.trim()) return;
+        setCreating(true);
         try {
             const res = await fetch("/api/projects", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(newProject),
+                body: JSON.stringify({
+                    name: createForm.name.trim(),
+                    description: createForm.description.trim() || null,
+                    clientId: createForm.clientId || null,
+                    color: createForm.color,
+                    startDate: createForm.startDate || null,
+                    endDate: createForm.endDate || null,
+                    members: createForm.memberIds.map((id) => ({ userId: id })),
+                }),
             });
             const json = await res.json();
             if (json.success) {
-                setProjects([json.data, ...projects]);
-                setShowNewModal(false);
-                setNewProject({ name: "", description: "" });
+                setShowCreate(false);
+                setCreateForm({
+                    name: "", description: "", clientId: "", color: "#6366f1",
+                    startDate: "", endDate: "", memberIds: [],
+                });
+                fetchProjects();
             }
-        } catch (error) {
-            console.error("Failed to create project:", error);
+        } catch (e) {
+            console.error(e);
         } finally {
-            setIsCreating(false);
+            setCreating(false);
         }
     };
 
-    const filteredProjects = projects.filter((p) =>
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.description?.toLowerCase().includes(search.toLowerCase())
-    );
-
-    const stats = {
-        total: projects.length,
-        active: projects.filter((p) => p.status === "ACTIVE").length,
-        completed: projects.filter((p) => p.status === "COMPLETED").length,
+    const handleDuplicate = async (projectId: string) => {
+        try {
+            const res = await fetch(`/api/projects/${projectId}/duplicate`, { method: "POST" });
+            const json = await res.json();
+            if (json.success) fetchProjects();
+        } catch (e) {
+            console.error(e);
+        }
     };
 
-    if (isLoading) {
-        return (
-            <div className="flex items-center justify-center py-20">
-                <div className="flex flex-col items-center gap-3">
-                    <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
-                    <p className="text-sm text-slate-500">Chargement des projets...</p>
-                </div>
-            </div>
-        );
-    }
+    const handleArchive = async (projectId: string) => {
+        try {
+            const res = await fetch(`/api/projects/${projectId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ status: "ARCHIVED" }),
+            });
+            if ((await res.json()).success) fetchProjects();
+        } catch (e) {
+            console.error(e);
+        }
+    };
+
+    const handleDelete = async (projectId: string) => {
+        if (!confirm("Supprimer ce projet et toutes ses tâches ?")) return;
+        try {
+            await fetch(`/api/projects/${projectId}`, { method: "DELETE" });
+            fetchProjects();
+        } catch (e) {
+            console.error(e);
+        }
+    };
+
+    // Stats
+    const totalActive = projects.filter((p) => p.status === "ACTIVE").length;
+    const totalCompleted = projects.filter((p) => p.status === "COMPLETED").length;
+    const totalOverdue = projects.reduce((acc, p) => acc + (p.taskStats?.overdue || 0), 0);
 
     return (
-        <div className="space-y-6">
-            {/* Premium Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-900">Projets</h1>
-                    <p className="text-sm text-slate-500 mt-1">
-                        Gérez vos projets et suivez leur avancement
-                    </p>
-                </div>
-                <div className="flex items-center gap-3">
+        <div className="p-6 max-w-7xl mx-auto">
+            <PageHeader
+                title="Projets"
+                subtitle={`${projects.length} projets`}
+                icon={<FolderKanban className="w-6 h-6 text-indigo-600" />}
+                actions={
                     <button
-                        onClick={loadProjects}
-                        className="p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
-                    >
-                        <RefreshCw className={`w-4 h-4 text-slate-500 ${isLoading ? "animate-spin" : ""}`} />
-                    </button>
-                    <button
-                        onClick={() => setShowNewModal(true)}
-                        className="mgr-btn-primary flex items-center gap-2 h-10 px-5 text-sm font-medium"
+                        onClick={() => setShowCreate(true)}
+                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
                     >
                         <Plus className="w-4 h-4" />
                         Nouveau projet
                     </button>
-                </div>
+                }
+            />
+
+            {/* Stats bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6">
+                <StatMini icon={<FolderKanban className="w-4 h-4 text-slate-500" />} label="Total" value={projects.length} />
+                <StatMini icon={<Clock className="w-4 h-4 text-blue-500" />} label="Actifs" value={totalActive} />
+                <StatMini icon={<CheckCircle2 className="w-4 h-4 text-emerald-500" />} label="Terminés" value={totalCompleted} />
+                <StatMini icon={<AlertTriangle className="w-4 h-4 text-red-500" />} label="Tâches en retard" value={totalOverdue} />
             </div>
 
-            {/* Premium Stats */}
-            <div className="grid grid-cols-3 gap-5">
-                <div className="mgr-stat-card">
-                    <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center">
-                            <FolderKanban className="w-6 h-6 text-indigo-600" />
-                        </div>
-                        <div>
-                            <p className="text-2xl font-bold text-slate-900">{stats.total}</p>
-                            <p className="text-sm text-slate-500">Total projets</p>
-                        </div>
-                    </div>
-                </div>
-                <div className="mgr-stat-card">
-                    <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center">
-                            <div className="w-3 h-3 rounded-full bg-emerald-500" />
-                        </div>
-                        <div>
-                            <p className="text-2xl font-bold text-emerald-600">{stats.active}</p>
-                            <p className="text-sm text-slate-500">Actifs</p>
-                        </div>
-                    </div>
-                </div>
-                <div className="mgr-stat-card">
-                    <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center">
-                            <CheckSquare className="w-6 h-6 text-blue-600" />
-                        </div>
-                        <div>
-                            <p className="text-2xl font-bold text-blue-600">{stats.completed}</p>
-                            <p className="text-sm text-slate-500">Terminés</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Premium Search */}
-            <div className="bg-white border border-slate-200 rounded-xl p-4">
-                <div className="relative">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+            {/* Controls */}
+            <div className="flex items-center gap-3 mt-6">
+                <div className="relative flex-1 max-w-sm">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
                         type="text"
                         placeholder="Rechercher un projet..."
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        className="mgr-search-input w-full h-11 pl-12 pr-10 text-sm text-slate-900"
+                        className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-indigo-400"
                     />
-                    {search && (
-                        <button
-                            onClick={() => setSearch("")}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 hover:bg-slate-100 rounded-full transition-colors"
-                        >
-                            <X className="w-4 h-4 text-slate-400" />
-                        </button>
-                    )}
+                </div>
+
+                <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-indigo-400"
+                >
+                    <option value="">Tous les statuts</option>
+                    <option value="ACTIVE">Actifs</option>
+                    <option value="COMPLETED">Terminés</option>
+                    <option value="ARCHIVED">Archivés</option>
+                </select>
+
+                <div className="flex bg-slate-100 border border-slate-200 rounded-lg p-0.5 ml-auto">
+                    <button
+                        onClick={() => setView("grid")}
+                        className={cn(
+                            "p-1.5 rounded transition-colors",
+                            view === "grid" ? "bg-white shadow-sm text-indigo-600" : "text-slate-500 hover:text-slate-700"
+                        )}
+                    >
+                        <LayoutGrid className="w-4 h-4" />
+                    </button>
+                    <button
+                        onClick={() => setView("list")}
+                        className={cn(
+                            "p-1.5 rounded transition-colors",
+                            view === "list" ? "bg-white shadow-sm text-indigo-600" : "text-slate-500 hover:text-slate-700"
+                        )}
+                    >
+                        <LayoutList className="w-4 h-4" />
+                    </button>
                 </div>
             </div>
 
-            {/* Projects Grid */}
-            {filteredProjects.length === 0 ? (
-                <div className="text-center py-16 bg-white rounded-2xl border border-slate-200">
-                    <div className="w-16 h-16 rounded-2xl bg-indigo-100 flex items-center justify-center mx-auto mb-4">
-                        <FolderKanban className="w-8 h-8 text-indigo-500" />
+            {/* Content */}
+            <div className="mt-6">
+                {loading ? (
+                    <LoadingState message="Chargement des projets..." />
+                ) : projects.length === 0 ? (
+                    <EmptyState
+                        icon={FolderKanban}
+                        title="Aucun projet"
+                        description="Créez votre premier projet pour commencer"
+                        action={
+                            <button
+                                onClick={() => setShowCreate(true)}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg"
+                            >
+                                <Plus className="w-4 h-4" />
+                                Créer un projet
+                            </button>
+                        }
+                    />
+                ) : view === "grid" ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {projects.map((p) => (
+                            <ProjectCard
+                                key={p.id}
+                                project={p}
+                                onDuplicate={() => handleDuplicate(p.id)}
+                                onArchive={() => handleArchive(p.id)}
+                                onDelete={() => handleDelete(p.id)}
+                            />
+                        ))}
                     </div>
-                    <h3 className="text-lg font-semibold text-slate-900 mb-2">
-                        {search ? "Aucun projet trouvé" : "Aucun projet"}
-                    </h3>
-                    <p className="text-sm text-slate-500 mb-6">
-                        {search ? "Essayez une autre recherche" : "Créez votre premier projet pour commencer"}
-                    </p>
-                    {!search && (
-                        <button
-                            onClick={() => setShowNewModal(true)}
-                            className="mgr-btn-primary inline-flex items-center gap-2"
+                ) : (
+                    <div className="space-y-2">
+                        {projects.map((p) => (
+                            <ProjectRow
+                                key={p.id}
+                                project={p}
+                                onDuplicate={() => handleDuplicate(p.id)}
+                                onArchive={() => handleArchive(p.id)}
+                                onDelete={() => handleDelete(p.id)}
+                            />
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Create Modal */}
+            <Modal isOpen={showCreate} onClose={() => setShowCreate(false)} title="Nouveau projet" size="lg">
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Nom *</label>
+                        <input
+                            type="text"
+                            value={createForm.name}
+                            onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400"
+                            placeholder="Nom du projet"
+                            autoFocus
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                        <textarea
+                            value={createForm.description}
+                            onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
+                            rows={3}
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 resize-none"
+                            placeholder="Description du projet..."
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Client</label>
+                            <select
+                                value={createForm.clientId}
+                                onChange={(e) => setCreateForm({ ...createForm, clientId: e.target.value })}
+                                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white"
+                            >
+                                <option value="">Aucun client</option>
+                                {clients.map((c) => (
+                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Couleur</label>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="color"
+                                    value={createForm.color}
+                                    onChange={(e) => setCreateForm({ ...createForm, color: e.target.value })}
+                                    className="w-10 h-10 rounded-lg border border-slate-200 cursor-pointer"
+                                />
+                                <span className="text-xs text-slate-500">{createForm.color}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Membres de l&apos;équipe</label>
+                        <p className="text-xs text-slate-500 mb-2">Vous serez ajouté comme propriétaire. Ajoutez d&apos;autres membres ci-dessous.</p>
+                        <select
+                            value=""
+                            onChange={(e) => {
+                                const id = e.target.value;
+                                if (id && !createForm.memberIds.includes(id)) {
+                                    setCreateForm({ ...createForm, memberIds: [...createForm.memberIds, id] });
+                                }
+                                e.target.value = "";
+                            }}
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white"
                         >
-                            <Plus className="w-4 h-4" />
-                            Créer un projet
-                        </button>
+                            <option value="">Ajouter un membre...</option>
+                            {users
+                                .filter((u) => !createForm.memberIds.includes(u.id))
+                                .map((u) => (
+                                    <option key={u.id} value={u.id}>{u.name}</option>
+                                ))}
+                        </select>
+                        {createForm.memberIds.length > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-2">
+                                {createForm.memberIds.map((id) => {
+                                    const u = users.find((x) => x.id === id);
+                                    return (
+                                        <span
+                                            key={id}
+                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-sm border border-indigo-100"
+                                        >
+                                            {u?.name ?? id}
+                                            <button
+                                                type="button"
+                                                onClick={() => setCreateForm({ ...createForm, memberIds: createForm.memberIds.filter((x) => x !== id) })}
+                                                className="p-0.5 hover:bg-indigo-200 rounded"
+                                                aria-label="Retirer"
+                                            >
+                                                <X className="w-3 h-3" />
+                                            </button>
+                                        </span>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Date début</label>
+                            <input
+                                type="date"
+                                value={createForm.startDate}
+                                onChange={(e) => setCreateForm({ ...createForm, startDate: e.target.value })}
+                                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Date fin</label>
+                            <input
+                                type="date"
+                                value={createForm.endDate}
+                                onChange={(e) => setCreateForm({ ...createForm, endDate: e.target.value })}
+                                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400"
+                            />
+                        </div>
+                    </div>
+                </div>
+                <ModalFooter>
+                    <button
+                        onClick={() => setShowCreate(false)}
+                        className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-lg"
+                    >
+                        Annuler
+                    </button>
+                    <button
+                        onClick={handleCreate}
+                        disabled={!createForm.name.trim() || creating}
+                        className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50 flex items-center gap-2"
+                    >
+                        {creating && <Loader2 className="w-4 h-4 animate-spin" />}
+                        Créer
+                    </button>
+                </ModalFooter>
+            </Modal>
+        </div>
+    );
+}
+
+// ============================================
+// SUB-COMPONENTS
+// ============================================
+
+function StatMini({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
+    return (
+        <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3">
+            {icon}
+            <div>
+                <p className="text-lg font-bold text-slate-900">{value}</p>
+                <p className="text-xs text-slate-500">{label}</p>
+            </div>
+        </div>
+    );
+}
+
+const STATUS_BADGE: Record<string, { label: string; variant: "default" | "success" | "warning" }> = {
+    ACTIVE: { label: "Actif", variant: "default" },
+    COMPLETED: { label: "Terminé", variant: "success" },
+    ARCHIVED: { label: "Archivé", variant: "warning" },
+};
+
+function ProjectCard({
+    project,
+    onDuplicate,
+    onArchive,
+    onDelete,
+}: {
+    project: Project;
+    onDuplicate: () => void;
+    onArchive: () => void;
+    onDelete: () => void;
+}) {
+    const [showMenu, setShowMenu] = useState(false);
+    const stats = project.taskStats;
+
+    return (
+        <a
+            href={`/manager/projects/${project.id}`}
+            className="block bg-white border border-slate-200 rounded-xl p-4 hover:border-indigo-300 hover:shadow-md transition-all group relative"
+        >
+            {/* Color accent */}
+            <div
+                className="h-1.5 rounded-full mb-3 w-16"
+                style={{ backgroundColor: project.color || "#6366f1" }}
+            />
+
+            {/* Header */}
+            <div className="flex items-start justify-between mb-2">
+                <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-semibold text-slate-800 truncate group-hover:text-indigo-700 transition-colors">
+                        {project.name}
+                    </h3>
+                    {project.client && (
+                        <p className="text-xs text-slate-500 mt-0.5">{project.client.name}</p>
                     )}
                 </div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                    {filteredProjects.map((project, index) => {
-                        const statusStyle = STATUS_STYLES[project.status];
-                        return (
-                            <Link
-                                key={project.id}
-                                href={`/manager/projects/${project.id}`}
-                                className="mgr-client-card group block"
-                                style={{ animationDelay: `${index * 50}ms` }}
+                <div className="flex items-center gap-2">
+                    <Badge variant={STATUS_BADGE[project.status]?.variant || "default"}>
+                        {STATUS_BADGE[project.status]?.label || project.status}
+                    </Badge>
+                    <div className="relative">
+                        <button
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setShowMenu(!showMenu);
+                            }}
+                            className="p-1 text-slate-400 hover:text-slate-600 rounded"
+                        >
+                            <MoreHorizontal className="w-4 h-4" />
+                        </button>
+                        {showMenu && (
+                            <div
+                                className="absolute right-0 top-8 z-10 bg-white border border-slate-200 rounded-lg shadow-lg py-1 w-40"
+                                onClick={(e) => e.preventDefault()}
                             >
-                                <div className="p-5">
-                                    <div className="flex items-start justify-between mb-4">
-                                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-                                            <FolderKanban className="w-6 h-6 text-indigo-600" />
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className={`px-2.5 py-1 text-xs font-medium rounded-lg ${statusStyle.bg} ${statusStyle.text}`}>
-                                                {statusStyle.label}
-                                            </span>
-                                            <ArrowRight className="w-5 h-5 text-slate-300 -rotate-45 group-hover:rotate-0 group-hover:text-indigo-500 transition-all duration-300" />
-                                        </div>
-                                    </div>
-
-                                    <h3 className="font-semibold text-slate-900 mb-1 group-hover:text-indigo-600 transition-colors">
-                                        {project.name}
-                                    </h3>
-                                    {project.description && (
-                                        <p className="text-sm text-slate-500 line-clamp-2 mb-4">
-                                            {project.description}
-                                        </p>
-                                    )}
-                                </div>
-
-                                <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
-                                    <div className="flex items-center gap-4 text-xs text-slate-500">
-                                        <span className="flex items-center gap-1.5">
-                                            <CheckSquare className="w-3.5 h-3.5" />
-                                            {project._count?.tasks || 0} tâches
-                                        </span>
-                                        <span className="flex items-center gap-1.5">
-                                            <Users className="w-3.5 h-3.5" />
-                                            {project.members.length}
-                                        </span>
-                                    </div>
-                                    {project.client && (
-                                        <span className="text-xs text-slate-400 font-medium">{project.client.name}</span>
-                                    )}
-                                </div>
-                            </Link>
-                        );
-                    })}
-                </div>
-            )}
-
-            {/* Premium Create Modal */}
-            {showNewModal && (
-                <div className="fixed inset-0 dev-modal-overlay z-50 flex items-center justify-center p-4">
-                    <div className="dev-modal w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-3 mb-6">
-                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center">
-                                <Sparkles className="w-5 h-5 text-white" />
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onDuplicate(); setShowMenu(false); }}
+                                    className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+                                >
+                                    <Copy className="w-3.5 h-3.5" /> Dupliquer
+                                </button>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onArchive(); setShowMenu(false); }}
+                                    className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+                                >
+                                    <Archive className="w-3.5 h-3.5" /> Archiver
+                                </button>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onDelete(); setShowMenu(false); }}
+                                    className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5" /> Supprimer
+                                </button>
                             </div>
-                            <div>
-                                <h2 className="text-lg font-semibold text-slate-900">Nouveau projet</h2>
-                                <p className="text-sm text-slate-500">Créez un nouveau projet</p>
-                            </div>
-                        </div>
-
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-2">
-                                    Nom du projet *
-                                </label>
-                                <input
-                                    type="text"
-                                    value={newProject.name}
-                                    onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
-                                    placeholder="Ex: Refonte landing page"
-                                    className="dev-input"
-                                    autoFocus
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-2">
-                                    Description
-                                </label>
-                                <textarea
-                                    value={newProject.description}
-                                    onChange={(e) => setNewProject({ ...newProject, description: e.target.value })}
-                                    placeholder="Description du projet..."
-                                    rows={3}
-                                    className="dev-input resize-none"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-200">
-                            <button
-                                onClick={() => setShowNewModal(false)}
-                                className="h-10 px-5 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-                            >
-                                Annuler
-                            </button>
-                            <button
-                                onClick={handleCreateProject}
-                                disabled={!newProject.name.trim() || isCreating}
-                                className="mgr-btn-primary h-10 px-5 text-sm font-medium disabled:opacity-50 flex items-center gap-2"
-                            >
-                                {isCreating ? (
-                                    <>
-                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                        Création...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Plus className="w-4 h-4" />
-                                        Créer le projet
-                                    </>
-                                )}
-                            </button>
-                        </div>
+                        )}
                     </div>
                 </div>
+            </div>
+
+            {/* Description */}
+            {project.description && (
+                <p className="text-xs text-slate-500 line-clamp-2 mb-3">{project.description}</p>
             )}
-        </div>
+
+            {/* Progress bar */}
+            <div className="mb-3">
+                <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+                    <span>{stats?.completionPercent || 0}% terminé</span>
+                    <span>{stats?.total || 0} tâches</span>
+                </div>
+                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                        className="h-full bg-indigo-500 rounded-full transition-all"
+                        style={{ width: `${stats?.completionPercent || 0}%` }}
+                    />
+                </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between">
+                <div className="flex -space-x-1.5">
+                    {project.members.slice(0, 4).map((m) => (
+                        <div
+                            key={m.user.id}
+                            className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[9px] font-bold border-2 border-white"
+                            title={m.user.name}
+                        >
+                            {m.user.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                        </div>
+                    ))}
+                    {project.members.length > 4 && (
+                        <div className="w-6 h-6 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center text-[9px] font-bold border-2 border-white">
+                            +{project.members.length - 4}
+                        </div>
+                    )}
+                </div>
+                {(stats?.overdue || 0) > 0 && (
+                    <span className="flex items-center gap-1 text-xs text-red-600 font-medium">
+                        <AlertTriangle className="w-3 h-3" />
+                        {stats.overdue} en retard
+                    </span>
+                )}
+            </div>
+        </a>
+    );
+}
+
+function ProjectRow({
+    project,
+    onDuplicate,
+    onArchive,
+    onDelete,
+}: {
+    project: Project;
+    onDuplicate: () => void;
+    onArchive: () => void;
+    onDelete: () => void;
+}) {
+    const stats = project.taskStats;
+
+    return (
+        <a
+            href={`/manager/projects/${project.id}`}
+            className="flex items-center gap-4 bg-white border border-slate-200 rounded-lg px-4 py-3 hover:border-indigo-300 hover:shadow-sm transition-all group"
+        >
+            <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: project.color || "#6366f1" }} />
+            <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-slate-800 truncate group-hover:text-indigo-700">{project.name}</p>
+                {project.client && <p className="text-xs text-slate-500">{project.client.name}</p>}
+            </div>
+            <Badge variant={STATUS_BADGE[project.status]?.variant || "default"}>
+                {STATUS_BADGE[project.status]?.label || project.status}
+            </Badge>
+            <div className="w-24 text-right">
+                <p className="text-sm font-medium text-slate-700">{stats?.completionPercent || 0}%</p>
+                <p className="text-xs text-slate-500">{stats?.total || 0} tâches</p>
+            </div>
+            <div className="flex -space-x-1.5">
+                {project.members.slice(0, 3).map((m) => (
+                    <div
+                        key={m.user.id}
+                        className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[9px] font-bold border-2 border-white"
+                    >
+                        {m.user.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                    </div>
+                ))}
+            </div>
+            <div className="flex items-center gap-1" onClick={(e) => e.preventDefault()}>
+                <button onClick={onDuplicate} className="p-1.5 text-slate-400 hover:text-indigo-600 rounded" title="Dupliquer">
+                    <Copy className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={onArchive} className="p-1.5 text-slate-400 hover:text-amber-600 rounded" title="Archiver">
+                    <Archive className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={onDelete} className="p-1.5 text-slate-400 hover:text-red-600 rounded" title="Supprimer">
+                    <Trash2 className="w-3.5 h-3.5" />
+                </button>
+            </div>
+        </a>
     );
 }

@@ -1,29 +1,26 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Loader2 } from "lucide-react";
-
-interface Task {
-    id: string;
-    title: string;
-    description: string | null;
-    status: "TODO" | "IN_PROGRESS" | "IN_REVIEW" | "DONE";
-    priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
-    dueDate: string | null;
-    project: { id: string; name: string };
-    assignee: { id: string; name: string; email: string } | null;
-    createdBy: { id: string; name: string };
-    _count: { comments: number };
-    createdAt: string;
-}
+import { Loader2, Sparkles, Plus, X } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Modal, ModalFooter } from "@/components/ui/Modal";
 
 interface NewTaskModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onSuccess: (task: Task) => void;
+    onSuccess: (task: any) => void;
     defaultProjectId?: string;
     lockProject?: boolean;
+    defaultStatus?: string;
+    members?: { id: string; name: string }[];
 }
+
+const PRIORITY_OPTIONS = [
+    { value: "LOW", label: "Basse", color: "bg-slate-100 text-slate-600 border-slate-200" },
+    { value: "MEDIUM", label: "Moyenne", color: "bg-blue-50 text-blue-700 border-blue-200" },
+    { value: "HIGH", label: "Haute", color: "bg-orange-50 text-orange-700 border-orange-200" },
+    { value: "URGENT", label: "Urgent", color: "bg-red-50 text-red-700 border-red-200" },
+];
 
 export function NewTaskModal({
     isOpen,
@@ -31,54 +28,109 @@ export function NewTaskModal({
     onSuccess,
     defaultProjectId = "",
     lockProject = false,
+    defaultStatus,
+    members: propMembers,
 }: NewTaskModalProps) {
     const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
+    const [members, setMembers] = useState<{ id: string; name: string }[]>(propMembers || []);
     const [isLoading, setIsLoading] = useState(false);
-    const [formData, setFormData] = useState({
+    const [aiLoading, setAiLoading] = useState(false);
+    const [showAdvanced, setShowAdvanced] = useState(false);
+    const [labelInput, setLabelInput] = useState("");
+
+    const [form, setForm] = useState({
         title: "",
         description: "",
         projectId: defaultProjectId,
         priority: "MEDIUM",
         dueDate: "",
-        tags: [] as string[],
+        startDate: "",
+        assigneeId: "",
+        estimatedHours: "",
+        labels: [] as string[],
     });
 
     useEffect(() => {
         if (isOpen) {
-            setFormData(prev => ({ ...prev, projectId: defaultProjectId || prev.projectId }));
+            setForm((prev) => ({
+                ...prev,
+                projectId: defaultProjectId || prev.projectId,
+                title: "",
+                description: "",
+                priority: "MEDIUM",
+                dueDate: "",
+                startDate: "",
+                assigneeId: "",
+                estimatedHours: "",
+                labels: [],
+            }));
+            setShowAdvanced(false);
+            setLabelInput("");
 
-            // Load projects for selection if not locked or if we need the name
-            fetch("/api/projects")
+            if (!lockProject) {
+                fetch("/api/projects")
+                    .then((res) => res.json())
+                    .then((json) => {
+                        if (json.success) setProjects(json.data);
+                    })
+                    .catch(console.error);
+            }
+        }
+    }, [isOpen, defaultProjectId, lockProject]);
+
+    // Load members when project changes
+    useEffect(() => {
+        if (propMembers) {
+            setMembers(propMembers);
+            return;
+        }
+        if (form.projectId) {
+            fetch(`/api/projects/${form.projectId}`)
                 .then((res) => res.json())
                 .then((json) => {
-                    if (json.success) setProjects(json.data);
+                    if (json.success && json.data?.members) {
+                        setMembers(
+                            json.data.members.map((m: any) => ({
+                                id: m.user.id,
+                                name: m.user.name,
+                            }))
+                        );
+                    }
                 })
                 .catch(console.error);
         }
-    }, [isOpen, defaultProjectId]);
+    }, [form.projectId, propMembers]);
 
     const handleSubmit = async () => {
-        if (!formData.title || !formData.projectId) return;
+        if (!form.title.trim() || !form.projectId) return;
 
         setIsLoading(true);
         try {
+            const payload: any = {
+                projectId: form.projectId,
+                title: form.title.trim(),
+                description: form.description.trim() || null,
+                priority: form.priority,
+                dueDate: form.dueDate || null,
+                startDate: form.startDate || null,
+                assigneeId: form.assigneeId || null,
+                estimatedHours: form.estimatedHours || null,
+                labels: form.labels,
+            };
+
+            if (defaultStatus) {
+                payload.status = defaultStatus;
+            }
+
             const res = await fetch("/api/tasks", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(formData),
+                body: JSON.stringify(payload),
             });
             const json = await res.json();
             if (json.success) {
                 onSuccess(json.data);
-                // Reset form
-                setFormData({
-                    title: "",
-                    description: "",
-                    projectId: defaultProjectId || "",
-                    priority: "MEDIUM",
-                    dueDate: "",
-                    tags: [],
-                });
+                onClose();
             }
         } catch (error) {
             console.error("Failed to create task:", error);
@@ -87,109 +139,242 @@ export function NewTaskModal({
         }
     };
 
-    if (!isOpen) return null;
+    const addLabel = () => {
+        const val = labelInput.trim();
+        if (val && !form.labels.includes(val)) {
+            setForm({ ...form, labels: [...form.labels, val] });
+        }
+        setLabelInput("");
+    };
+
+    const removeLabel = (label: string) => {
+        setForm({ ...form, labels: form.labels.filter((l) => l !== label) });
+    };
+
+    const handleAiEnhance = async () => {
+        if (!form.title.trim()) return;
+        setAiLoading(true);
+        try {
+            const project = projects.find((p) => p.id === form.projectId);
+            const res = await fetch("/api/ai/mistral/task-enhance", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    title: form.title,
+                    description: form.description,
+                    projectContext: project?.name || "",
+                }),
+            });
+            const json = await res.json();
+            if (json.success && json.data) {
+                setForm((prev) => ({
+                    ...prev,
+                    title: json.data.enhancedTitle || prev.title,
+                    description: json.data.enhancedDescription || prev.description,
+                    priority: json.data.suggestedPriority || prev.priority,
+                    labels: json.data.suggestedLabels || prev.labels,
+                    estimatedHours: json.data.estimatedHours?.toString() || prev.estimatedHours,
+                }));
+                setShowAdvanced(true);
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setAiLoading(false);
+        }
+    };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-            <div className="bg-white rounded-lg w-full max-w-md p-6 animate-in fade-in zoom-in duration-200">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Nouvelle tâche</h2>
-
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Titre *
-                        </label>
+        <Modal isOpen={isOpen} onClose={onClose} title="Nouvelle tâche" size="lg">
+            <div className="space-y-4">
+                {/* Title + AI Enhance */}
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Titre *</label>
+                    <div className="flex gap-2">
                         <input
                             type="text"
-                            value={formData.title}
-                            onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm outline-none focus:border-violet-500"
+                            value={form.title}
+                            onChange={(e) => setForm({ ...form, title: e.target.value })}
+                            className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400"
                             placeholder="Titre de la tâche"
                             autoFocus
                         />
+                        <button
+                            onClick={handleAiEnhance}
+                            disabled={!form.title.trim() || aiLoading}
+                            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 transition-colors whitespace-nowrap"
+                            title="Améliorer avec IA"
+                        >
+                            {aiLoading ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                                <Sparkles className="w-4 h-4" />
+                            )}
+                            IA
+                        </button>
                     </div>
+                </div>
 
-                    {!lockProject && (
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Projet *
-                            </label>
-                            <select
-                                value={formData.projectId}
-                                onChange={(e) => setFormData({ ...formData, projectId: e.target.value })}
-                                className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm outline-none focus:border-violet-500 bg-white"
-                            >
-                                <option value="">Sélectionner un projet</option>
-                                {projects.map((p) => (
-                                    <option key={p.id} value={p.id}>{p.name}</option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
-
+                {/* Project selector */}
+                {!lockProject && (
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Priorité
-                        </label>
-                        <div className="flex gap-2">
-                            {["LOW", "MEDIUM", "HIGH", "URGENT"].map((p) => (
-                                <button
-                                    key={p}
-                                    onClick={() => setFormData({ ...formData, priority: p })}
-                                    className={`px-3 py-1.5 rounded text-xs font-medium border transition-colors ${formData.priority === p
-                                        ? "bg-violet-50 border-violet-200 text-violet-700"
-                                        : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
-                                        }`}
-                                >
-                                    {p}
-                                </button>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Projet *</label>
+                        <select
+                            value={form.projectId}
+                            onChange={(e) => setForm({ ...form, projectId: e.target.value })}
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white"
+                        >
+                            <option value="">Sélectionner un projet</option>
+                            {projects.map((p) => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
                             ))}
+                        </select>
+                    </div>
+                )}
+
+                {/* Assignee */}
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Assigné à</label>
+                    <select
+                        value={form.assigneeId}
+                        onChange={(e) => setForm({ ...form, assigneeId: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white"
+                    >
+                        <option value="">Non assigné</option>
+                        {members.map((m) => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                    </select>
+                </div>
+
+                {/* Priority */}
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Priorité</label>
+                    <div className="flex gap-2">
+                        {PRIORITY_OPTIONS.map((p) => (
+                            <button
+                                key={p.value}
+                                onClick={() => setForm({ ...form, priority: p.value })}
+                                className={cn(
+                                    "px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
+                                    form.priority === p.value ? p.color : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+                                )}
+                            >
+                                {p.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Due date */}
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Échéance</label>
+                    <input
+                        type="date"
+                        value={form.dueDate}
+                        onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400"
+                    />
+                </div>
+
+                {/* Description */}
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                    <textarea
+                        value={form.description}
+                        onChange={(e) => setForm({ ...form, description: e.target.value })}
+                        rows={3}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 resize-none"
+                        placeholder="Description détaillée..."
+                    />
+                </div>
+
+                {/* Toggle advanced */}
+                <button
+                    onClick={() => setShowAdvanced(!showAdvanced)}
+                    className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                >
+                    {showAdvanced ? "Masquer les options avancées" : "Options avancées"}
+                </button>
+
+                {/* Advanced fields */}
+                {showAdvanced && (
+                    <div className="space-y-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                        {/* Start date */}
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Date de début</label>
+                            <input
+                                type="date"
+                                value={form.startDate}
+                                onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+                                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white"
+                            />
+                        </div>
+
+                        {/* Estimated hours */}
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Estimation (heures)</label>
+                            <input
+                                type="number"
+                                step="0.5"
+                                min="0"
+                                value={form.estimatedHours}
+                                onChange={(e) => setForm({ ...form, estimatedHours: e.target.value })}
+                                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white"
+                                placeholder="Ex: 4"
+                            />
+                        </div>
+
+                        {/* Labels */}
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Labels</label>
+                            <div className="flex flex-wrap gap-1 mb-2">
+                                {form.labels.map((l) => (
+                                    <span key={l} className="flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md">
+                                        {l}
+                                        <button onClick={() => removeLabel(l)}>
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </span>
+                                ))}
+                            </div>
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={labelInput}
+                                    onChange={(e) => setLabelInput(e.target.value)}
+                                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addLabel())}
+                                    className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white"
+                                    placeholder="Ajouter un label..."
+                                />
+                                <button
+                                    onClick={addLabel}
+                                    className="px-2 py-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"
+                                >
+                                    <Plus className="w-4 h-4" />
+                                </button>
+                            </div>
                         </div>
                     </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Échéance
-                        </label>
-                        <input
-                            type="date"
-                            value={formData.dueDate}
-                            onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm outline-none focus:border-violet-500"
-                        />
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Description
-                        </label>
-                        <textarea
-                            value={formData.description}
-                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                            rows={3}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm outline-none focus:border-violet-500 resize-none"
-                            placeholder="Description détaillée..."
-                        />
-                    </div>
-                </div>
-
-                <div className="flex justify-end gap-3 mt-6">
-                    <button
-                        onClick={onClose}
-                        className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-md transition-colors"
-                    >
-                        Annuler
-                    </button>
-                    <button
-                        onClick={handleSubmit}
-                        disabled={!formData.title || !formData.projectId || isLoading}
-                        className="px-4 py-2 text-sm font-medium text-white bg-violet-600 hover:bg-violet-700 rounded-md disabled:opacity-50 flex items-center gap-2 transition-colors"
-                    >
-                        {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-                        Créer
-                    </button>
-                </div>
+                )}
             </div>
-        </div>
+
+            <ModalFooter>
+                <button
+                    onClick={onClose}
+                    className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-lg transition-colors"
+                >
+                    Annuler
+                </button>
+                <button
+                    onClick={handleSubmit}
+                    disabled={!form.title.trim() || !form.projectId || isLoading}
+                    className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50 flex items-center gap-2 transition-colors"
+                >
+                    {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                    Créer
+                </button>
+            </ModalFooter>
+        </Modal>
     );
 }
