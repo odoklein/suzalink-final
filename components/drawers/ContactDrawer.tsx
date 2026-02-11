@@ -102,7 +102,7 @@ export function ContactDrawer({
     });
 
     const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
-    const [actions, setActions] = useState<Array<{ id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string } }>>([]);
+    const [actions, setActions] = useState<Array<{ id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string }; sdr?: { id: string; name: string } }>>([]);
     const [actionsLoading, setActionsLoading] = useState(false);
     const lastContactIdRef = useRef<string | null>(null);
     const [campaigns, setCampaigns] = useState<Array<{ id: string; name: string; mission?: { channel: string } }>>([]);
@@ -228,13 +228,14 @@ export function ContactDrawer({
             .then((json) => {
                 if (json.success && Array.isArray(json.data)) {
                     setActions(
-                        (json.data as Array<{ id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string } }>).map(
-                            (a: { id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string } }) => ({
+                        (json.data as Array<{ id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string }; sdr?: { id: string; name: string } }>).map(
+                            (a) => ({
                                 id: a.id,
                                 result: a.result,
                                 note: a.note ?? null,
                                 createdAt: a.createdAt,
                                 campaign: a.campaign,
+                                sdr: a.sdr,
                             })
                         )
                     );
@@ -1063,19 +1064,20 @@ export function ContactDrawer({
                             fetch(`/api/actions?contactId=${contact.id}&limit=20`)
                                 .then((res) => res.json())
                                 .then((json) => {
-                                    if (json.success && Array.isArray(json.data)) {
-                                        setActions(
-                                            (json.data as Array<{ id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string } }>).map(
-                                                (a) => ({
-                                                    id: a.id,
-                                                    result: a.result,
-                                                    note: a.note ?? null,
-                                                    createdAt: a.createdAt,
-                                                    campaign: a.campaign,
-                                                })
-                                            )
-                                        );
-                                    }
+                    if (json.success && Array.isArray(json.data)) {
+                        setActions(
+                            (json.data as Array<{ id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string }; sdr?: { id: string; name: string } }>).map(
+                                (a) => ({
+                                    id: a.id,
+                                    result: a.result,
+                                    note: a.note ?? null,
+                                    createdAt: a.createdAt,
+                                    campaign: a.campaign,
+                                    sdr: a.sdr,
+                                })
+                            )
+                        );
+                    }
                                 });
                         }}
                     />
@@ -1111,18 +1113,25 @@ export function ContactDrawer({
                                                 })}
                                             </span>
                                         </div>
-                                        {a.campaign?.name && (
-                                            <p className="text-xs text-slate-500 mb-1">{a.campaign.name}</p>
-                                        )}
-                                        {a.note && (
-                                            <p className="text-slate-600 mt-1 whitespace-pre-wrap">{a.note}</p>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                            {a.campaign?.name && (
+                                <p className="text-xs text-slate-500">{a.campaign.name}</p>
+                            )}
+                            {a.sdr?.name && (
+                                <span className="text-xs text-indigo-500 font-medium bg-indigo-50 px-1.5 py-0.5 rounded">
+                                    {a.sdr.name}
+                                </span>
+                            )}
+                        </div>
+                        {a.note && (
+                            <p className="text-slate-600 mt-1 whitespace-pre-wrap">{a.note}</p>
                         )}
-                    </DrawerSection>
-                )}
+                    </div>
+                ))}
+            </div>
+        )}
+    </DrawerSection>
+)}
             </div>
         </Drawer>
     );

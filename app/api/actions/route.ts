@@ -51,14 +51,21 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 
     if (missionId) filters.missionId = missionId;
 
-    // SDR and BD: own actions only, unless they are team lead for this mission (then show all team actions)
+    // When viewing actions for a specific contact or company (drawer history),
+    // show ALL actions from all team members so every role can see notes & history.
+    // Only filter by sdrId when listing actions in general (no entity-specific filter).
+    const isEntityView = !!(contactId || companyId);
+
     if (session.user.role === 'SDR' || session.user.role === 'BUSINESS_DEVELOPER') {
-        const isTeamLeadForMission = missionId
-            ? await actionService.isTeamLeadForMission(session.user.id, missionId)
-            : false;
-        if (!isTeamLeadForMission) {
-            filters.sdrId = session.user.id;
+        if (!isEntityView) {
+            const isTeamLeadForMission = missionId
+                ? await actionService.isTeamLeadForMission(session.user.id, missionId)
+                : false;
+            if (!isTeamLeadForMission) {
+                filters.sdrId = session.user.id;
+            }
         }
+        // When isEntityView (contactId or companyId), no sdrId filter → show all actions
     } else {
         const sdrId = searchParams.get('sdrId');
         if (sdrId) filters.sdrId = sdrId;

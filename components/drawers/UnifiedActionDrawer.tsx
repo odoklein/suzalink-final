@@ -139,7 +139,7 @@ export function UnifiedActionDrawer({
     const [loading, setLoading] = useState(false);
 
     // Actions state
-    const [actions, setActions] = useState<Array<{ id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string } }>>([]);
+    const [actions, setActions] = useState<Array<{ id: string; result: string; note: string | null; createdAt: string; campaign?: { name: string }; sdr?: { id: string; name: string } }>>([]);
     const [actionsLoading, setActionsLoading] = useState(false);
 
     // Campaign state for recording actions
@@ -1441,13 +1441,18 @@ export function UnifiedActionDrawer({
                                                     <div className={cn("w-2 h-2 rounded-full shrink-0", colors.dot)} />
 
                                                     <div className="flex-1 min-w-0">
-                                                        <div className="flex items-center gap-2">
+                                                        <div className="flex items-center gap-2 flex-wrap">
                                                             <span className={cn("text-sm font-semibold", colors.text)}>
                                                                 {statusLabels[a.result] ?? a.result}
                                                             </span>
                                                             {a.campaign?.name && (
                                                                 <span className="text-[10px] text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded font-medium truncate max-w-[120px]">
                                                                     {a.campaign.name}
+                                                                </span>
+                                                            )}
+                                                            {a.sdr?.name && (
+                                                                <span className="text-[10px] text-indigo-500 font-medium bg-indigo-50 px-1.5 py-0.5 rounded">
+                                                                    {a.sdr.name}
                                                                 </span>
                                                             )}
                                                         </div>
