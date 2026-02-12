@@ -2331,7 +2331,7 @@ export default function SDRActionPage() {
                         loadNextAction();
                     }
                 }}
-                isManager={false}
+                isManager={true}
                 listId={selectedListId ?? undefined}
                 companies={[]}
             />
@@ -2346,7 +2346,7 @@ export default function SDRActionPage() {
                     }
                 }}
                 onContactClick={handleContactFromCompany}
-                isManager={false}
+                isManager={true}
                 listId={selectedListId ?? undefined}
             />
         </div>
