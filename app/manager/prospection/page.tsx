@@ -244,7 +244,6 @@ export default function ManagerProspectionPage() {
         const params = new URLSearchParams();
         params.set("missionId", selectedMissionId);
         params.set("listId", selectedListId);
-        params.set("limit", tableSearchApi ? "300" : "200");
         if (tableSearchApi) params.set("search", tableSearchApi);
         params.set("_t", String(Date.now()));
         fetch(`/api/manager/prospection/action-queue?${params.toString()}`, { cache: "no-store" })
@@ -273,7 +272,6 @@ export default function ManagerProspectionPage() {
         const params = new URLSearchParams();
         params.set("missionId", selectedMissionId);
         params.set("listId", selectedListId);
-        params.set("limit", tableSearchApi ? "300" : "200");
         if (tableSearchApi) params.set("search", tableSearchApi);
         fetch(`/api/manager/prospection/action-queue?${params.toString()}`)
             .then((res) => res.json())

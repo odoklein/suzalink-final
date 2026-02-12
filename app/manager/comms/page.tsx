@@ -316,7 +316,11 @@ export default function ManagerCommsPage() {
     // Real-time event handler: incremental updates only (no full refetch)
     const handleRealtimeEvent = useCallback(
         (payload: CommsRealtimePayload) => {
-            const tid = payload.threadId;
+            // Resolve threadId for typing when server sends only userId/userName (page has thread list)
+            let tid = payload.threadId;
+            if (!tid && (payload.type === "typing_start" || payload.type === "typing_stop") && payload.userId && selectedThread?.participants?.some((p) => p.userId === payload.userId)) {
+                tid = selectedThread.id;
+            }
             const userName = payload.userName;
 
             if (payload.type === "typing_start" && tid && userName) {
@@ -425,7 +429,7 @@ export default function ManagerCommsPage() {
 
 
         },
-        [session?.user?.id, debouncedFetchStats]
+        [session?.user?.id, debouncedFetchStats, selectedThread]
     );
 
     const handleStatusChange = useCallback(
@@ -556,6 +560,17 @@ export default function ManagerCommsPage() {
         [selectedThread, session?.user?.id, error, debouncedFetchStats]
     );
 
+    // Resolve recipient user IDs for the current thread (for typing emissions).
+    const getRecipientIdsForThread = useCallback(
+        (threadId: string) => {
+            if (selectedThread?.id !== threadId) return [];
+            return selectedThread.participants
+                .filter((p) => p.userId !== session?.user?.id)
+                .map((p) => p.userId);
+        },
+        [selectedThread?.id, selectedThread?.participants, session?.user?.id]
+    );
+
     // Real-time hook with presence
     const {
         isConnected,
@@ -568,6 +583,7 @@ export default function ManagerCommsPage() {
         enabled: !!session?.user?.id,
         userId: session?.user?.id,
         onEvent: handleRealtimeEvent,
+        getRecipientIdsForThread,
     });
 
     // Keep track of selected thread for room management

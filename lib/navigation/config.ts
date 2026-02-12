@@ -437,8 +437,8 @@ export const ROLE_CONFIG: Record<UserRole, RoleConfig> = {
   },
   CLIENT: {
     label: "Client",
-    color: "slate",
-    gradient: "from-slate-500 to-slate-600",
+    color: "indigo",
+    gradient: "from-indigo-500 to-violet-600",
     defaultPath: "/client/portal",
   },
 };

@@ -623,8 +623,8 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
                             <Target className="w-6 h-6 text-emerald-600" />
                         </div>
                         <div>
-                            <p className="text-2xl font-bold text-slate-900">{mission._count.campaigns}</p>
-                            <p className="text-sm text-slate-500">Campagnes</p>
+                            <p className="text-2xl font-bold text-slate-900">{mission.campaigns.length > 0 ? "Oui" : "Non"}</p>
+                            <p className="text-sm text-slate-500">Stratégie</p>
                         </div>
                     </div>
                 </div>
@@ -826,48 +826,59 @@ export default function MissionDetailPage({ params }: { params: Promise<{ id: st
                 </div>
             </div>
 
-            {/* Campaigns Section */}
+            {/* Campaigns Section — inline view */}
             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
                 <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
                             <Target className="w-5 h-5 text-emerald-600" />
                         </div>
-                        <h2 className="text-lg font-semibold text-slate-900">Campagnes</h2>
+                        <div>
+                            <h2 className="text-lg font-semibold text-slate-900">Stratégie & Script</h2>
+                            <p className="text-sm text-slate-500">ICP, pitch et script de prospection</p>
+                        </div>
                     </div>
-                    <Link
-                        href={`/manager/campaigns/new?missionId=${mission.id}`}
-                        className="flex items-center gap-2 h-9 px-4 text-sm font-medium text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors"
-                    >
-                        <Target className="w-4 h-4" />
-                        Nouvelle
-                    </Link>
+                    {mission.campaigns.length > 0 && (
+                        <Link
+                            href={`/manager/campaigns/${mission.campaigns[0].id}`}
+                            className="flex items-center gap-2 h-9 px-4 text-sm font-medium text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors"
+                        >
+                            <Edit className="w-4 h-4" />
+                            Modifier
+                        </Link>
+                    )}
                 </div>
 
                 {mission.campaigns.length === 0 ? (
                     <div className="text-center py-12">
                         <Target className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                        <p className="text-sm text-slate-500">Aucune campagne</p>
+                        <p className="text-sm text-slate-500">Aucune stratégie configurée</p>
                     </div>
                 ) : (
-                    <div className="space-y-2">
-                        {mission.campaigns.map((campaign) => (
-                            <Link
-                                key={campaign.id}
-                                href={`/manager/campaigns/${campaign.id}`}
-                                className="mgr-mission-card group flex items-center gap-4 p-4 block"
-                            >
-                                <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-                                    <Target className="w-5 h-5 text-emerald-600" />
+                    <div className="space-y-4">
+                        {mission.campaigns.slice(0, 1).map((campaign) => (
+                            <div key={campaign.id} className="space-y-4">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <span className={campaign.isActive ? "mgr-badge-active" : "mgr-badge-paused"}>
+                                        {campaign.isActive ? "Actif" : "Pause"}
+                                    </span>
                                 </div>
-                                <div className="flex-1">
-                                    <p className="font-medium text-slate-900 group-hover:text-indigo-600 transition-colors">{campaign.name}</p>
-                                </div>
-                                <span className={campaign.isActive ? "mgr-badge-active" : "mgr-badge-paused"}>
-                                    {campaign.isActive ? "Actif" : "Pause"}
-                                </span>
-                                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-1 transition-all" />
-                            </Link>
+                                <p className="text-sm text-slate-500">
+                                    Consultez et modifiez l&apos;ICP, le pitch et le script via la page de détails de la campagne.
+                                </p>
+                                <Link
+                                    href={`/manager/campaigns/${campaign.id}`}
+                                    className="mgr-mission-card group flex items-center gap-4 p-4 block"
+                                >
+                                    <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                                        <Target className="w-5 h-5 text-emerald-600" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <p className="font-medium text-slate-900 group-hover:text-indigo-600 transition-colors">Voir le script & la stratégie</p>
+                                    </div>
+                                    <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-1 transition-all" />
+                                </Link>
+                            </div>
                         ))}
                     </div>
                 )}

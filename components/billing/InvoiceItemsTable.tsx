@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Trash2, Plus } from "lucide-react";
+import { Trash2, Plus, GripVertical, Package } from "lucide-react";
 import { Button, Input } from "@/components/ui";
 
 export interface InvoiceItem {
@@ -42,7 +42,6 @@ export function InvoiceItemsTable({ items, onChange, readOnly = false }: Invoice
         const updated = [...items];
         updated[index] = { ...updated[index], [field]: value };
 
-        // Recalculate totals
         const quantity = Number(updated[index].quantity) || 0;
         const unitPriceHt = Number(updated[index].unitPriceHt) || 0;
         const vatRate = Number(updated[index].vatRate) || 0;
@@ -63,16 +62,11 @@ export function InvoiceItemsTable({ items, onChange, readOnly = false }: Invoice
 
     const calculateTotals = () => {
         const totals = items.reduce(
-            (acc, item) => {
-                const totalHt = item.totalHt || 0;
-                const totalVat = item.totalVat || 0;
-                const totalTtc = item.totalTtc || 0;
-                return {
-                    totalHt: acc.totalHt + totalHt,
-                    totalVat: acc.totalVat + totalVat,
-                    totalTtc: acc.totalTtc + totalTtc,
-                };
-            },
+            (acc, item) => ({
+                totalHt: acc.totalHt + (item.totalHt || 0),
+                totalVat: acc.totalVat + (item.totalVat || 0),
+                totalTtc: acc.totalTtc + (item.totalTtc || 0),
+            }),
             { totalHt: 0, totalVat: 0, totalTtc: 0 }
         );
 
@@ -83,131 +77,165 @@ export function InvoiceItemsTable({ items, onChange, readOnly = false }: Invoice
         };
     };
 
+    const formatCurrency = (amount: number) =>
+        new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(amount);
+
     const totals = calculateTotals();
+
+    if (items.length === 0 && readOnly) {
+        return (
+            <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+                <Package className="w-10 h-10 mb-3" />
+                <p className="text-sm">Aucun article</p>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-4">
-            <div className="overflow-x-auto">
-                <table className="w-full border-collapse">
+            {/* Table */}
+            <div className="overflow-x-auto rounded-xl border border-slate-200/80">
+                <table className="w-full">
                     <thead>
-                        <tr className="border-b border-slate-200">
-                            <th className="text-left p-2 font-semibold text-slate-700">Description</th>
-                            <th className="text-right p-2 font-semibold text-slate-700 w-24">Qté</th>
-                            <th className="text-right p-2 font-semibold text-slate-700 w-32">Prix HT</th>
-                            <th className="text-right p-2 font-semibold text-slate-700 w-24">TVA %</th>
-                            <th className="text-right p-2 font-semibold text-slate-700 w-32">Total TTC</th>
-                            {!readOnly && <th className="w-12"></th>}
+                        <tr className="bg-gradient-to-r from-slate-50 to-slate-100/50">
+                            {!readOnly && <th className="w-8" />}
+                            <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                                Description
+                            </th>
+                            <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-24">
+                                Qté
+                            </th>
+                            <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-32">
+                                Prix unit. HT
+                            </th>
+                            <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-20">
+                                TVA
+                            </th>
+                            <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-36">
+                                Total HT
+                            </th>
+                            {!readOnly && <th className="w-12" />}
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="divide-y divide-slate-100">
                         {items.map((item, index) => (
-                            <tr key={index} className="border-b border-slate-100">
-                                <td className="p-2">
+                            <tr
+                                key={index}
+                                className="group transition-colors duration-150 hover:bg-indigo-50/30"
+                            >
+                                {!readOnly && (
+                                    <td className="px-2 py-3">
+                                        <GripVertical className="w-4 h-4 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    </td>
+                                )}
+                                <td className="px-4 py-3">
                                     {readOnly ? (
-                                        <div className="text-slate-900">{item.description}</div>
+                                        <span className="text-slate-900 font-medium">{item.description}</span>
                                     ) : (
-                                        <Input
+                                        <input
                                             value={item.description}
                                             onChange={(e) => updateItem(index, "description", e.target.value)}
-                                            placeholder="Description"
-                                            className="border-0 bg-transparent p-0 focus:ring-0"
+                                            placeholder="Description de la prestation..."
+                                            className="w-full bg-transparent border-0 p-0 text-slate-900 placeholder-slate-300 focus:outline-none focus:ring-0 text-sm"
                                         />
                                     )}
                                 </td>
-                                <td className="p-2">
+                                <td className="px-4 py-3">
                                     {readOnly ? (
-                                        <div className="text-right text-slate-900">{item.quantity.toFixed(2)}</div>
+                                        <div className="text-right text-slate-700 tabular-nums">{Number(item.quantity).toFixed(2)}</div>
                                     ) : (
-                                        <Input
+                                        <input
                                             type="number"
                                             step="0.01"
                                             min="0"
                                             value={item.quantity}
                                             onChange={(e) => updateItem(index, "quantity", parseFloat(e.target.value) || 0)}
-                                            className="text-right border-0 bg-transparent p-0 focus:ring-0"
+                                            className="w-full bg-transparent border-0 p-0 text-right text-slate-700 focus:outline-none focus:ring-0 text-sm tabular-nums"
                                         />
                                     )}
                                 </td>
-                                <td className="p-2">
+                                <td className="px-4 py-3">
                                     {readOnly ? (
-                                        <div className="text-right text-slate-900">{item.unitPriceHt.toFixed(2)} €</div>
+                                        <div className="text-right text-slate-700 tabular-nums">{formatCurrency(Number(item.unitPriceHt))}</div>
                                     ) : (
-                                        <Input
+                                        <input
                                             type="number"
                                             step="0.01"
                                             min="0"
                                             value={item.unitPriceHt}
                                             onChange={(e) => updateItem(index, "unitPriceHt", parseFloat(e.target.value) || 0)}
-                                            className="text-right border-0 bg-transparent p-0 focus:ring-0"
+                                            className="w-full bg-transparent border-0 p-0 text-right text-slate-700 focus:outline-none focus:ring-0 text-sm tabular-nums"
                                         />
                                     )}
                                 </td>
-                                <td className="p-2">
+                                <td className="px-4 py-3">
                                     {readOnly ? (
-                                        <div className="text-right text-slate-900">{item.vatRate.toFixed(2)}%</div>
+                                        <div className="text-right">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-xs font-medium tabular-nums">
+                                                {Number(item.vatRate).toFixed(0)}%
+                                            </span>
+                                        </div>
                                     ) : (
-                                        <Input
+                                        <input
                                             type="number"
                                             step="0.01"
                                             min="0"
                                             max="100"
                                             value={item.vatRate}
                                             onChange={(e) => updateItem(index, "vatRate", parseFloat(e.target.value) || 0)}
-                                            className="text-right border-0 bg-transparent p-0 focus:ring-0"
+                                            className="w-full bg-transparent border-0 p-0 text-right text-slate-700 focus:outline-none focus:ring-0 text-sm tabular-nums"
                                         />
                                     )}
                                 </td>
-                                <td className="p-2">
-                                    <div className="text-right font-medium text-slate-900">
-                                        {(item.totalTtc || 0).toFixed(2)} €
+                                <td className="px-4 py-3">
+                                    <div className="text-right font-semibold text-slate-900 tabular-nums">
+                                        {formatCurrency(item.totalHt || 0)}
                                     </div>
                                 </td>
                                 {!readOnly && (
-                                    <td className="p-2">
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
+                                    <td className="px-2 py-3">
+                                        <button
                                             onClick={() => removeItem(index)}
-                                            className="text-red-600 hover:text-red-700"
+                                            className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all duration-150"
                                         >
                                             <Trash2 className="w-4 h-4" />
-                                        </Button>
+                                        </button>
                                     </td>
                                 )}
                             </tr>
                         ))}
                     </tbody>
-                    <tfoot>
-                        <tr className="border-t-2 border-slate-300 font-semibold">
-                            <td colSpan={readOnly ? 4 : 5} className="p-2 text-right text-slate-700">
-                                Total HT:
-                            </td>
-                            <td className="p-2 text-right text-slate-900">{totals.totalHt.toFixed(2)} €</td>
-                            {!readOnly && <td></td>}
-                        </tr>
-                        <tr>
-                            <td colSpan={readOnly ? 4 : 5} className="p-2 text-right text-slate-700">
-                                TVA:
-                            </td>
-                            <td className="p-2 text-right text-slate-900">{totals.totalVat.toFixed(2)} €</td>
-                            {!readOnly && <td></td>}
-                        </tr>
-                        <tr className="border-t border-slate-300 font-bold text-lg">
-                            <td colSpan={readOnly ? 4 : 5} className="p-2 text-right text-slate-900">
-                                Total TTC:
-                            </td>
-                            <td className="p-2 text-right text-slate-900">{totals.totalTtc.toFixed(2)} €</td>
-                            {!readOnly && <td></td>}
-                        </tr>
-                    </tfoot>
                 </table>
             </div>
 
+            {/* Totals */}
+            <div className="flex justify-end">
+                <div className="w-72 space-y-2">
+                    <div className="flex justify-between items-center text-sm text-slate-500 px-2">
+                        <span>Sous-total HT</span>
+                        <span className="tabular-nums font-medium text-slate-700">{formatCurrency(totals.totalHt)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm text-slate-500 px-2">
+                        <span>TVA</span>
+                        <span className="tabular-nums font-medium text-slate-700">{formatCurrency(totals.totalVat)}</span>
+                    </div>
+                    <div className="h-px bg-gradient-to-r from-transparent via-slate-300 to-transparent" />
+                    <div className="flex justify-between items-center px-2 py-1">
+                        <span className="text-base font-bold text-slate-900">Total TTC</span>
+                        <span className="text-lg font-bold text-indigo-600 tabular-nums">{formatCurrency(totals.totalTtc)}</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Add button */}
             {!readOnly && (
-                <Button variant="outline" onClick={addItem} className="w-full">
-                    <Plus className="w-4 h-4 mr-2" />
+                <button
+                    onClick={addItem}
+                    className="w-full py-3 border-2 border-dashed border-slate-200 rounded-xl text-sm font-medium text-slate-400 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50/30 transition-all duration-200 flex items-center justify-center gap-2"
+                >
+                    <Plus className="w-4 h-4" />
                     Ajouter un article
-                </Button>
+                </button>
             )}
         </div>
     );

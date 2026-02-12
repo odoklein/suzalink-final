@@ -23,7 +23,12 @@ export async function GET(request: Request) {
         }
 
         const { searchParams } = new URL(request.url);
-        const limit = Math.min(Math.max(1, parseInt(searchParams.get("limit") || "100", 10)), 200);
+        // 0 or omitted = no limit (return all); otherwise cap at 50k for safety
+        const limitParam = searchParams.get("limit");
+        const limit =
+            limitParam === null || limitParam === "" || limitParam === "0"
+                ? 0
+                : Math.min(Math.max(1, parseInt(limitParam, 10) || 0), 50_000);
         const skip = Math.max(0, parseInt(searchParams.get("skip") || "0", 10));
         const missionIdParam = searchParams.get("missionId") || undefined;
         const listIdParam = searchParams.get("listId") || undefined;
@@ -116,7 +121,7 @@ export async function GET(request: Request) {
         const callbacks = await prisma.action.findMany({
             where: whereClause,
             skip,
-            take: limit,
+            ...(limit > 0 ? { take: limit } : {}),
             include: {
                 sdr: (isBusinessDeveloper || teamLeadMissionIds.length > 0)
                     ? { select: { id: true, name: true } }
@@ -231,7 +236,7 @@ export async function GET(request: Request) {
         return NextResponse.json({
             success: true,
             data: activeCallbacks,
-            pagination: { limit, skip, hasMore: callbacks.length === limit },
+            pagination: { limit: limit || null, skip, hasMore: limit > 0 ? callbacks.length === limit : false },
         });
 
     } catch (error) {

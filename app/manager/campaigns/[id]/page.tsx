@@ -245,7 +245,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 }
             } else {
                 showError("Erreur", json.error || "Campagne non trouvée");
-                router.push("/manager/campaigns");
+                router.push("/manager/missions");
             }
         } catch (err) {
             console.error("Failed to fetch campaign:", err);
@@ -340,7 +340,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
 
             if (json.success) {
                 success("Campagne supprimée", "La campagne a été supprimée");
-                router.push("/manager/campaigns");
+                router.push("/manager/missions");
             } else {
                 showError("Erreur", json.error);
             }
@@ -378,12 +378,12 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMSIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjAzKSIvPjwvc3ZnPg==')] opacity-50" />
                 <div className="relative z-10">
                     <div className="flex items-center gap-3 mb-6">
-                        <Link
-                            href="/manager/campaigns"
+                        <button
+                            onClick={() => router.back()}
                             className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
                         >
                             <ArrowLeft className="w-4 h-4" />
-                        </Link>
+                        </button>
                         <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center">
                             <FileText className="w-7 h-7" />
                         </div>

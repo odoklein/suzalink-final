@@ -6,8 +6,8 @@ import { statusConfigService } from "@/lib/services/StatusConfigService";
 // ============================================
 // GET /api/sdr/action-queue
 // Returns a list of queue items (same pool as /api/actions/next) for table view.
-// Query: missionId?, listId?, limit (default 200, max 500), search (optional - filter by name/company)
-// When search is used, limit defaults to 300 so "emailed" contacts (low priority) can be found.
+// Query: missionId?, listId?, limit? (0 or omitted = all), search? (filter by name/company)
+// Returns all queue items by default so the SDR table shows the complete listing.
 // ============================================
 
 function escapeIlikePattern(raw: string): string {
@@ -24,13 +24,9 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     const listId = searchParams.get("listId");
     const search = searchParams.get("search")?.trim() ?? "";
     const hasSearch = search.length > 0;
-    // When searching, use higher limit so contacts we already emailed (pushed to end by priority) are included
-    const defaultLimit = hasSearch ? 300 : 200;
-    const maxLimit = hasSearch ? 500 : 300;
-    const limit = Math.min(
-        parseInt(searchParams.get("limit") || String(defaultLimit), 10) || defaultLimit,
-        maxLimit
-    );
+    // No hard limit – return all queue items so the SDR can see the full listing
+    const limitParam = searchParams.get("limit");
+    const limit = limitParam ? parseInt(limitParam, 10) || 0 : 0; // 0 = no limit
 
     const COOLDOWN_HOURS = 24;
     const cooldownDate = new Date(Date.now() - COOLDOWN_HOURS * 60 * 60 * 1000);
@@ -228,7 +224,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                 (b.contact_status === "ACTIONABLE" ? 0 : b.contact_status === "PARTIAL" ? 1 : 2) ||
             new Date(a.last_action_created ?? 0).getTime() - new Date(b.last_action_created ?? 0).getTime()
     );
-    const result = sorted.slice(0, limit);
+    const result = limit > 0 ? sorted.slice(0, limit) : sorted;
 
     const items = result.map((row) => ({
         contactId: row.contact_id,

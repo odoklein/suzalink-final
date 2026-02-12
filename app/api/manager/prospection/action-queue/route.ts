@@ -6,7 +6,7 @@ import { statusConfigService } from "@/lib/services/StatusConfigService";
 // ============================================
 // GET /api/manager/prospection/action-queue
 // Manager view: same queue shape as SDR but for any list (no SDR filter).
-// Query: missionId, listId (required), limit (default 200, max 500), search (optional)
+// Query: missionId, listId (required), limit (optional; 0 or omitted = return all), search (optional)
 // ============================================
 
 function escapeIlikePattern(raw: string): string {
@@ -31,12 +31,12 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 
     const search = searchParams.get("search")?.trim() ?? "";
     const hasSearch = search.length > 0;
-    const defaultLimit = hasSearch ? 300 : 200;
-    const maxLimit = hasSearch ? 500 : 300;
-    const limit = Math.min(
-        parseInt(searchParams.get("limit") || String(defaultLimit), 10) || defaultLimit,
-        maxLimit
-    );
+    // 0 or omitted = no limit (return all); otherwise cap at 50k for safety
+    const limitParam = searchParams.get("limit");
+    const limit =
+        limitParam === null || limitParam === "" || limitParam === "0"
+            ? 0
+            : Math.min(Math.max(1, parseInt(limitParam, 10) || 0), 50_000);
 
     const COOLDOWN_HOURS = 24;
     const cooldownDate = new Date(Date.now() - COOLDOWN_HOURS * 60 * 60 * 1000);
@@ -210,7 +210,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                 (b.contact_status === "ACTIONABLE" ? 0 : b.contact_status === "PARTIAL" ? 1 : 2) ||
             new Date(a.last_action_created ?? 0).getTime() - new Date(b.last_action_created ?? 0).getTime()
     );
-    const result = sorted.slice(0, limit);
+    const result = limit > 0 ? sorted.slice(0, limit) : sorted;
 
     const items = result.map((row) => ({
         contactId: row.contact_id,

@@ -1,0 +1,73 @@
+{"location":"comms-socket.ts:connectCommsSocket","message":"connect attempt","data":{"url":"http://173.212.231.174:4000","path":"/socket","userId":"cly5z3z9p0000x8q5z9p0000x8q5z9p0"},"timestamp":1770898960451,"hypothesisId":"A_E"}
+{"location":"comms-socket.ts:disconnectCommsSocket","message":"disconnectCommsSocket called","data":{"hadSocket":true},"timestamp":1770898960455,"hypothesisId":"B"}
+{"location":"comms-socket.ts:connectCommsSocket","message":"connect attempt","data":{"url":"http://173.212.231.174:4000","path":"/socket","userId":"cly5z3z9p0000x8q5z9p0000x8q5z9p0"},"timestamp":1770898960456,"hypothesisId":"A_E"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770898961649,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770898963555,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770898966975,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connectCommsSocket","message":"connect attempt","data":{"url":"http://173.212.231.174:4000","path":"/socket","userId":"cly5z3z9p0000x8q5z9p0000x8q5z9p0"},"timestamp":1770898970559,"hypothesisId":"A_E"}
+{"location":"comms-socket.ts:disconnectCommsSocket","message":"disconnectCommsSocket called","data":{"hadSocket":true},"timestamp":1770898970569,"hypothesisId":"B"}
+{"location":"comms-socket.ts:connectCommsSocket","message":"connect attempt","data":{"url":"http://173.212.231.174:4000","path":"/socket","userId":"cly5z3z9p0000x8q5z9p0000x8q5z9p0"},"timestamp":1770898970574,"hypothesisId":"A_E"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770898971772,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770898973718,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770898976975,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770898981959,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770898988919,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770898995891,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899002924,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899009936,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899016905,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899023922,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899030916,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899037891,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899044888,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899051925,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899058937,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899065927,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899072925,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899079939,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:disconnectCommsSocket","message":"disconnectCommsSocket called","data":{"hadSocket":true},"timestamp":1770899086341,"hypothesisId":"B"}
+{"location":"comms-socket.ts:connectCommsSocket","message":"connect attempt","data":{"url":"http://173.212.231.174:4000","path":"/socket.io","userId":"cly5z3z9p0000x8q5z9p0000x8q5z9p0"},"timestamp":1770899086352,"hypothesisId":"A_E"}
+{"location":"comms-socket.ts:onConnect","message":"socket connected","data":{},"timestamp":1770899086731,"hypothesisId":"D"}
+{"location":"comms-socket.ts:connectCommsSocket","message":"connect attempt","data":{"url":"http://173.212.231.174:4000","path":"/socket","userId":"cly5z3z9p0000x8q5z9p0000x8q5z9p0"},"timestamp":1770899159823,"hypothesisId":"A_E"}
+{"location":"comms-socket.ts:connectCommsSocket","message":"connect attempt","data":{"url":"http://173.212.231.174:4000","path":"/socket","userId":"cly5z3z9p0000x8q5z9p0000x8q5z9p0"},"timestamp":1770899159835,"hypothesisId":"A_E"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899160973,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899163010,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899166949,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899171646,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899177843,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899184900,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899191924,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899198956,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899205906,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899212909,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899219945,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899226932,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899233922,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899240936,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899247941,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899254971,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899261926,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899268942,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899275936,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899282952,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899289962,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899296920,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899303950,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899310948,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899317964,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899324925,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899331912,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899338916,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899345953,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899352953,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899359962,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899367011,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899374063,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899381114,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899388339,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899397184,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899407323,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899413933,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899420928,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899427960,"hypothesisId":"A_C_D"}
+{"location":"comms-socket.ts:connect_error","message":"socket connect_error","data":{"message":"websocket error","name":"Error"},"timestamp":1770899434152,"hypothesisId":"A_C_D"}

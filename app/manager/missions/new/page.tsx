@@ -7,7 +7,7 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { WizardForm, WizardStep } from "@/components/common/WizardForm";
 import { MissionDetails } from "./_components/MissionDetails";
-import { AudienceFilter } from "./_components/AudienceFilter";
+import { ScriptBuilder } from "./_components/ScriptBuilder";
 import { ReviewLaunch } from "./_components/ReviewLaunch";
 import { CreateMissionInput, createMission } from "@/app/actions/mission-wizard";
 import { Channel } from "@prisma/client";
@@ -29,14 +29,22 @@ export default function NewMissionPage() {
     const router = useRouter();
     const { success, error: showError } = useToast();
 
-    // Data State
+    // Data State (unified mission + campaign)
     const [missionData, setMissionData] = useState<CreateMissionInput>({
+        // Mission fields
         name: "",
         objective: "",
         channel: "CALL" as Channel,
         clientId: "",
         startDate: "",
         endDate: "",
+        // Campaign fields
+        icp: "",
+        pitch: "",
+        scriptIntro: "",
+        scriptDiscovery: "",
+        scriptObjection: "",
+        scriptClosing: "",
     });
 
     // UI State
@@ -75,11 +83,14 @@ export default function NewMissionPage() {
     // VALIDATION LOGIC
     // ============================================
 
+    // Step 1: Mission details + ICP/Pitch
     const step1Errors = (() => {
         const errs: Record<string, string> = {};
         if (!missionData.name.trim()) errs.name = "Le nom est requis";
         if (!missionData.clientId) errs.clientId = "Le client est requis";
         if (!missionData.channel) errs.channel = "Le canal est requis";
+        if (!missionData.icp.trim()) errs.icp = "L'ICP est requis";
+        if (!missionData.pitch.trim()) errs.pitch = "Le pitch est requis";
 
         if (missionData.startDate && missionData.endDate) {
             if (new Date(missionData.endDate) < new Date(missionData.startDate)) {
@@ -90,6 +101,15 @@ export default function NewMissionPage() {
     })();
 
     const isStep1Valid = Object.keys(step1Errors).length === 0;
+
+    // Step 2: Script (intro required)
+    const step2Errors = (() => {
+        const errs: Record<string, string> = {};
+        if (!missionData.scriptIntro.trim()) errs.scriptIntro = "L'introduction est requise";
+        return errs;
+    })();
+
+    const isStep2Valid = Object.keys(step2Errors).length === 0;
 
     // ============================================
     // SUBMIT
@@ -124,7 +144,7 @@ export default function NewMissionPage() {
     const steps: WizardStep[] = [
         {
             id: "details",
-            label: "Détails Mission",
+            label: "Mission & Stratégie",
             component: (
                 <MissionDetails
                     data={missionData}
@@ -135,6 +155,20 @@ export default function NewMissionPage() {
             ),
             isValid: isStep1Valid,
             validationError: !isStep1Valid ? "Veuillez corriger les erreurs" : undefined
+        },
+        {
+            id: "script",
+            label: "Script",
+            component: (
+                <ScriptBuilder
+                    data={missionData}
+                    onChange={setMissionData}
+                    clientName={clients.find(c => c.id === missionData.clientId)?.name}
+                    errors={step2Errors}
+                />
+            ),
+            isValid: isStep2Valid,
+            validationError: !isStep2Valid ? "L'introduction du script est requise" : undefined
         },
         {
             id: "review",
@@ -165,7 +199,7 @@ export default function NewMissionPage() {
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900">Nouvelle mission</h1>
                     <p className="text-slate-500 mt-1">
-                        Assistant de création de mission
+                        Créez votre mission et configurez votre stratégie en une seule étape
                     </p>
                 </div>
             </div>

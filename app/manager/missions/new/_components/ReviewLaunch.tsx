@@ -2,7 +2,7 @@
 
 import { Card } from "@/components/ui";
 import { CreateMissionInput } from "@/app/actions/mission-wizard";
-import { CheckCircle2, Target, Building, Calendar } from "lucide-react";
+import { CheckCircle2, Target, Calendar, MessageSquare, Users } from "lucide-react";
 
 interface ReviewLaunchProps {
     data: CreateMissionInput;
@@ -10,6 +10,8 @@ interface ReviewLaunchProps {
 }
 
 export function ReviewLaunch({ data, clientName }: ReviewLaunchProps) {
+    const hasScript = data.scriptIntro || data.scriptDiscovery || data.scriptObjection || data.scriptClosing;
+
     return (
         <div className="max-w-3xl mx-auto space-y-6">
             <div className="text-center mb-8">
@@ -20,6 +22,7 @@ export function ReviewLaunch({ data, clientName }: ReviewLaunchProps) {
                 <p className="text-slate-500">Vérifiez les informations ci-dessous avant de valider.</p>
             </div>
 
+            {/* Mission Details */}
             <Card className="p-6">
                 <h3 className="font-medium text-slate-900 mb-4 flex items-center gap-2">
                     <Target className="w-5 h-5 text-indigo-600" />
@@ -53,6 +56,60 @@ export function ReviewLaunch({ data, clientName }: ReviewLaunchProps) {
                     </div>
                 </dl>
             </Card>
+
+            {/* Strategy / Campaign Details */}
+            <Card className="p-6">
+                <h3 className="font-medium text-slate-900 mb-4 flex items-center gap-2">
+                    <Users className="w-5 h-5 text-emerald-600" />
+                    Stratégie de prospection
+                </h3>
+                <dl className="grid grid-cols-1 gap-y-5 text-sm">
+                    <div>
+                        <dt className="text-slate-500 mb-1">ICP (Profil Client Idéal)</dt>
+                        <dd className="font-medium text-slate-900 bg-slate-50 p-3 rounded-lg">{data.icp || "-"}</dd>
+                    </div>
+                    <div>
+                        <dt className="text-slate-500 mb-1">Pitch Commercial</dt>
+                        <dd className="font-medium text-slate-900 bg-slate-50 p-3 rounded-lg">{data.pitch || "-"}</dd>
+                    </div>
+                </dl>
+            </Card>
+
+            {/* Script Summary */}
+            {hasScript && (
+                <Card className="p-6">
+                    <h3 className="font-medium text-slate-900 mb-4 flex items-center gap-2">
+                        <MessageSquare className="w-5 h-5 text-violet-600" />
+                        Script de prospection
+                    </h3>
+                    <div className="space-y-4 text-sm">
+                        {data.scriptIntro && (
+                            <div>
+                                <dt className="text-slate-500 mb-1 font-medium">Introduction</dt>
+                                <dd className="text-slate-900 bg-slate-50 p-3 rounded-lg whitespace-pre-wrap">{data.scriptIntro}</dd>
+                            </div>
+                        )}
+                        {data.scriptDiscovery && (
+                            <div>
+                                <dt className="text-slate-500 mb-1 font-medium">Découverte</dt>
+                                <dd className="text-slate-900 bg-slate-50 p-3 rounded-lg whitespace-pre-wrap">{data.scriptDiscovery}</dd>
+                            </div>
+                        )}
+                        {data.scriptObjection && (
+                            <div>
+                                <dt className="text-slate-500 mb-1 font-medium">Objections</dt>
+                                <dd className="text-slate-900 bg-slate-50 p-3 rounded-lg whitespace-pre-wrap">{data.scriptObjection}</dd>
+                            </div>
+                        )}
+                        {data.scriptClosing && (
+                            <div>
+                                <dt className="text-slate-500 mb-1 font-medium">Closing</dt>
+                                <dd className="text-slate-900 bg-slate-50 p-3 rounded-lg whitespace-pre-wrap">{data.scriptClosing}</dd>
+                            </div>
+                        )}
+                    </div>
+                </Card>
+            )}
         </div>
     );
 }

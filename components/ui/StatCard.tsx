@@ -2,9 +2,9 @@
 
 import { cn } from "@/lib/utils";
 import { LucideIcon } from "lucide-react";
-import { ReactNode } from "react";
+import { HTMLAttributes, ReactNode } from "react";
 
-interface StatCardProps {
+interface StatCardProps extends HTMLAttributes<HTMLDivElement> {
     label: string;
     value: string | number;
     icon: LucideIcon;
@@ -27,16 +27,20 @@ export function StatCard({
     subtitle,
     className,
     trend,
+    ...props
 }: StatCardProps) {
     return (
-        <div className={cn(
-            "bg-white border border-slate-200 rounded-xl p-5 transition-all duration-300 hover:shadow-lg hover:border-slate-300",
-            className
-        )}>
+        <div
+            className={cn(
+                "bg-white border border-slate-200 rounded-xl p-5 transition-all duration-300 hover:shadow-lg hover:border-slate-300",
+                className
+            )}
+            {...props}
+        >
             <div className="flex items-start justify-between">
                 <div>
                     <p className="text-sm text-slate-500 font-medium">{label}</p>
-                    <p className="text-3xl font-bold text-slate-900 mt-1">{value}</p>
+                    <p className="text-3xl font-bold text-slate-900 mt-1 tabular-nums">{value}</p>
                     {subtitle && (
                         <div className="mt-2 text-sm">{subtitle}</div>
                     )}

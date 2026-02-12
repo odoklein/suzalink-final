@@ -125,6 +125,30 @@ enum InvoiceStatus {
   VALIDATED
   SENT
   PAID
+  CANCELLED
+  PARTIALLY_PAID
+}
+
+enum InvoiceDocumentType {
+  INVOICE
+  CREDIT_NOTE
+}
+
+enum InvoiceTransactionType {
+  B2B_DOMESTIC        // B2B France domestic (e-invoicing)
+  B2B_INTRA_EU        // B2B intra-EU (e-reporting)
+  B2B_EXPORT          // B2B export outside EU (e-reporting)
+  B2C_DOMESTIC        // B2C France (e-reporting)
+  B2C_INTRA_EU        // B2C intra-EU (e-reporting)
+  B2C_EXPORT          // B2C export (e-reporting)
+}
+
+enum PdpSubmissionStatus {
+  NOT_SUBMITTED
+  PENDING
+  ACCEPTED
+  REJECTED
+  ERROR
 }
 
 enum PaymentMatchStatus {
@@ -332,6 +356,7 @@ model User {
   // Billing Module
   createdInvoices         Invoice[]               @relation("InvoiceCreator")
   confirmedPayments       InvoicePayment[]        @relation("PaymentConfirmer")
+  invoiceAuditLogs        InvoiceAuditLog[]       @relation("InvoiceAuditLogUser")
   
   // Prospect Orchestration Engine
   reviewedProspects   ProspectProfile[] @relation("ProspectReviewer")
@@ -2023,6 +2048,21 @@ model CompanyIssuer {
   phone         String?
   logo          String?
   
+  // Legal information (mandatory French mentions)
+  legalForm     String?   // Forme juridique: SAS, SARL, EURL, SA, etc.
+  capitalSocial String?   // Capital social: e.g., "10 000 €"
+  rcsCity       String?   // Ville du RCS: e.g., "Paris"
+  rcsNumber     String?   // Numéro RCS: e.g., "Paris B 123 456 789"
+  
+  // Bank details for payment
+  iban          String?   // IBAN for bank transfer
+  bic           String?   // BIC/SWIFT code
+  
+  // Default invoice settings
+  defaultPaymentTermsDays   Int       @default(30)
+  defaultLatePenaltyRate    Decimal   @default(0) @db.Decimal(5, 2) // % penalty rate
+  defaultEarlyPaymentDiscount String? // Escompte text, e.g., "Pas d'escompte pour paiement anticipé"
+  
   invoices      Invoice[]
   
   createdAt     DateTime  @default(now())
@@ -2051,9 +2091,10 @@ model BillingClient {
 }
 
 model Invoice {
-  id              String          @id @default(cuid())
-  invoiceNumber   String?         @unique
-  status          InvoiceStatus   @default(DRAFT)
+  id              String              @id @default(cuid())
+  invoiceNumber   String?             @unique
+  status          InvoiceStatus       @default(DRAFT)
+  documentType    InvoiceDocumentType @default(INVOICE)
   
   billingClientId String
   billingClient   BillingClient   @relation(fields: [billingClientId], references: [id], onDelete: Restrict)
@@ -2063,12 +2104,32 @@ model Invoice {
   
   issueDate       DateTime
   dueDate         DateTime
+  currency        String          @default("EUR")
   
   totalHt         Decimal         @default(0) @db.Decimal(10, 2)
   totalVat        Decimal         @default(0) @db.Decimal(10, 2)
   totalTtc        Decimal         @default(0) @db.Decimal(10, 2)
   
+  // Payment terms & legal mentions
+  paymentTermsDays       Int       @default(30)
+  paymentTermsText       String?   // Custom text, e.g., "Paiement à 30 jours date de facture"
+  latePenaltyRate        Decimal   @default(0) @db.Decimal(5, 2) // Late penalty %
+  earlyPaymentDiscount   String?   // Escompte text
+  notes                  String?   // Free-text notes
+  
   facturxPdfUrl   String?
+  
+  // E-reporting / PDP (EU 2026)
+  transactionType      InvoiceTransactionType @default(B2B_DOMESTIC)
+  pdpSubmissionStatus  PdpSubmissionStatus    @default(NOT_SUBMITTED)
+  pdpSubmissionId      String?    // External ID from PDP/PPF
+  pdpSubmittedAt       DateTime?
+  pdpResponseData      Json?      // Response from PDP
+  
+  // Credit note relation
+  relatedInvoiceId String?
+  relatedInvoice   Invoice?  @relation("CreditNoteRelation", fields: [relatedInvoiceId], references: [id])
+  creditNotes      Invoice[] @relation("CreditNoteRelation")
   
   createdById     String
   createdBy       User            @relation("InvoiceCreator", fields: [createdById], references: [id])
@@ -2076,18 +2137,24 @@ model Invoice {
   validatedAt     DateTime?
   sentAt          DateTime?
   paidAt          DateTime?
+  cancelledAt     DateTime?
   
   items           InvoiceItem[]
   payments        InvoicePayment[]
+  auditLogs       InvoiceAuditLog[]
   
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   
   @@index([invoiceNumber])
   @@index([status])
+  @@index([documentType])
   @@index([billingClientId])
   @@index([companyIssuerId])
   @@index([createdById])
+  @@index([relatedInvoiceId])
+  @@index([transactionType])
+  @@index([pdpSubmissionStatus])
 }
 
 model InvoiceItem {
@@ -2134,6 +2201,23 @@ model InvoicePayment {
   @@index([invoiceId])
   @@index([qontoTransactionId])
   @@index([status])
+}
+
+model InvoiceAuditLog {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  
+  action      String   // CREATED, VALIDATED, SENT, PAID, CANCELLED, CREDIT_NOTE_CREATED
+  userId      String
+  user        User     @relation("InvoiceAuditLogUser", fields: [userId], references: [id])
+  details     Json?    // Additional context (e.g., reason for cancellation)
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([invoiceId])
+  @@index([userId])
+  @@index([action])
 }
 
 // ============================================

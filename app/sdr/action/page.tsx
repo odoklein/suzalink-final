@@ -254,7 +254,7 @@ export default function SDRActionPage() {
     const [tableFilterPriority, setTableFilterPriority] = useState<string>("");
     const [tableFilterChannel, setTableFilterChannel] = useState<string>("");
     const [tableFilterType, setTableFilterType] = useState<string>(""); // "" | "contact" | "company"
-    // Mission search: server-side search so contacts we already emailed (beyond first 100) can be found
+    // Mission search: server-side search so contacts can be filtered by name
     const [tableSearchInput, setTableSearchInput] = useState("");
     const [tableSearchApi, setTableSearchApi] = useState("");
 
@@ -459,7 +459,7 @@ export default function SDRActionPage() {
         return () => { if (timerRef.current) clearInterval(timerRef.current); };
     }, [selectedMissionId, selectedListId, loadNextAction]);
 
-    // Fetch queue for table view (limit 200 by default; with search API uses 300 so emailed contacts are findable)
+    // Fetch queue for table view (loads all items — no limit)
     useEffect(() => {
         if (viewMode !== "table" || selectedMissionId === null) {
             setQueueItems([]);
@@ -475,7 +475,6 @@ export default function SDRActionPage() {
         const params = new URLSearchParams();
         params.set("missionId", selectedMissionId);
         if (selectedListId) params.set("listId", selectedListId);
-        params.set("limit", tableSearchApi ? "300" : "200");
         if (tableSearchApi) params.set("search", tableSearchApi);
         fetch(`/api/sdr/action-queue?${params.toString()}`, { signal })
             .then((res) => res.json())
@@ -628,7 +627,6 @@ export default function SDRActionPage() {
         const params = new URLSearchParams();
         params.set("missionId", selectedMissionId);
         if (selectedListId) params.set("listId", selectedListId);
-        params.set("limit", tableSearchApi ? "300" : "200");
         if (tableSearchApi) params.set("search", tableSearchApi);
         params.set("_t", String(Date.now())); // cache-bust so we get fresh data after drawer updates
         fetch(`/api/sdr/action-queue?${params.toString()}`, { cache: "no-store", signal })

@@ -12,15 +12,33 @@ import {
     Users,
     FileText,
     Euro,
-    Calendar,
     ArrowUpRight,
+    ArrowDownRight,
     Loader2,
     Plus,
+    Download,
+    FileX2,
+    BarChart3,
+    Settings,
+    ChevronRight,
+    Zap,
+    Shield,
 } from "lucide-react";
-import { Button, Card, Badge, PageHeader } from "@/components/ui";
+import { Button, Card } from "@/components/ui";
 import Link from "next/link";
 import { format, startOfMonth, endOfMonth, subMonths } from "date-fns";
 import { fr } from "date-fns/locale";
+import {
+    BarChart,
+    Bar,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip as ChartTooltip,
+    ResponsiveContainer,
+    Area,
+    AreaChart,
+} from "recharts";
 
 interface BillingStats {
     totalInvoices: number;
@@ -31,7 +49,9 @@ interface BillingStats {
     validatedCount: number;
     sentCount: number;
     paidCount: number;
+    cancelledCount: number;
     overdueCount: number;
+    creditNoteCount: number;
     thisMonthTtc: number;
     lastMonthTtc: number;
 }
@@ -40,114 +60,117 @@ interface RecentInvoice {
     id: string;
     invoiceNumber: string | null;
     status: string;
+    documentType: string;
     totalTtc: number;
     issueDate: string;
     dueDate: string;
-    billingClient: {
-        legalName: string;
-    };
+    billingClient: { legalName: string };
 }
+
+interface AgingBucket {
+    label: string;
+    range: string;
+    count: number;
+    totalHt: number;
+    totalTtc: number;
+}
+
+interface MonthlyRevenue {
+    month: string;
+    revenue: number;
+    invoiceCount: number;
+}
+
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; dot: string }> = {
+    DRAFT: { label: "Brouillon", color: "text-slate-600", bg: "bg-slate-100", dot: "bg-slate-400" },
+    VALIDATED: { label: "Validée", color: "text-indigo-700", bg: "bg-indigo-50", dot: "bg-indigo-500" },
+    SENT: { label: "Envoyée", color: "text-amber-700", bg: "bg-amber-50", dot: "bg-amber-500" },
+    PAID: { label: "Payée", color: "text-emerald-700", bg: "bg-emerald-50", dot: "bg-emerald-500" },
+    CANCELLED: { label: "Annulée", color: "text-red-700", bg: "bg-red-50", dot: "bg-red-500" },
+    PARTIALLY_PAID: { label: "Part. payée", color: "text-amber-700", bg: "bg-amber-50", dot: "bg-amber-500" },
+};
 
 export default function BillingDashboardPage() {
     const { error: showError } = useToast();
     const router = useRouter();
     const [stats, setStats] = useState<BillingStats | null>(null);
     const [recentInvoices, setRecentInvoices] = useState<RecentInvoice[]>([]);
+    const [aging, setAging] = useState<AgingBucket[]>([]);
+    const [monthlyRevenue, setMonthlyRevenue] = useState<MonthlyRevenue[]>([]);
+    const [dso, setDso] = useState<number>(0);
     const [isLoading, setIsLoading] = useState(true);
 
-    useEffect(() => {
-        fetchBillingData();
-    }, []);
+    useEffect(() => { fetchBillingData(); }, []);
 
     const fetchBillingData = async () => {
         setIsLoading(true);
         try {
-            const [invoicesRes, clientsRes] = await Promise.all([
+            const [invoicesRes, clientsRes, statsRes] = await Promise.all([
                 fetch("/api/billing/invoices?limit=100"),
                 fetch("/api/billing/clients"),
+                fetch("/api/billing/stats?type=overview"),
             ]);
 
-            const [invoicesJson, clientsJson] = await Promise.all([
-                invoicesRes.json(),
-                clientsRes.json(),
+            const [invoicesJson, clientsJson, statsJson] = await Promise.all([
+                invoicesRes.json(), clientsRes.json(), statsRes.json(),
             ]);
 
             if (invoicesJson.success && clientsJson.success) {
                 const invoices = invoicesJson.data;
                 const clients = clientsJson.data;
-
-                // Calculate stats
                 const now = new Date();
                 const thisMonthStart = startOfMonth(now);
                 const thisMonthEnd = endOfMonth(now);
                 const lastMonthStart = startOfMonth(subMonths(now, 1));
                 const lastMonthEnd = endOfMonth(subMonths(now, 1));
 
-                const stats: BillingStats = {
-                    totalInvoices: invoices.length,
+                const calcStats: BillingStats = {
+                    totalInvoices: invoices.filter((inv: any) => inv.documentType !== "CREDIT_NOTE").length,
                     totalClients: clients.length,
                     totalHt: invoices.reduce((sum: number, inv: any) => sum + Number(inv.totalHt || 0), 0),
                     totalTtc: invoices.reduce((sum: number, inv: any) => sum + Number(inv.totalTtc || 0), 0),
-                    draftCount: invoices.filter((inv: any) => inv.status === "DRAFT").length,
-                    validatedCount: invoices.filter((inv: any) => inv.status === "VALIDATED").length,
+                    draftCount: invoices.filter((inv: any) => inv.status === "DRAFT" && inv.documentType !== "CREDIT_NOTE").length,
+                    validatedCount: invoices.filter((inv: any) => inv.status === "VALIDATED" && inv.documentType !== "CREDIT_NOTE").length,
                     sentCount: invoices.filter((inv: any) => inv.status === "SENT").length,
-                    paidCount: invoices.filter((inv: any) => inv.status === "PAID").length,
+                    paidCount: invoices.filter((inv: any) => inv.status === "PAID" && inv.documentType !== "CREDIT_NOTE").length,
+                    cancelledCount: invoices.filter((inv: any) => inv.status === "CANCELLED").length,
+                    creditNoteCount: invoices.filter((inv: any) => inv.documentType === "CREDIT_NOTE").length,
                     overdueCount: invoices.filter((inv: any) => {
-                        if (inv.status === "PAID") return false;
+                        if (["PAID", "CANCELLED"].includes(inv.status)) return false;
                         return new Date(inv.dueDate) < now;
                     }).length,
                     thisMonthTtc: invoices
                         .filter((inv: any) => {
                             const date = new Date(inv.issueDate);
-                            return date >= thisMonthStart && date <= thisMonthEnd;
+                            return date >= thisMonthStart && date <= thisMonthEnd && inv.documentType !== "CREDIT_NOTE";
                         })
                         .reduce((sum: number, inv: any) => sum + Number(inv.totalTtc || 0), 0),
                     lastMonthTtc: invoices
                         .filter((inv: any) => {
                             const date = new Date(inv.issueDate);
-                            return date >= lastMonthStart && date <= lastMonthEnd;
+                            return date >= lastMonthStart && date <= lastMonthEnd && inv.documentType !== "CREDIT_NOTE";
                         })
                         .reduce((sum: number, inv: any) => sum + Number(inv.totalTtc || 0), 0),
                 };
 
-                setStats(stats);
+                setStats(calcStats);
                 setRecentInvoices(invoices.slice(0, 5));
-            } else {
-                if (!invoicesJson.success) showError("Erreur", invoicesJson.error);
-                if (!clientsJson.success) showError("Erreur", clientsJson.error);
+            }
+
+            if (statsJson.success) {
+                setAging(statsJson.data.aging || []);
+                setMonthlyRevenue(statsJson.data.monthlyRevenue || []);
+                setDso(statsJson.data.dso || 0);
             }
         } catch (err) {
-            console.error("Failed to fetch billing data:", err);
             showError("Erreur", "Impossible de charger les données de facturation");
         } finally {
             setIsLoading(false);
         }
     };
 
-    const formatCurrency = (amount: number) => {
-        return new Intl.NumberFormat("fr-FR", {
-            style: "currency",
-            currency: "EUR",
-        }).format(amount);
-    };
-
-    const getStatusBadge = (status: string) => {
-        const variants: Record<string, "default" | "warning" | "success" | "primary" | "danger"> = {
-            DRAFT: "default",
-            VALIDATED: "primary",
-            SENT: "warning",
-            PAID: "success",
-        };
-
-        const labels: Record<string, string> = {
-            DRAFT: "Brouillon",
-            VALIDATED: "Validée",
-            SENT: "Envoyée",
-            PAID: "Payée",
-        };
-
-        return <Badge variant={variants[status] || "default"}>{labels[status] || status}</Badge>;
-    };
+    const formatCurrency = (amount: number) =>
+        new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(amount);
 
     const getGrowthPercentage = () => {
         if (!stats) return 0;
@@ -158,239 +181,374 @@ export default function BillingDashboardPage() {
     if (isLoading) {
         return (
             <div className="flex items-center justify-center h-64">
-                <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+                <div className="text-center">
+                    <Loader2 className="w-8 h-8 animate-spin mx-auto text-indigo-400 mb-3" />
+                    <p className="text-sm text-slate-500">Chargement du tableau de bord...</p>
+                </div>
             </div>
         );
     }
 
+    const growth = getGrowthPercentage();
+
     return (
-        <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <PageHeader
-                    title="Facturation"
-                    subtitle="Vue d'ensemble de votre activité de facturation"
-                />
-                <div className="flex items-center gap-2">
-                    <Link href="/manager/billing/settings">
-                        <Button variant="secondary">Paramètres</Button>
-                    </Link>
-                    <Link href="/manager/billing/invoices/new">
-                        <Button>
-                            <Plus className="w-4 h-4 mr-2" />
-                            Nouvelle facture
-                        </Button>
-                    </Link>
+        <div className="space-y-8 max-w-[1280px] mx-auto">
+            {/* Hero Header */}
+            <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-8 text-white">
+                <div className="absolute inset-0 opacity-20">
+                    <div className="absolute inset-0" style={{
+                        backgroundImage: "radial-gradient(circle at 25% 25%, rgba(99, 102, 241, 0.3) 0%, transparent 50%), radial-gradient(circle at 75% 75%, rgba(139, 92, 246, 0.2) 0%, transparent 50%)"
+                    }} />
                 </div>
-            </div>
-
-            {/* KPI Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <Card className="p-6">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <p className="text-sm text-slate-600">Chiffre d'affaires</p>
-                            <p className="text-2xl font-bold text-slate-900 mt-1">
-                                {formatCurrency(stats?.totalTtc || 0)}
-                            </p>
-                            <div className="flex items-center gap-1 mt-2">
-                                {getGrowthPercentage() >= 0 ? (
-                                    <ArrowUpRight className="w-4 h-4 text-emerald-600" />
-                                ) : (
-                                    <ArrowUpRight className="w-4 h-4 text-red-600 rotate-180" />
-                                )}
-                                <span className={`text-sm ${getGrowthPercentage() >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                                    {Math.abs(getGrowthPercentage())}% vs mois dernier
-                                </span>
-                            </div>
-                        </div>
-                        <div className="p-3 rounded-full bg-gradient-to-br from-emerald-100 to-emerald-50">
-                            <Euro className="w-6 h-6 text-emerald-600" />
-                        </div>
+                <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full -translate-y-20 translate-x-20 blur-3xl" />
+                <div className="relative z-10">
+                    <div className="flex items-center gap-2 text-indigo-300 text-sm font-medium mb-2">
+                        <Shield className="w-4 h-4" />
+                        <span>Conforme Factur-X EN16931 / EU 2026</span>
                     </div>
-                </Card>
-
-                <Card className="p-6">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-start justify-between">
                         <div>
-                            <p className="text-sm text-slate-600">Factures</p>
-                            <p className="text-2xl font-bold text-slate-900 mt-1">
-                                {stats?.totalInvoices || 0}
+                            <h1 className="text-3xl font-bold mb-1">Facturation</h1>
+                            <p className="text-slate-400 text-sm">
+                                {stats?.totalInvoices || 0} factures - {stats?.totalClients || 0} clients
                             </p>
-                            <div className="flex items-center gap-2 mt-2 text-sm text-slate-500">
-                                <span>{stats?.paidCount || 0} payées</span>
-                                <span>•</span>
-                                <span>{stats?.sentCount || 0} en attente</span>
-                            </div>
                         </div>
-                        <div className="p-3 rounded-full bg-gradient-to-br from-indigo-100 to-indigo-50">
-                            <FileText className="w-6 h-6 text-indigo-600" />
-                        </div>
-                    </div>
-                </Card>
-
-                <Card className="p-6">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <p className="text-sm text-slate-600">Clients</p>
-                            <p className="text-2xl font-bold text-slate-900 mt-1">
-                                {stats?.totalClients || 0}
-                            </p>
-                            <Link
-                                href="/manager/billing/clients"
-                                className="text-sm text-indigo-600 hover:text-indigo-700 mt-2 inline-block"
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="ghost"
+                                onClick={() => window.open("/api/billing/export", "_blank")}
+                                className="text-white/70 hover:text-white hover:bg-white/10"
                             >
-                                Gérer les clients →
+                                <Download className="w-4 h-4 mr-2" />
+                                Export
+                            </Button>
+                            <Link href="/manager/billing/settings">
+                                <Button variant="ghost" className="text-white/70 hover:text-white hover:bg-white/10">
+                                    <Settings className="w-4 h-4 mr-2" />
+                                    Paramètres
+                                </Button>
                             </Link>
-                        </div>
-                        <div className="p-3 rounded-full bg-gradient-to-br from-violet-100 to-violet-50">
-                            <Users className="w-6 h-6 text-violet-600" />
-                        </div>
-                    </div>
-                </Card>
-
-                <Card className="p-6">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <p className="text-sm text-slate-600">En retard</p>
-                            <p className={`text-2xl font-bold mt-1 ${(stats?.overdueCount || 0) > 0 ? "text-red-600" : "text-slate-900"}`}>
-                                {stats?.overdueCount || 0}
-                            </p>
-                            {(stats?.overdueCount || 0) > 0 && (
-                                <p className="text-sm text-red-500 mt-2">
-                                    Action requise
-                                </p>
-                            )}
-                        </div>
-                        <div className={`p-3 rounded-full ${(stats?.overdueCount || 0) > 0 ? "bg-gradient-to-br from-red-100 to-red-50" : "bg-gradient-to-br from-slate-100 to-slate-50"}`}>
-                            <AlertTriangle className={`w-6 h-6 ${(stats?.overdueCount || 0) > 0 ? "text-red-600" : "text-slate-400"}`} />
-                        </div>
-                    </div>
-                </Card>
-            </div>
-
-            {/* Status Breakdown */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <Card className="p-6 col-span-2">
-                    <h3 className="text-lg font-semibold text-slate-900 mb-4">Factures récentes</h3>
-                    {recentInvoices.length === 0 ? (
-                        <div className="text-center py-8 text-slate-500">
-                            <FileText className="w-12 h-12 mx-auto text-slate-300 mb-3" />
-                            <p>Aucune facture pour le moment</p>
                             <Link href="/manager/billing/invoices/new">
-                                <Button className="mt-4" size="sm">
-                                    <Plus className="w-4 h-4 mr-1" />
-                                    Créer une facture
-                                </Button>
-                            </Link>
-                        </div>
-                    ) : (
-                        <div className="space-y-3">
-                            {recentInvoices.map((invoice) => (
-                                <div
-                                    key={invoice.id}
-                                    onClick={() => router.push(`/manager/billing/invoices/${invoice.id}`)}
-                                    className="flex items-center justify-between p-3 rounded-lg bg-slate-50 hover:bg-slate-100 cursor-pointer transition-colors"
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <div className="p-2 rounded-lg bg-white">
-                                            <Receipt className="w-5 h-5 text-slate-600" />
-                                        </div>
-                                        <div>
-                                            <div className="font-medium text-slate-900">
-                                                {invoice.invoiceNumber || "Brouillon"}
-                                            </div>
-                                            <div className="text-sm text-slate-500">
-                                                {invoice.billingClient.legalName}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-4">
-                                        {getStatusBadge(invoice.status)}
-                                        <div className="text-right">
-                                            <div className="font-semibold text-slate-900">
-                                                {formatCurrency(Number(invoice.totalTtc))}
-                                            </div>
-                                            <div className="text-xs text-slate-500">
-                                                {format(new Date(invoice.issueDate), "dd MMM yyyy", { locale: fr })}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                            <Link href="/manager/billing/invoices">
-                                <Button variant="ghost" className="w-full mt-2">
-                                    Voir toutes les factures →
-                                </Button>
-                            </Link>
-                        </div>
-                    )}
-                </Card>
-
-                <Card className="p-6">
-                    <h3 className="text-lg font-semibold text-slate-900 mb-4">Statuts</h3>
-                    <div className="space-y-4">
-                        <Link href="/manager/billing/invoices?status=DRAFT" className="block">
-                            <div className="flex items-center justify-between p-3 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-3 h-3 rounded-full bg-slate-400" />
-                                    <span className="text-slate-700">Brouillons</span>
-                                </div>
-                                <span className="font-semibold text-slate-900">{stats?.draftCount || 0}</span>
-                            </div>
-                        </Link>
-                        <Link href="/manager/billing/invoices?status=VALIDATED" className="block">
-                            <div className="flex items-center justify-between p-3 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-3 h-3 rounded-full bg-indigo-500" />
-                                    <span className="text-slate-700">Validées</span>
-                                </div>
-                                <span className="font-semibold text-slate-900">{stats?.validatedCount || 0}</span>
-                            </div>
-                        </Link>
-                        <Link href="/manager/billing/invoices?status=SENT" className="block">
-                            <div className="flex items-center justify-between p-3 rounded-lg bg-amber-50 hover:bg-amber-100 transition-colors">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-3 h-3 rounded-full bg-amber-500" />
-                                    <span className="text-slate-700">Envoyées</span>
-                                </div>
-                                <span className="font-semibold text-slate-900">{stats?.sentCount || 0}</span>
-                            </div>
-                        </Link>
-                        <Link href="/manager/billing/invoices?status=PAID" className="block">
-                            <div className="flex items-center justify-between p-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 transition-colors">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-3 h-3 rounded-full bg-emerald-500" />
-                                    <span className="text-slate-700">Payées</span>
-                                </div>
-                                <span className="font-semibold text-slate-900">{stats?.paidCount || 0}</span>
-                            </div>
-                        </Link>
-                    </div>
-
-                    <div className="border-t border-slate-200 mt-6 pt-4">
-                        <h4 className="text-sm font-medium text-slate-700 mb-3">Actions rapides</h4>
-                        <div className="space-y-2">
-                            <Link href="/manager/billing/invoices/new" className="block">
-                                <Button variant="secondary" size="sm" className="w-full justify-start">
+                                <Button className="bg-white text-indigo-700 hover:bg-indigo-50 shadow-lg shadow-black/20">
                                     <Plus className="w-4 h-4 mr-2" />
                                     Nouvelle facture
                                 </Button>
                             </Link>
-                            <Link href="/manager/billing/clients" className="block">
-                                <Button variant="secondary" size="sm" className="w-full justify-start">
-                                    <Users className="w-4 h-4 mr-2" />
-                                    Gérer les clients
-                                </Button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* KPI Grid */}
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                {/* Revenue */}
+                <div className="col-span-2 lg:col-span-1 rounded-2xl border border-slate-200 bg-white p-5 hover:shadow-lg hover:border-indigo-200 transition-all duration-300">
+                    <div className="flex items-center justify-between mb-3">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-100 to-violet-100 flex items-center justify-center">
+                            <Euro className="w-5 h-5 text-indigo-600" />
+                        </div>
+                        {growth !== 0 && (
+                            <div className={`flex items-center gap-0.5 text-xs font-semibold px-2 py-1 rounded-full ${
+                                growth >= 0 ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
+                            }`}>
+                                {growth >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                                {Math.abs(growth)}%
+                            </div>
+                        )}
+                    </div>
+                    <p className="text-2xl font-bold text-slate-900 tabular-nums">{formatCurrency(stats?.totalTtc || 0)}</p>
+                    <p className="text-xs text-slate-500 mt-1">Chiffre d&apos;affaires total</p>
+                </div>
+
+                {/* Invoices */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 hover:shadow-lg hover:border-indigo-200 transition-all duration-300">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center mb-3">
+                        <FileText className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <p className="text-2xl font-bold text-slate-900">{stats?.totalInvoices || 0}</p>
+                    <p className="text-xs text-slate-500 mt-1">Factures total</p>
+                    <p className="text-[11px] text-indigo-600 font-medium mt-1">{stats?.paidCount || 0} payées</p>
+                </div>
+
+                {/* DSO */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 hover:shadow-lg hover:border-indigo-200 transition-all duration-300">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-100 to-orange-100 flex items-center justify-center mb-3">
+                        <Clock className="w-5 h-5 text-amber-600" />
+                    </div>
+                    <p className="text-2xl font-bold text-slate-900">{dso}<span className="text-sm font-normal text-slate-400 ml-1">j</span></p>
+                    <p className="text-xs text-slate-500 mt-1">DSO moyen</p>
+                </div>
+
+                {/* Overdue */}
+                <div className={`rounded-2xl border p-5 hover:shadow-lg transition-all duration-300 ${
+                    (stats?.overdueCount || 0) > 0
+                        ? "border-red-200 bg-gradient-to-br from-white to-red-50/30"
+                        : "border-slate-200 bg-white"
+                }`}>
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${
+                        (stats?.overdueCount || 0) > 0
+                            ? "bg-gradient-to-br from-red-100 to-rose-100"
+                            : "bg-gradient-to-br from-slate-100 to-slate-50"
+                    }`}>
+                        <AlertTriangle className={`w-5 h-5 ${(stats?.overdueCount || 0) > 0 ? "text-red-500" : "text-slate-400"}`} />
+                    </div>
+                    <p className={`text-2xl font-bold ${(stats?.overdueCount || 0) > 0 ? "text-red-600" : "text-slate-900"}`}>
+                        {stats?.overdueCount || 0}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">En retard</p>
+                    {(stats?.overdueCount || 0) > 0 && (
+                        <p className="text-[11px] text-red-500 font-medium mt-1">Action requise</p>
+                    )}
+                </div>
+
+                {/* Credit Notes */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 hover:shadow-lg hover:border-indigo-200 transition-all duration-300">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-100 to-purple-100 flex items-center justify-center mb-3">
+                        <FileX2 className="w-5 h-5 text-violet-600" />
+                    </div>
+                    <p className="text-2xl font-bold text-slate-900">{stats?.creditNoteCount || 0}</p>
+                    <p className="text-xs text-slate-500 mt-1">Avoirs</p>
+                    <p className="text-[11px] text-indigo-600 font-medium mt-1">{stats?.totalClients || 0} clients</p>
+                </div>
+            </div>
+
+            {/* Charts Row */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Revenue Chart */}
+                <div className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-6">
+                    <div className="flex items-center justify-between mb-6">
+                        <div>
+                            <h3 className="text-base font-semibold text-slate-900">Chiffre d&apos;affaires mensuel</h3>
+                            <p className="text-xs text-slate-500 mt-0.5">12 derniers mois</p>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                            <div className="w-3 h-3 rounded bg-indigo-500" />
+                            Revenus
+                        </div>
+                    </div>
+                    {monthlyRevenue.length > 0 ? (
+                        <ResponsiveContainer width="100%" height={260}>
+                            <AreaChart data={monthlyRevenue}>
+                                <defs>
+                                    <linearGradient id="revenueGrad" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor="#6366f1" stopOpacity={0.2} />
+                                        <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                                <XAxis
+                                    dataKey="month"
+                                    tick={{ fontSize: 11, fill: "#94a3b8" }}
+                                    axisLine={false}
+                                    tickLine={false}
+                                />
+                                <YAxis
+                                    tick={{ fontSize: 11, fill: "#94a3b8" }}
+                                    tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
+                                    axisLine={false}
+                                    tickLine={false}
+                                    width={50}
+                                />
+                                <ChartTooltip
+                                    contentStyle={{
+                                        background: "white",
+                                        border: "1px solid #e2e8f0",
+                                        borderRadius: "12px",
+                                        boxShadow: "0 10px 40px rgba(0,0,0,0.08)",
+                                        padding: "12px 16px",
+                                    }}
+                                    formatter={(value: number) => [formatCurrency(value), "CA"]}
+                                />
+                                <Area
+                                    type="monotone"
+                                    dataKey="revenue"
+                                    stroke="#6366f1"
+                                    strokeWidth={2.5}
+                                    fill="url(#revenueGrad)"
+                                    dot={{ r: 4, fill: "white", stroke: "#6366f1", strokeWidth: 2 }}
+                                    activeDot={{ r: 6, fill: "#6366f1", stroke: "white", strokeWidth: 3 }}
+                                />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+                            <BarChart3 className="w-10 h-10 mb-3 text-slate-300" />
+                            <p className="text-sm">Aucune donnée disponible</p>
+                        </div>
+                    )}
+                </div>
+
+                {/* Status Pipeline */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                    <h3 className="text-base font-semibold text-slate-900 mb-5">Pipeline</h3>
+                    <div className="space-y-2">
+                        {[
+                            { key: "DRAFT", count: stats?.draftCount || 0 },
+                            { key: "VALIDATED", count: stats?.validatedCount || 0 },
+                            { key: "SENT", count: stats?.sentCount || 0 },
+                            { key: "PAID", count: stats?.paidCount || 0 },
+                            ...(stats?.cancelledCount ? [{ key: "CANCELLED", count: stats.cancelledCount }] : []),
+                        ].map((item) => {
+                            const sc = STATUS_CONFIG[item.key];
+                            const total = stats?.totalInvoices || 1;
+                            const pct = Math.round((item.count / total) * 100) || 0;
+                            return (
+                                <Link
+                                    key={item.key}
+                                    href={`/manager/billing/invoices?status=${item.key}`}
+                                    className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-colors group"
+                                >
+                                    <div className={`w-2.5 h-2.5 rounded-full ${sc.dot}`} />
+                                    <span className="text-sm text-slate-700 flex-1 group-hover:text-slate-900">{sc.label}</span>
+                                    <span className="text-sm font-bold text-slate-900 tabular-nums w-8 text-right">{item.count}</span>
+                                    <div className="w-16 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                        <div className={`h-full rounded-full ${sc.dot} transition-all duration-500`} style={{ width: `${pct}%` }} />
+                                    </div>
+                                </Link>
+                            );
+                        })}
+                    </div>
+
+                    <div className="border-t border-slate-100 mt-5 pt-5">
+                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Actions rapides</p>
+                        <div className="space-y-2">
+                            <Link href="/manager/billing/invoices/new" className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-indigo-50 transition-colors group">
+                                <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
+                                    <Plus className="w-4 h-4 text-indigo-600" />
+                                </div>
+                                <span className="text-sm text-slate-700 group-hover:text-indigo-700">Nouvelle facture</span>
                             </Link>
-                            <Link href="/manager/billing/settings" className="block">
-                                <Button variant="secondary" size="sm" className="w-full justify-start">
-                                    <Receipt className="w-4 h-4 mr-2" />
-                                    Paramètres
-                                </Button>
+                            <Link href="/manager/billing/clients" className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-indigo-50 transition-colors group">
+                                <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
+                                    <Users className="w-4 h-4 text-indigo-600" />
+                                </div>
+                                <span className="text-sm text-slate-700 group-hover:text-indigo-700">Gérer les clients</span>
                             </Link>
                         </div>
                     </div>
-                </Card>
+                </div>
+            </div>
+
+            {/* Bottom Row */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Aging Report */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                    <div className="flex items-center justify-between mb-5">
+                        <div>
+                            <h3 className="text-base font-semibold text-slate-900">Créances par ancienneté</h3>
+                            <p className="text-xs text-slate-500 mt-0.5">Balance âgée des encours clients</p>
+                        </div>
+                    </div>
+                    {aging.length > 0 ? (
+                        <div className="space-y-2">
+                            {aging.map((bucket, idx) => {
+                                const colors = [
+                                    "bg-emerald-50 border-emerald-100",
+                                    "bg-emerald-50/50 border-emerald-100/50",
+                                    "bg-amber-50/50 border-amber-100/50",
+                                    "bg-amber-50 border-amber-100",
+                                    "bg-red-50/50 border-red-100/50",
+                                    "bg-red-50 border-red-100",
+                                ];
+                                return (
+                                    <div
+                                        key={idx}
+                                        className={`flex items-center justify-between p-3.5 rounded-xl border transition-all duration-150 ${
+                                            bucket.count === 0 ? "bg-slate-50 border-slate-100 opacity-40" : colors[idx] || colors[5]
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-2 h-8 rounded-full ${
+                                                bucket.count === 0 ? "bg-slate-200" :
+                                                idx <= 1 ? "bg-emerald-400" :
+                                                idx <= 3 ? "bg-amber-400" : "bg-red-400"
+                                            }`} />
+                                            <div>
+                                                <div className="text-sm font-medium text-slate-900">{bucket.label}</div>
+                                                <div className="text-xs text-slate-500">{bucket.count} facture(s)</div>
+                                            </div>
+                                        </div>
+                                        <span className="font-bold text-slate-900 tabular-nums">{formatCurrency(bucket.totalTtc)}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+                            <CheckCircle2 className="w-10 h-10 mb-3 text-emerald-300" />
+                            <p className="text-sm font-medium text-slate-500">Aucune créance en cours</p>
+                        </div>
+                    )}
+                </div>
+
+                {/* Recent Invoices */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                    <div className="flex items-center justify-between mb-5">
+                        <h3 className="text-base font-semibold text-slate-900">Dernières factures</h3>
+                        <Link href="/manager/billing/invoices" className="text-xs font-medium text-indigo-600 hover:text-indigo-700 transition-colors flex items-center gap-1">
+                            Tout voir <ChevronRight className="w-3 h-3" />
+                        </Link>
+                    </div>
+                    {recentInvoices.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-12">
+                            <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mb-3">
+                                <Receipt className="w-7 h-7 text-slate-300" />
+                            </div>
+                            <p className="text-sm font-medium text-slate-500 mb-1">Aucune facture</p>
+                            <p className="text-xs text-slate-400 mb-4">Créez votre première facture</p>
+                            <Link href="/manager/billing/invoices/new">
+                                <Button size="sm">
+                                    <Plus className="w-4 h-4 mr-1.5" />
+                                    Créer
+                                </Button>
+                            </Link>
+                        </div>
+                    ) : (
+                        <div className="space-y-1">
+                            {recentInvoices.map((invoice) => {
+                                const sc = STATUS_CONFIG[invoice.status] || STATUS_CONFIG.DRAFT;
+                                const isCredit = invoice.documentType === "CREDIT_NOTE";
+                                return (
+                                    <button
+                                        key={invoice.id}
+                                        onClick={() => router.push(`/manager/billing/invoices/${invoice.id}`)}
+                                        className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-all duration-150 text-left group"
+                                    >
+                                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                                            isCredit ? "bg-red-50" : "bg-slate-100"
+                                        }`}>
+                                            {isCredit ? (
+                                                <FileX2 className="w-4 h-4 text-red-500" />
+                                            ) : (
+                                                <Receipt className="w-4 h-4 text-slate-400" />
+                                            )}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm font-medium text-slate-900 truncate group-hover:text-indigo-700 transition-colors">
+                                                    {invoice.invoiceNumber || "Brouillon"}
+                                                </span>
+                                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${sc.bg} ${sc.color}`}>
+                                                    <span className={`w-1 h-1 rounded-full ${sc.dot}`} />
+                                                    {sc.label}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-slate-500 truncate">{invoice.billingClient.legalName}</p>
+                                        </div>
+                                        <div className="text-right flex-shrink-0">
+                                            <p className={`text-sm font-bold tabular-nums ${isCredit ? "text-red-600" : "text-slate-900"}`}>
+                                                {isCredit ? "-" : ""}{formatCurrency(Number(invoice.totalTtc))}
+                                            </p>
+                                            <p className="text-[11px] text-slate-400">
+                                                {format(new Date(invoice.issueDate), "dd MMM", { locale: fr })}
+                                            </p>
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     );

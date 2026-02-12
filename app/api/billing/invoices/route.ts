@@ -50,6 +50,12 @@ const createInvoiceSchema = z.object({
     companyIssuerId: z.string().min(1, "Émetteur requis"),
     issueDate: z.string().transform((str) => new Date(str)),
     dueDate: z.string().transform((str) => new Date(str)),
+    paymentTermsDays: z.number().int().min(0).max(365).optional(),
+    paymentTermsText: z.string().optional(),
+    latePenaltyRate: z.number().min(0).max(100).optional(),
+    earlyPaymentDiscount: z.string().optional(),
+    notes: z.string().optional(),
+    currency: z.string().optional(),
     items: z
         .array(
             z.object({

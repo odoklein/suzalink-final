@@ -270,7 +270,10 @@ export default function SDRCommsPage() {
 
     const handleRealtimeEvent = useCallback(
         (payload: CommsRealtimePayload) => {
-            const tid = payload.threadId;
+            let tid = payload.threadId;
+            if (!tid && (payload.type === "typing_start" || payload.type === "typing_stop") && payload.userId && selectedThread?.participants?.some((p) => p.userId === payload.userId)) {
+                tid = selectedThread.id;
+            }
             const userName = payload.userName;
 
             if (payload.type === "typing_start" && tid && userName) {
@@ -338,13 +341,42 @@ export default function SDRCommsPage() {
                     break;
             }
         },
-        [session?.user?.id, debouncedFetchStats]
+        [session?.user?.id, debouncedFetchStats, selectedThread]
     );
 
-    useCommsRealtime({
+    const getRecipientIdsForThread = useCallback(
+        (threadId: string) => {
+            if (selectedThread?.id !== threadId) return [];
+            return selectedThread.participants
+                .filter((p) => p.userId !== session?.user?.id)
+                .map((p) => p.userId);
+        },
+        [selectedThread?.id, selectedThread?.participants, session?.user?.id]
+    );
+
+    const {
+        onlineUsers,
+        startTyping,
+        stopTyping,
+    } = useCommsRealtime({
         enabled: !!session?.user?.id,
+        userId: session?.user?.id,
         onEvent: handleRealtimeEvent,
+        getRecipientIdsForThread,
     });
+
+    const handleTyping = useCallback((isTyping: boolean) => {
+        if (!session?.user?.name || !selectedThread?.id) return;
+        if (isTyping) startTyping(selectedThread.id, session.user.name);
+        else stopTyping(selectedThread.id, session.user.name);
+    }, [selectedThread?.id, session?.user?.name, startTyping, stopTyping]);
+
+    const isRecipientOnline = useMemo(() => {
+        if (!selectedThread) return false;
+        return selectedThread.participants.some(
+            (p) => p.userId !== session?.user?.id && onlineUsers.has(p.userId)
+        );
+    }, [selectedThread, session?.user?.id, onlineUsers]);
 
     // Initial load
     useEffect(() => {
@@ -741,6 +773,8 @@ export default function SDRCommsPage() {
                                 typingUserName={getTypingText(selectedThread.id)}
                                 focusMode={focusMode}
                                 onFocusModeChange={setFocusMode}
+                                isRecipientOnline={isRecipientOnline}
+                                onTyping={handleTyping}
                             />
                         ) : (
                             <div className="flex-1 flex flex-col items-center justify-center h-full">

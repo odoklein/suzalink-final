@@ -2130,3 +2130,114 @@ textarea::placeholder {
         transition: none !important;
     }
 }
+
+/* ============================================
+   CLIENT PORTAL — Premium Dashboard Styles
+   ============================================ */
+
+@keyframes client-fadeSlideUp {
+    from {
+        opacity: 0;
+        transform: translateY(16px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Staggered entrance animation */
+.client-dashboard-mounted > *:nth-child(1) { animation: client-fadeSlideUp 0.4s 0.03s ease-out both; }
+.client-dashboard-mounted > *:nth-child(2) { animation: client-fadeSlideUp 0.4s 0.08s ease-out both; }
+.client-dashboard-mounted > *:nth-child(3) { animation: client-fadeSlideUp 0.4s 0.13s ease-out both; }
+.client-dashboard-mounted > *:nth-child(4) { animation: client-fadeSlideUp 0.4s 0.18s ease-out both; }
+.client-dashboard-mounted > *:nth-child(5) { animation: client-fadeSlideUp 0.4s 0.23s ease-out both; }
+.client-dashboard-mounted > *:nth-child(6) { animation: client-fadeSlideUp 0.4s 0.28s ease-out both; }
+
+/* KPI Cards — hover lift with gradient top bar */
+.client-kpi-card {
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.client-kpi-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.client-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 24px -4px rgba(99, 102, 241, 0.12), 0 4px 8px -2px rgba(0, 0, 0, 0.06);
+    border-color: #c7d2fe;
+}
+
+.client-kpi-card:hover::before {
+    opacity: 1;
+}
+
+/* Panel sections */
+.client-panel {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 1rem;
+    padding: 1.5rem;
+    transition: all 0.2s ease;
+}
+
+.client-panel:hover {
+    border-color: #cbd5e1;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+/* Opportunity cards — accent border on hover */
+.client-opp-card {
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.client-opp-card:hover {
+    border-color: #a5b4fc;
+    box-shadow: 0 8px 24px -4px rgba(99, 102, 241, 0.1), 0 2px 8px -2px rgba(0, 0, 0, 0.04);
+}
+
+.client-opp-card:focus-visible {
+    outline: 2px solid #6366f1;
+    outline-offset: 2px;
+}
+
+/* Results page - mission rows */
+.client-mission-row {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    padding: 1rem 1.25rem;
+    transition: all 0.2s ease;
+}
+
+.client-mission-row:hover {
+    background: #f8fafc;
+    border-color: #c7d2fe;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.06);
+}
+
+/* Accessibility: respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    .client-dashboard-mounted,
+    .client-dashboard-mounted > * {
+        animation: none !important;
+        opacity: 1;
+    }
+    .client-kpi-card,
+    .client-panel,
+    .client-opp-card,
+    .client-mission-row {
+        transition: none !important;
+    }
+}
