@@ -366,7 +366,10 @@ export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
                 </div>
 
                 {/* Navigation */}
-                <nav className="flex-1 px-2.5 py-2 space-y-0.5 overflow-y-auto dev-scrollbar">
+                <nav className={cn(
+                    "flex-1 px-2.5 py-2 space-y-0.5 overflow-y-auto",
+                    isCollapsed ? "no-scrollbar" : "dev-scrollbar"
+                )}>
                     {effectiveNavigation.map((section, idx) => (
                         <SidebarSection
                             key={idx}

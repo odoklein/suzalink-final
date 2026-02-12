@@ -28,10 +28,13 @@ export const GET = withErrorHandler(async (
         return errorResponse("PDF non disponible. La facture doit être validée.", 400);
     }
 
-    // Extract storage key from URL
-    // URL format: /uploads/invoices/{key} or https://bucket.s3.../{key}
-    const urlParts = invoice.facturxPdfUrl.split("/");
-    const key = urlParts.slice(-2).join("/"); // Get last two parts (folder/filename)
+    // Extract storage key from URL (full path after /uploads/ or after bucket)
+    // Local: /uploads/invoices/{userId}/{timestamp}/{uuid}.pdf
+    // S3: https://bucket.s3.../invoices/{userId}/{timestamp}/{uuid}.pdf
+    const url = invoice.facturxPdfUrl;
+    const key = url.includes("/uploads/")
+        ? url.split("/uploads/")[1] ?? url
+        : url.split("/").slice(-4).join("/"); // S3: take last 4 segments (invoices/userId/timestamp/file.pdf)
 
     try {
         // Download PDF from storage
