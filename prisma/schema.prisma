@@ -617,6 +617,7 @@ model Action {
   createdAt     DateTime     @default(now())
   
   @@index([companyId])
+  @@index([contactId])
   @@index([callbackDate])
 }
 

@@ -286,12 +286,15 @@ export default function SDRCallbacksPage() {
         setSubmittingId(null);
     };
 
+    const CALLBACKS_CACHE_KEY = "sdr_callbacks_cache";
+
     const fetchCallbacksAbortRef = useRef<AbortController | null>(null);
     const fetchCallbacks = useCallback(async () => {
         fetchCallbacksAbortRef.current?.abort();
         const controller = new AbortController();
         fetchCallbacksAbortRef.current = controller;
         const signal = controller.signal;
+        const filterKey = `${selectedMissionId ?? ""}|${selectedListId ?? ""}|${dateFrom}|${dateTo}`;
         try {
             setIsLoading(true);
             const params = new URLSearchParams();
@@ -305,6 +308,13 @@ export default function SDRCallbacksPage() {
             if (json.success) {
                 setCallbacksFetchError(null);
                 setCallbacks(json.data);
+                try {
+                    if (typeof sessionStorage !== "undefined") {
+                        sessionStorage.setItem(CALLBACKS_CACHE_KEY, JSON.stringify({ filterKey, data: json.data, ts: Date.now() }));
+                    }
+                } catch {
+                    // ignore storage errors
+                }
             } else {
                 setCallbacksFetchError("Impossible de charger les rappels");
                 showError("Impossible de charger les rappels");
@@ -319,6 +329,25 @@ export default function SDRCallbacksPage() {
             if (fetchCallbacksAbortRef.current === controller) fetchCallbacksAbortRef.current = null;
         }
     }, [selectedMissionId, selectedListId, dateFrom, dateTo, showError]);
+
+    // Restore cached callbacks for current filters so table/cards show instantly while refetching
+    useEffect(() => {
+        const filterKey = `${selectedMissionId ?? ""}|${selectedListId ?? ""}|${dateFrom}|${dateTo}`;
+        try {
+            if (typeof sessionStorage !== "undefined") {
+                const raw = sessionStorage.getItem(CALLBACKS_CACHE_KEY);
+                if (raw) {
+                    const parsed = JSON.parse(raw) as { filterKey?: string; data?: Callback[] };
+                    if (parsed.filterKey === filterKey && Array.isArray(parsed.data)) {
+                        setCallbacks(parsed.data);
+                        setCallbacksFetchError(null);
+                    }
+                }
+            }
+        } catch {
+            // ignore
+        }
+    }, [selectedMissionId, selectedListId, dateFrom, dateTo]);
 
     useEffect(() => {
         fetch("/api/sdr/missions")
@@ -531,7 +560,8 @@ export default function SDRCallbacksPage() {
         },
     ];
 
-    if (isLoading) {
+    // Show skeleton only when loading and no data to show (no cache)
+    if (isLoading && callbacks.length === 0) {
         return (
             <div className="space-y-6 p-2">
                 <div className="h-24 rounded-2xl bg-slate-100 animate-pulse" />

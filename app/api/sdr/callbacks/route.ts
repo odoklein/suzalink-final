@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import { Prisma } from "@prisma/client";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -174,9 +175,8 @@ export async function GET(request: Request) {
             ]
         });
 
-        // Pending = CALLBACK_REQUESTED and (callbackDate null or <= now) and no newer action
-        // for same contact/company. Any newer action supersedes (INTERESTED, MEETING_BOOKED,
-        // DISQUALIFIED, or another CALLBACK_REQUESTED) to avoid stale callbacks.
+        // Pending = CALLBACK_REQUESTED with no newer action for same contact/company.
+        // Batch query: one SQL call instead of N to find all superseded action ids.
         type CallbackItem = {
             id: string;
             campaignId: string;
@@ -191,26 +191,28 @@ export async function GET(request: Request) {
         };
         const activeCallbacks: CallbackItem[] = [];
 
+        if (callbacks.length === 0) {
+            return NextResponse.json({
+                success: true,
+                data: [],
+                pagination: { limit: limit || null, skip, hasMore: false },
+            });
+        }
+
+        const callbackIds = callbacks.map((c) => c.id);
+        const superseded = await prisma.$queryRaw<{ id: string }[]>`
+            SELECT a.id FROM "Action" a
+            WHERE a.id IN (${Prisma.join(callbackIds)})
+            AND (
+                (a."contactId" IS NOT NULL AND EXISTS (SELECT 1 FROM "Action" b WHERE b."contactId" = a."contactId" AND b."createdAt" > a."createdAt"))
+                OR
+                (a."companyId" IS NOT NULL AND EXISTS (SELECT 1 FROM "Action" b WHERE b."companyId" = a."companyId" AND b."createdAt" > a."createdAt"))
+            )
+        `;
+        const supersededSet = new Set(superseded.map((r) => r.id));
+
         for (const action of callbacks) {
-            let newerAction: { id: string } | null = null;
-            if (action.contactId) {
-                newerAction = await prisma.action.findFirst({
-                    where: {
-                        contactId: action.contactId,
-                        createdAt: { gt: action.createdAt },
-                    },
-                    select: { id: true },
-                });
-            } else if (action.companyId) {
-                newerAction = await prisma.action.findFirst({
-                    where: {
-                        companyId: action.companyId,
-                        createdAt: { gt: action.createdAt },
-                    },
-                    select: { id: true },
-                });
-            }
-            if (newerAction) continue;
+            if (supersededSet.has(action.id)) continue;
 
             const item: CallbackItem = {
                 id: action.id,
