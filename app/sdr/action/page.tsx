@@ -31,6 +31,7 @@ import {
     ArrowDownUp,
     PhoneOff,
     MailOpen,
+    PenLine,
 } from "lucide-react";
 import { Card, Badge, Button, LoadingState, EmptyState, Tabs, Drawer, DataTable, Select, useToast, TableSkeleton, CardSkeleton } from "@/components/ui";
 import type { Column } from "@/components/ui/DataTable";
@@ -1797,9 +1798,22 @@ export default function SDRActionPage() {
                                     <Building2 className="w-7 h-7 text-indigo-600" />
                                 </div>
                                 <div className="min-w-0 flex-1">
-                                    <h2 className="text-lg font-bold text-slate-900 truncate">
-                                        {currentAction.company?.name}
-                                    </h2>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <h2 className="text-lg font-bold text-slate-900 truncate">
+                                            {currentAction.company?.name}
+                                        </h2>
+                                        {currentAction.company?.id && (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => setDrawerCompanyId(currentAction.company!.id)}
+                                                className="shrink-0 h-8 px-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50"
+                                                title="Modifier l'entreprise"
+                                            >
+                                                <PenLine className="w-4 h-4" />
+                                            </Button>
+                                        )}
+                                    </div>
                                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                                         {currentAction.company?.industry && (
                                             <Badge variant="default" className="bg-slate-100 text-slate-600 border-slate-200">
@@ -1837,7 +1851,7 @@ export default function SDRActionPage() {
                                     <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center">
                                         <User className="w-6 h-6 text-indigo-600" />
                                     </div>
-                                    <div>
+                                    <div className="min-w-0 flex-1">
                                         <p className="font-semibold text-slate-900">
                                             {currentAction.contact.firstName} {currentAction.contact.lastName}
                                         </p>
@@ -1847,6 +1861,17 @@ export default function SDRActionPage() {
                                             </Badge>
                                         )}
                                     </div>
+                                    {currentAction.contact.id && (
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => setDrawerContactId(currentAction.contact!.id)}
+                                            className="shrink-0 h-8 px-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50"
+                                            title="Modifier le contact"
+                                        >
+                                            <PenLine className="w-4 h-4" />
+                                        </Button>
+                                    )}
                                 </div>
 
                                 {/* Contact Actions */}
@@ -1899,9 +1924,20 @@ export default function SDRActionPage() {
 
                                         if (currentAction.channel === 'CALL' && !isValidPhone) {
                                             return (
-                                                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
-                                                    <AlertCircle className="w-4 h-4 inline mr-2" />
-                                                    Aucun numéro de téléphone valide disponible
+                                                <div className="space-y-2">
+                                                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+                                                        <AlertCircle className="w-4 h-4 inline mr-2" />
+                                                        Aucun numéro de téléphone valide disponible
+                                                    </div>
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => setDrawerContactId(currentAction.contact!.id)}
+                                                        className="w-full gap-2"
+                                                    >
+                                                        <PenLine className="w-4 h-4" />
+                                                        Ajouter un numéro / Modifier le contact
+                                                    </Button>
                                                 </div>
                                             );
                                         }
@@ -1927,13 +1963,13 @@ export default function SDRActionPage() {
                                     )}
                                 </div>
                             </>
-                        ) : currentAction.company?.phone ? (
+                        ) : currentAction.company ? (
                             <>
                                 <div className="flex items-center gap-4 mb-4">
                                     <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center">
                                         <Building2 className="w-6 h-6 text-indigo-600" />
                                     </div>
-                                    <div>
+                                    <div className="min-w-0 flex-1">
                                         <p className="font-semibold text-slate-900">
                                             {currentAction.company.name}
                                         </p>
@@ -1941,11 +1977,22 @@ export default function SDRActionPage() {
                                             Entreprise
                                         </Badge>
                                     </div>
+                                    {currentAction.company.id && (
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => setDrawerCompanyId(currentAction.company!.id)}
+                                            className="shrink-0 h-8 px-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50"
+                                            title="Modifier l'entreprise"
+                                        >
+                                            <PenLine className="w-4 h-4" />
+                                        </Button>
+                                    )}
                                 </div>
 
                                 {/* Company Actions */}
                                 <div className="space-y-2">
-                                    {currentAction.company.phone && (
+                                    {currentAction.company.phone ? (
                                         <a
                                             href={`tel:${currentAction.company.phone}`}
                                             className="flex items-center justify-center gap-2 h-12 w-full text-sm font-medium text-white bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 rounded-xl transition-all shadow-lg shadow-indigo-500/20"
@@ -1953,6 +2000,16 @@ export default function SDRActionPage() {
                                             <Phone className="w-4 h-4" />
                                             {currentAction.company.phone}
                                         </a>
+                                    ) : (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setDrawerCompanyId(currentAction.company!.id)}
+                                            className="w-full gap-2"
+                                        >
+                                            <PenLine className="w-4 h-4" />
+                                            Ajouter un numéro / Modifier l'entreprise
+                                        </Button>
                                     )}
                                 </div>
                             </>
@@ -2263,6 +2320,35 @@ export default function SDRActionPage() {
                 />
             )}
 
+            {/* Contact / Company edit drawers (card view: edit contact info, company info, add phone) */}
+            <ContactDrawer
+                isOpen={!!drawerContactId}
+                onClose={closeContactDrawer}
+                contact={drawerContact}
+                onUpdate={() => {
+                    refreshQueue();
+                    if (viewMode === "card" && currentAction?.contact?.id === drawerContactId) {
+                        loadNextAction();
+                    }
+                }}
+                isManager={false}
+                listId={selectedListId ?? undefined}
+                companies={[]}
+            />
+            <CompanyDrawer
+                isOpen={!!drawerCompanyId}
+                onClose={closeCompanyDrawer}
+                company={drawerCompany}
+                onUpdate={() => {
+                    refreshQueue();
+                    if (viewMode === "card" && currentAction?.company?.id === drawerCompanyId) {
+                        loadNextAction();
+                    }
+                }}
+                onContactClick={handleContactFromCompany}
+                isManager={false}
+                listId={selectedListId ?? undefined}
+            />
         </div>
     );
 }
