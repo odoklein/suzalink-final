@@ -24,16 +24,23 @@ export async function GET(req: NextRequest) {
         const error = req.nextUrl.searchParams.get('error');
         const errorDescription = req.nextUrl.searchParams.get('error_description');
 
+        const defaultReturn = '/manager/email/mailboxes';
+
         if (error) {
             console.error('Outlook OAuth error:', error, errorDescription);
+            let returnBase = defaultReturn;
+            try {
+                const stateData = JSON.parse(Buffer.from(state || '', 'base64url').toString());
+                if (stateData.returnUrl) returnBase = stateData.returnUrl;
+            } catch { /* ignore */ }
             return NextResponse.redirect(
-                new URL(`/manager/email/mailboxes?error=${encodeURIComponent(error)}`, req.url)
+                new URL(`${returnBase}?error=${encodeURIComponent(error)}`, req.url)
             );
         }
 
         if (!code || !state) {
             return NextResponse.redirect(
-                new URL('/manager/email/mailboxes?error=missing_params', req.url)
+                new URL(`${defaultReturn}?error=missing_params`, req.url)
             );
         }
 
@@ -43,21 +50,23 @@ export async function GET(req: NextRequest) {
             stateData = JSON.parse(Buffer.from(state, 'base64url').toString());
         } catch {
             return NextResponse.redirect(
-                new URL('/manager/email/mailboxes?error=invalid_state', req.url)
+                new URL(`${defaultReturn}?error=invalid_state`, req.url)
             );
         }
+
+        const returnUrl = stateData.returnUrl || defaultReturn;
 
         // Verify state matches current user
         if (stateData.userId !== session.user.id) {
             return NextResponse.redirect(
-                new URL('/manager/email/mailboxes?error=state_mismatch', req.url)
+                new URL(`${returnUrl}?error=state_mismatch`, req.url)
             );
         }
 
         // Check state freshness (10 minute expiry)
         if (Date.now() - stateData.timestamp > 10 * 60 * 1000) {
             return NextResponse.redirect(
-                new URL('/manager/email/mailboxes?error=state_expired', req.url)
+                new URL(`${returnUrl}?error=state_expired`, req.url)
             );
         }
 
@@ -69,7 +78,7 @@ export async function GET(req: NextRequest) {
 
         if (!profile.email) {
             return NextResponse.redirect(
-                new URL('/manager/email/mailboxes?error=no_email', req.url)
+                new URL(`${returnUrl}?error=no_email`, req.url)
             );
         }
 
@@ -97,9 +106,9 @@ export async function GET(req: NextRequest) {
                 },
             });
 
-            const returnUrl = stateData.returnUrl || '/manager/email/mailboxes';
+            const finalUrl = stateData.returnUrl || defaultReturn;
             return NextResponse.redirect(
-                new URL(`${returnUrl}?success=reconnected`, req.url)
+                new URL(`${finalUrl}?success=reconnected`, req.url)
             );
         }
 
@@ -119,14 +128,15 @@ export async function GET(req: NextRequest) {
             },
         });
 
-        const returnUrl = stateData.returnUrl || '/manager/email/mailboxes';
+        const finalUrl = stateData.returnUrl || defaultReturn;
         return NextResponse.redirect(
-            new URL(`${returnUrl}?success=connected`, req.url)
+            new URL(`${finalUrl}?success=connected`, req.url)
         );
     } catch (error) {
         console.error('Outlook OAuth callback error:', error);
+        const defaultReturn = '/manager/email/mailboxes';
         return NextResponse.redirect(
-            new URL('/manager/email/mailboxes?error=callback_failed', req.url)
+            new URL(`${defaultReturn}?error=callback_failed`, req.url)
         );
     }
 }

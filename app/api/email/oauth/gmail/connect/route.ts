@@ -18,8 +18,8 @@ export async function GET(req: NextRequest) {
             );
         }
 
-        // Only allow managers and SDRs to connect email
-        const allowedRoles = ['MANAGER', 'SDR', 'BUSINESS_DEVELOPER'];
+        // Allow managers, SDRs, BDs, and developers to connect email
+        const allowedRoles = ['MANAGER', 'SDR', 'BUSINESS_DEVELOPER', 'DEVELOPER'];
         if (!allowedRoles.includes(session.user.role)) {
             return NextResponse.json(
                 { success: false, error: 'Rôle non autorisé' },

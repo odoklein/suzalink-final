@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
-// DELETE /api/email/accounts/[id] - Remove email account
+// DELETE /api/email/accounts/[id] - Remove email account or OAuth mailbox
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     try {
         const session = await getServerSession(authOptions);
@@ -17,18 +17,26 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
             where: { id },
         });
 
-        if (!account) {
-            return NextResponse.json({ success: false, error: "Compte non trouvé" }, { status: 404 });
+        if (account) {
+            if (account.userId !== session.user.id) {
+                return NextResponse.json({ success: false, error: "Accès refusé" }, { status: 403 });
+            }
+            await prisma.emailAccount.delete({ where: { id } });
+            return NextResponse.json({ success: true });
         }
 
-        // Only owner can delete
-        if (account.userId !== session.user.id) {
-            return NextResponse.json({ success: false, error: "Accès refusé" }, { status: 403 });
+        const mailbox = await prisma.mailbox.findUnique({
+            where: { id },
+        });
+        if (mailbox) {
+            if (mailbox.ownerId !== session.user.id) {
+                return NextResponse.json({ success: false, error: "Accès refusé" }, { status: 403 });
+            }
+            await prisma.mailbox.delete({ where: { id } });
+            return NextResponse.json({ success: true });
         }
 
-        await prisma.emailAccount.delete({ where: { id } });
-
-        return NextResponse.json({ success: true });
+        return NextResponse.json({ success: false, error: "Compte non trouvé" }, { status: 404 });
     } catch (error) {
         console.error("DELETE /api/email/accounts/[id] error:", error);
         return NextResponse.json({ success: false, error: "Erreur serveur" }, { status: 500 });

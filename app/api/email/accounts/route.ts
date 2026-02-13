@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
-// GET /api/email/accounts - List email accounts
+// GET /api/email/accounts - List email accounts (EmailAccount + OAuth Mailboxes for unified view)
 export async function GET(req: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
@@ -16,22 +16,65 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ success: false, error: "Rôle non autorisé" }, { status: 403 });
         }
 
-        const accounts = await prisma.emailAccount.findMany({
-            where: { userId: session.user.id },
-            select: {
-                id: true,
-                provider: true,
-                email: true,
-                displayName: true,
-                isActive: true,
-                lastSyncAt: true,
-                syncError: true,
-                createdAt: true,
-            },
-            orderBy: { createdAt: "desc" },
-        });
+        const [emailAccounts, mailboxes] = await Promise.all([
+            prisma.emailAccount.findMany({
+                where: { userId: session.user.id },
+                select: {
+                    id: true,
+                    provider: true,
+                    email: true,
+                    displayName: true,
+                    isActive: true,
+                    lastSyncAt: true,
+                    syncError: true,
+                    createdAt: true,
+                },
+                orderBy: { createdAt: "desc" },
+            }),
+            prisma.mailbox.findMany({
+                where: { ownerId: session.user.id, provider: { in: ["GMAIL", "OUTLOOK"] } },
+                select: {
+                    id: true,
+                    provider: true,
+                    email: true,
+                    displayName: true,
+                    isActive: true,
+                    lastSyncAt: true,
+                    lastError: true,
+                    createdAt: true,
+                },
+                orderBy: { createdAt: "desc" },
+            }),
+        ]);
 
-        return NextResponse.json({ success: true, data: accounts });
+        const accountItems = emailAccounts.map((a) => ({
+            id: a.id,
+            provider: a.provider,
+            email: a.email,
+            displayName: a.displayName,
+            isActive: a.isActive,
+            lastSyncAt: a.lastSyncAt,
+            syncError: a.syncError,
+            createdAt: a.createdAt,
+            source: "account" as const,
+        }));
+        const mailboxItems = mailboxes.map((m) => ({
+            id: m.id,
+            provider: m.provider,
+            email: m.email,
+            displayName: m.displayName,
+            isActive: m.isActive,
+            lastSyncAt: m.lastSyncAt,
+            syncError: m.lastError,
+            createdAt: m.createdAt,
+            source: "mailbox" as const,
+        }));
+
+        const combined = [...mailboxItems, ...accountItems].sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+
+        return NextResponse.json({ success: true, data: combined });
     } catch (error) {
         console.error("GET /api/email/accounts error:", error);
         return NextResponse.json({ success: false, error: "Erreur serveur" }, { status: 500 });

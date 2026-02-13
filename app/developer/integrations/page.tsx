@@ -24,6 +24,7 @@ interface EmailAccount {
     lastSyncAt: string | null;
     syncError: string | null;
     createdAt: string;
+    source?: "account" | "mailbox";
 }
 
 const PROVIDER_INFO = {
@@ -73,6 +74,23 @@ export default function IntegrationsPage() {
 
     useEffect(() => {
         loadAccounts();
+    }, []);
+
+    // Handle OAuth return (success/error in URL)
+    useEffect(() => {
+        if (typeof window === "undefined" || !window.location?.search) return;
+        const params = new URLSearchParams(window.location.search);
+        const success = params.get("success");
+        const error = params.get("error");
+        if (success === "connected" || success === "reconnected") {
+            loadAccounts();
+            const clean = window.location.pathname;
+            window.history.replaceState({}, "", clean);
+        }
+        if (error) {
+            const clean = window.location.pathname;
+            window.history.replaceState({}, "", clean);
+        }
     }, []);
 
     const loadAccounts = async () => {
@@ -133,7 +151,13 @@ export default function IntegrationsPage() {
     };
 
     const handleConnectOAuth = (provider: "GMAIL" | "OUTLOOK") => {
-        alert(`OAuth ${provider} integration will be configured with your Google/Microsoft credentials`);
+        const returnUrl = typeof window !== "undefined" ? `${window.location.origin}/developer/integrations` : "/developer/integrations";
+        const encoded = encodeURIComponent(returnUrl);
+        if (provider === "GMAIL") {
+            window.location.href = `/api/email/oauth/gmail/connect?returnUrl=${encoded}`;
+        } else {
+            window.location.href = `/api/email/oauth/outlook/connect?returnUrl=${encoded}`;
+        }
     };
 
     if (isLoading) {
