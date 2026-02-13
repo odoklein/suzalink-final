@@ -2587,9 +2587,6 @@ export default function SDRActionPage() {
                 contact={drawerContact}
                 onUpdate={() => {
                     refreshQueue();
-                    if (viewMode === "card" && currentAction?.contact?.id === drawerContactId) {
-                        loadNextAction();
-                    }
                 }}
                 isManager={true}
                 listId={selectedListId ?? undefined}
@@ -2601,9 +2598,6 @@ export default function SDRActionPage() {
                 company={drawerCompany}
                 onUpdate={() => {
                     refreshQueue();
-                    if (viewMode === "card" && currentAction?.company?.id === drawerCompanyId) {
-                        loadNextAction();
-                    }
                 }}
                 onContactClick={handleContactFromCompany}
                 isManager={true}

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useId } from "react";
 import { cn } from "@/lib/utils";
 import {
     X,
@@ -187,6 +187,7 @@ export function EmailComposer({
 
     const editorRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const fileInputId = useId();
     const hasContentRef = useRef(false);
 
     // Track if composer has content (for discard warning)
@@ -327,16 +328,15 @@ export function EmailComposer({
         }
     };
 
-    // Handle attachment
+    // Handle attachment (native label + input so file picker opens reliably)
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
-        if (files) {
-            setAttachments(prev => [...prev, ...Array.from(files)]);
+        if (files && files.length > 0) {
+            // Capture file list synchronously; clearing input below can invalidate it before React runs the state updater
+            const toAdd = Array.from(files);
+            setAttachments(prev => [...prev, ...toAdd]);
         }
-        // Reset input so same file can be re-selected
-        if (fileInputRef.current) {
-            fileInputRef.current.value = "";
-        }
+        e.target.value = "";
     };
 
     const removeAttachment = (index: number) => {
@@ -835,18 +835,20 @@ export function EmailComposer({
                             <div className="flex items-center gap-0.5">
                                 <input
                                     ref={fileInputRef}
+                                    id={fileInputId}
                                     type="file"
                                     multiple
-                                    className="hidden"
+                                    className="sr-only"
                                     onChange={handleFileSelect}
+                                    accept="*/*"
                                 />
-                                <button
-                                    onClick={() => fileInputRef.current?.click()}
-                                    className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+                                <label
+                                    htmlFor={fileInputId}
+                                    className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors cursor-pointer inline-flex"
                                     title="Joindre un fichier"
                                 >
                                     <Paperclip className="w-4 h-4" />
-                                </button>
+                                </label>
                                 <button
                                     onClick={() => setShowSchedule(!showSchedule)}
                                     className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
