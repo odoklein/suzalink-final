@@ -7,8 +7,8 @@ import type { ActionResult, Channel } from "@/lib/types";
 
 // ============================================
 // GET /api/sdr/actions
-// Returns the current SDR/BD's actions (calls and other actions) for "my activity" view.
-// Query: period=today|all, limit (default 50)
+// Returns the current SDR/BD's actions (calls and other actions) for "my activity" and history.
+// Query: period=today|all, limit (default 50), dateFrom, dateTo, missionId, result, channel
 // ============================================
 
 export async function GET(request: NextRequest) {
@@ -31,16 +31,50 @@ export async function GET(request: NextRequest) {
 
         const { searchParams } = new URL(request.url);
         const period = searchParams.get("period") || "today"; // today | all
-        const limit = Math.min(parseInt(searchParams.get("limit") || "50") || 50, 200);
+        const limit = Math.min(parseInt(searchParams.get("limit") || "50") || 50, 500);
+        const dateFrom = searchParams.get("dateFrom");
+        const dateTo = searchParams.get("dateTo");
+        const missionId = searchParams.get("missionId");
+        const result = searchParams.get("result");
+        const channel = searchParams.get("channel");
 
         const sdrId = session.user.id;
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        const where: { sdrId: string; createdAt?: { gte?: Date } } = { sdrId };
+        type Where = {
+            sdrId: string;
+            createdAt?: { gte?: Date; lte?: Date };
+            campaign?: { missionId?: string };
+            result?: string;
+            channel?: string;
+        };
+        const where: Where = { sdrId };
         if (period === "today") {
-            where.createdAt = { gte: today };
+            where.createdAt = { ...where.createdAt, gte: today };
+        }
+        if (dateFrom) {
+            const from = new Date(dateFrom);
+            if (!isNaN(from.getTime())) {
+                where.createdAt = { ...where.createdAt, gte: from };
+            }
+        }
+        if (dateTo) {
+            const to = new Date(dateTo);
+            if (!isNaN(to.getTime())) {
+                to.setHours(23, 59, 59, 999);
+                where.createdAt = { ...where.createdAt, lte: to };
+            }
+        }
+        if (missionId) {
+            where.campaign = { missionId };
+        }
+        if (result) {
+            where.result = result;
+        }
+        if (channel) {
+            where.channel = channel;
         }
 
         const actions = await prisma.action.findMany({
@@ -61,7 +95,11 @@ export async function GET(request: NextRequest) {
                     select: { id: true, name: true },
                 },
                 campaign: {
-                    select: { name: true },
+                    select: {
+                        name: true,
+                        missionId: true,
+                        mission: { select: { id: true, name: true } },
+                    },
                 },
             },
         });
@@ -72,19 +110,24 @@ export async function GET(request: NextRequest) {
                 : null;
             const companyName = a.contact?.company?.name ?? a.company?.name ?? null;
             const label = ACTION_RESULT_LABELS[(a.result as ActionResult)] ?? a.result;
+            const companyIdResolved = a.companyId ?? a.contact?.company?.id ?? null;
 
             return {
                 id: a.id,
                 contactId: a.contactId,
-                companyId: a.companyId,
+                companyId: companyIdResolved,
                 result: a.result,
                 resultLabel: label,
                 channel: a.channel as Channel,
                 campaignName: a.campaign?.name,
+                missionId: a.campaign?.mission?.id,
+                missionName: a.campaign?.mission?.name,
                 contactName: contactName || undefined,
                 companyName: companyName || undefined,
                 note: a.note ?? undefined,
                 createdAt: a.createdAt.toISOString(),
+                callbackDate: a.callbackDate?.toISOString() ?? null,
+                duration: a.duration ?? null,
             };
         });
 

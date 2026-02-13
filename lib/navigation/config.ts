@@ -19,6 +19,7 @@ import {
   MessageSquare,
   Receipt,
   Search,
+  History,
   LucideIcon,
 } from "lucide-react";
 import { UserRole } from "@prisma/client";
@@ -193,6 +194,12 @@ export const SDR_NAV: NavSection[] = [
         permission: "pages.action",
       },
       {
+        href: "/sdr/history",
+        icon: History,
+        label: "Historique",
+        permission: "pages.action",
+      },
+      {
         href: "/sdr/meetings",
         icon: Calendar,
         label: "Mes RDV",
@@ -267,6 +274,12 @@ export const BD_NAV: NavSection[] = [
         href: "/sdr/callbacks",
         icon: Calendar,
         label: "Rappels",
+        permission: "pages.action",
+      },
+      {
+        href: "/sdr/history",
+        icon: History,
+        label: "Historique",
         permission: "pages.action",
       },
       {
