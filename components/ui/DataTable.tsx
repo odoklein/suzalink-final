@@ -45,6 +45,19 @@ interface DataTableProps<T> {
 
 type SortDirection = "asc" | "desc" | null;
 
+/** Get value from row by key; supports nested paths e.g. "contact.firstName" */
+function getValueAtPath<T extends Record<string, any>>(row: T, field: string): unknown {
+    if (!field.includes(".")) return row[field];
+    const parts = field.split(".");
+    let current: unknown = row;
+    for (const part of parts) {
+        current = current != null && typeof current === "object" && part in current
+            ? (current as Record<string, unknown>)[part]
+            : undefined;
+    }
+    return current;
+}
+
 export function DataTable<T extends Record<string, any>>({
     data,
     columns,
@@ -73,7 +86,7 @@ export function DataTable<T extends Record<string, any>>({
         return String(row[keyField]);
     };
 
-    // Filter data
+    // Filter data (supports nested paths in searchFields e.g. "contact.firstName")
     const filteredData = useMemo(() => {
         if (!searchQuery.trim()) return data;
 
@@ -81,8 +94,8 @@ export function DataTable<T extends Record<string, any>>({
         return data.filter((row) => {
             const fieldsToSearch = searchFields || (Object.keys(row) as (keyof T)[]);
             return fieldsToSearch.some((field) => {
-                const value = row[field];
-                return String(value).toLowerCase().includes(query);
+                const value = getValueAtPath(row, field as string);
+                return value != null && String(value).toLowerCase().includes(query);
             });
         });
     }, [data, searchQuery, searchFields]);

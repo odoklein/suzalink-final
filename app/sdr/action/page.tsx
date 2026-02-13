@@ -32,8 +32,9 @@ import {
     PhoneOff,
     MailOpen,
     PenLine,
+    BarChart2,
 } from "lucide-react";
-import { Card, Badge, Button, LoadingState, EmptyState, Tabs, Drawer, DataTable, Select, useToast, TableSkeleton, CardSkeleton } from "@/components/ui";
+import { Card, Badge, Button, LoadingState, EmptyState, Tabs, Drawer, DataTable, Select, useToast, TableSkeleton, CardSkeleton, Modal } from "@/components/ui";
 import type { Column } from "@/components/ui/DataTable";
 import { CompanyDrawer, ContactDrawer } from "@/components/drawers";
 import { UnifiedActionDrawer } from "@/components/drawers/UnifiedActionDrawer";
@@ -109,6 +110,7 @@ interface QueueItem {
     _companyName?: string;
     _phone?: string | null;
     _email?: string | null;
+    _searchNote?: string | null;
 }
 
 interface DrawerContact {
@@ -186,6 +188,127 @@ const SCRIPT_TABS = [
     { id: "closing", label: "Closing" },
 ];
 
+// Stats modal body: summary + list of contacts with status (for Actions page)
+function ActionStatsModalBody({
+    items,
+    loading,
+    statusLabels,
+    onRowClick,
+    priorityLabels,
+    resultIconMap,
+    queueRowKey,
+}: {
+    items: QueueItem[];
+    loading: boolean;
+    statusLabels: Record<string, string>;
+    onRowClick: (row: QueueItem) => void;
+    priorityLabels: Record<string, { label: string; color: string }>;
+    resultIconMap: Record<string, React.ReactNode>;
+    queueRowKey: (row: QueueItem) => string;
+}) {
+    const byStatus = useMemo(() => {
+        const map: Record<string, number> = {};
+        items.forEach((row) => {
+            const key = row.lastAction?.result ?? "NONE";
+            map[key] = (map[key] ?? 0) + 1;
+        });
+        return map;
+    }, [items]);
+    const byPriority = useMemo(() => {
+        const map: Record<string, number> = {};
+        items.forEach((row) => {
+            const key = row.priority ?? "";
+            map[key] = (map[key] ?? 0) + 1;
+        });
+        return map;
+    }, [items]);
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+            </div>
+        );
+    }
+    return (
+        <div className="space-y-6">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Total</p>
+                    <p className="text-xl font-bold text-slate-900">{items.length}</p>
+                </div>
+                {Object.entries(priorityLabels).map(([key, { label, color }]) => (
+                    <div key={key} className={cn("rounded-xl border p-3", color)}>
+                        <p className="text-xs font-medium uppercase tracking-wider opacity-90">{label}</p>
+                        <p className="text-xl font-bold">{byPriority[key] ?? 0}</p>
+                    </div>
+                ))}
+            </div>
+            <div>
+                <h4 className="text-sm font-semibold text-slate-700 mb-2">Par statut</h4>
+                <div className="flex flex-wrap gap-2">
+                    <Badge className="bg-slate-100 text-slate-700 border-slate-200">Jamais contacté: {byStatus["NONE"] ?? 0}</Badge>
+                    {Object.entries(statusLabels).map(([key, label]) => (
+                        <Badge key={key} className="bg-slate-100 text-slate-700 border-slate-200">{label}: {byStatus[key] ?? 0}</Badge>
+                    ))}
+                </div>
+            </div>
+            <div>
+                <h4 className="text-sm font-semibold text-slate-700 mb-2">Tous les contacts</h4>
+                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-[320px] overflow-y-auto">
+                    {items.length === 0 ? (
+                        <p className="text-center py-8 text-slate-500 text-sm">Aucun contact dans cette vue.</p>
+                    ) : (
+                        <table className="w-full text-sm">
+                            <thead className="bg-slate-50 border-b border-slate-200 sticky top-0">
+                                <tr>
+                                    <th className="text-left py-2.5 px-3 font-medium text-slate-600">Contact / Société</th>
+                                    <th className="text-left py-2.5 px-3 font-medium text-slate-600">Statut</th>
+                                    <th className="text-left py-2.5 px-3 font-medium text-slate-600">Priorité</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {items.map((row) => {
+                                    const name = row._displayName ?? (row.contact ? `${row.contact.firstName ?? ""} ${row.contact.lastName ?? ""}`.trim() || row.company.name : row.company.name);
+                                    const status = row.lastAction ? (statusLabels[row.lastAction.result] ?? row.lastAction.result) : "Jamais contacté";
+                                    const pri = priorityLabels[row.priority];
+                                    return (
+                                        <tr
+                                            key={queueRowKey(row)}
+                                            onClick={() => onRowClick(row)}
+                                            className="border-b border-slate-100 last:border-0 hover:bg-indigo-50/80 cursor-pointer transition-colors"
+                                        >
+                                            <td className="py-2.5 px-3">
+                                                <span className="font-medium text-slate-900">{name}</span>
+                                                {row._companyName && row._companyName !== name && (
+                                                    <span className="text-slate-500 text-xs block">{row._companyName}</span>
+                                                )}
+                                            </td>
+                                            <td className="py-2.5 px-3">
+                                                {row.lastAction ? (
+                                                    <span className="inline-flex items-center gap-1">
+                                                        {resultIconMap[row.lastAction.result]}
+                                                        {status}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-slate-400 italic">Jamais contacté</span>
+                                                )}
+                                            </td>
+                                            <td className="py-2.5 px-3">
+                                                {pri ? <Badge className={cn("text-xs", pri.color)}>{pri.label}</Badge> : row.priority}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function SDRActionPage() {
     const { data: session } = useSession();
     const { error: showError } = useToast();
@@ -258,6 +381,11 @@ export default function SDRActionPage() {
     // Mission search: server-side search so contacts can be filtered by name
     const [tableSearchInput, setTableSearchInput] = useState("");
     const [tableSearchApi, setTableSearchApi] = useState("");
+
+    // Stats modal (table + card view): view stats and list of contacts with status
+    const [showStatsModal, setShowStatsModal] = useState(false);
+    const [statsQueueItems, setStatsQueueItems] = useState<QueueItem[]>([]);
+    const [statsLoading, setStatsLoading] = useState(false);
 
     // Drawer for table view (contact/company fiche)
     const [drawerContactId, setDrawerContactId] = useState<string | null>(null);
@@ -492,6 +620,7 @@ export default function SDRActionPage() {
                         _companyName: i.company.name,
                         _phone: i.contact?.phone || i.company?.phone || null,
                         _email: i.contact?.email || null,
+                        _searchNote: i.lastAction?.note ?? null,
                     })));
                 } else {
                     setQueueItems([]);
@@ -644,6 +773,7 @@ export default function SDRActionPage() {
                         _companyName: i.company.name,
                         _phone: i.contact?.phone || i.company?.phone || null,
                         _email: i.contact?.email || null,
+                        _searchNote: i.lastAction?.note ?? null,
                     })));
                 }
             })
@@ -652,6 +782,36 @@ export default function SDRActionPage() {
                 if (refreshQueueAbortRef.current === controller) refreshQueueAbortRef.current = null;
             });
     }, [selectedMissionId, selectedListId, tableSearchApi]);
+
+    // When opening Stats modal in card view, fetch queue for current mission/list
+    useEffect(() => {
+        if (!showStatsModal || viewMode !== "card" || !selectedMissionId) return;
+        setStatsLoading(true);
+        const params = new URLSearchParams();
+        params.set("missionId", selectedMissionId);
+        if (selectedListId) params.set("listId", selectedListId);
+        fetch(`/api/sdr/action-queue?${params.toString()}`, { cache: "no-store" })
+            .then((res) => res.json())
+            .then((json) => {
+                if (json.success && json.data?.items) {
+                    const items = json.data.items as QueueItem[];
+                    setStatsQueueItems(items.map((i) => ({
+                        ...i,
+                        _displayName: i.contact
+                            ? `${(i.contact.firstName || "").trim()} ${(i.contact.lastName || "").trim()}`.trim() || i.company.name
+                            : i.company.name,
+                        _companyName: i.company.name,
+                        _phone: i.contact?.phone || i.company?.phone || null,
+                        _email: i.contact?.email || null,
+                        _searchNote: i.lastAction?.note ?? null,
+                    })));
+                } else {
+                    setStatsQueueItems([]);
+                }
+            })
+            .catch(() => setStatsQueueItems([]))
+            .finally(() => setStatsLoading(false));
+    }, [showStatsModal, viewMode, selectedMissionId, selectedListId]);
 
     // Unified drawer state (table view)
     const [unifiedDrawerOpen, setUnifiedDrawerOpen] = useState(false);
@@ -1265,6 +1425,15 @@ export default function SDRActionPage() {
                                     </button>
                                 </div>
 
+                                <Button
+                                    type="button"
+                                    onClick={() => setShowStatsModal(true)}
+                                    className="rounded-xl border border-white/20 bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm gap-2 px-4 py-2 h-auto font-medium"
+                                >
+                                    <BarChart2 className="w-4 h-4" />
+                                    Stats
+                                </Button>
+
                                 {/* Stats badge - Actions count only (no timer for SDR/BD) */}
                                 <div className="px-4 py-2 rounded-xl bg-white/10 border border-white/10 backdrop-blur-sm">
                                     <div className="flex items-center gap-3">
@@ -1464,8 +1633,8 @@ export default function SDRActionPage() {
                             columns={queueColumns}
                             keyField={(row) => queueRowKey(row)}
                             searchable
-                            searchPlaceholder="Rechercher contact ou société..."
-                            searchFields={["_displayName", "_companyName", "missionName"]}
+                            searchPlaceholder="Rechercher contact, société, téléphone, note..."
+                            searchFields={["_displayName", "_companyName", "_phone", "_searchNote", "missionName"]}
                             pagination
                             pageSize={15}
                             emptyMessage="Aucun contact dans la file. Changez de mission ou liste."
@@ -1533,6 +1702,43 @@ export default function SDRActionPage() {
                     missionId={emailModalMissionId}
                     missionName={emailModalMissionName}
                 />
+
+                {/* Stats modal: summary + list of contacts with status (click to open drawer) */}
+                <Modal
+                    isOpen={showStatsModal}
+                    onClose={() => setShowStatsModal(false)}
+                    title="Statistiques"
+                    description={selectedMissionId ? (missions.find((m) => m.id === selectedMissionId)?.name ?? "") + (selectedListId ? ` · ${filteredLists.find((l) => l.id === selectedListId)?.name ?? ""}` : "") : "Sélectionnez une mission"}
+                    size="xl"
+                >
+                    {viewMode === "table" ? (
+                        <ActionStatsModalBody
+                            items={filteredQueueItems}
+                            loading={false}
+                            statusLabels={statusLabels}
+                            onRowClick={(row) => {
+                                openDrawerForRow(row);
+                                setShowStatsModal(false);
+                            }}
+                            priorityLabels={PRIORITY_LABELS}
+                            resultIconMap={RESULT_ICON_MAP}
+                            queueRowKey={queueRowKey}
+                        />
+                    ) : (
+                        <ActionStatsModalBody
+                            items={statsQueueItems}
+                            loading={statsLoading}
+                            statusLabels={statusLabels}
+                            onRowClick={(row) => {
+                                openDrawerForRow(row);
+                                setShowStatsModal(false);
+                            }}
+                            priorityLabels={PRIORITY_LABELS}
+                            resultIconMap={RESULT_ICON_MAP}
+                            queueRowKey={queueRowKey}
+                        />
+                    )}
+                </Modal>
             </div >
         );
     }
@@ -1738,6 +1944,15 @@ export default function SDRActionPage() {
                                 placeholder="Liste"
                                 className="min-w-[160px]"
                             />
+
+                            <Button
+                                type="button"
+                                onClick={() => setShowStatsModal(true)}
+                                className="rounded-xl border border-white/20 bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm gap-2 px-4 py-2 h-auto font-medium"
+                            >
+                                <BarChart2 className="w-4 h-4" />
+                                Stats
+                            </Button>
 
                             {/* Stats Badges */}
                             <div className="px-4 py-2 rounded-xl bg-white/10 border border-white/10 backdrop-blur-sm">
@@ -2304,6 +2519,51 @@ export default function SDRActionPage() {
                 missionId={emailModalMissionId}
                 missionName={emailModalMissionName}
             />
+
+            {/* Stats modal (card view) */}
+            <Modal
+                isOpen={showStatsModal}
+                onClose={() => setShowStatsModal(false)}
+                title="Statistiques"
+                description={selectedMissionId ? (missions.find((m) => m.id === selectedMissionId)?.name ?? "") + (selectedListId ? ` · ${filteredLists.find((l) => l.id === selectedListId)?.name ?? ""}` : "") : "Sélectionnez une mission"}
+                size="xl"
+            >
+                <ActionStatsModalBody
+                    items={statsQueueItems}
+                    loading={statsLoading}
+                    statusLabels={statusLabels}
+                    onRowClick={(row) => {
+                        openDrawerForRow(row);
+                        setShowStatsModal(false);
+                    }}
+                    priorityLabels={PRIORITY_LABELS}
+                    resultIconMap={RESULT_ICON_MAP}
+                    queueRowKey={queueRowKey}
+                />
+            </Modal>
+
+            {/* Unified Action Drawer (card view: when opened from Stats modal) */}
+            {unifiedDrawerCompanyId && (
+                <UnifiedActionDrawer
+                    isOpen={unifiedDrawerOpen}
+                    onClose={closeUnifiedDrawer}
+                    contactId={unifiedDrawerContactId}
+                    companyId={unifiedDrawerCompanyId}
+                    missionId={unifiedDrawerMissionId}
+                    missionName={unifiedDrawerMissionName}
+                    clientBookingUrl={unifiedDrawerClientBookingUrl || undefined}
+                    onOpenEmailModal={openEmailModalFromDrawer}
+                    onActionRecorded={() => {
+                        const rowKey = unifiedDrawerContactId ?? unifiedDrawerCompanyId ?? "";
+                        if (rowKey) setActionsCompleted((c) => c + 1);
+                        loadNextAction();
+                    }}
+                    onValidateAndNext={() => {
+                        closeUnifiedDrawer();
+                        loadNextAction();
+                    }}
+                />
+            )}
 
             {/* Booking Modal */}
             {currentAction?.clientBookingUrl && currentAction.contact && (

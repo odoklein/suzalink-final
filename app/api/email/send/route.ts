@@ -75,14 +75,18 @@ export async function POST(req: NextRequest) {
             bcc = bccJson ? JSON.parse(bccJson) : [];
 
             for (const [key, value] of formData.entries()) {
-                if (key.startsWith('attachment_') && value instanceof File) {
-                    const arrayBuffer = await value.arrayBuffer();
-                    attachments.push({
-                        filename: value.name,
-                        content: Buffer.from(arrayBuffer),
-                        mimeType: value.type,
-                    });
-                }
+                if (!key.startsWith('attachment_')) continue;
+                // Accept File or Blob (some runtimes return Blob for multipart file parts)
+                const blob = value instanceof Blob ? value : null;
+                if (!blob) continue;
+                const arrayBuffer = await blob.arrayBuffer();
+                const filename = value instanceof File && value.name ? value.name : `attachment_${key.replace('attachment_', '')}`;
+                const mimeType = value instanceof File && value.type ? value.type : 'application/octet-stream';
+                attachments.push({
+                    filename,
+                    content: Buffer.from(arrayBuffer),
+                    mimeType,
+                });
             }
         }
 

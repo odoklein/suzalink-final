@@ -31,6 +31,7 @@ import {
     SkipForward,
     Eye,
     PhoneOff,
+    BarChart2,
 } from "lucide-react";
 import Link from "next/link";
 import { formatCallbackDateTime } from "@/lib/utils/parseDateFromNote";
@@ -114,6 +115,111 @@ function getUrgencyLevel(cb: Callback): { level: "overdue" | "due_now" | "upcomi
     return { level: "future", label: `${Math.floor(diffHours / 24)}j`, color: "bg-slate-50 text-slate-600 border-slate-200", sortPriority: 3 };
 }
 
+function CallbacksStatsModalBody({
+    callbacks,
+    getUrgencyLevel: getUrgency,
+    formatCallbackDateTime,
+    onRowClick,
+}: {
+    callbacks: Callback[];
+    getUrgencyLevel: (cb: Callback) => { level: string; label: string; color: string };
+    formatCallbackDateTime: (date: string) => string;
+    onRowClick: (cb: Callback) => void;
+}) {
+    const byUrgency = useMemo(() => {
+        const map: Record<string, number> = { overdue: 0, due_now: 0, upcoming: 0, future: 0 };
+        callbacks.forEach((cb) => {
+            const u = getUrgency(cb);
+            map[u.level] = (map[u.level] ?? 0) + 1;
+        });
+        return map;
+    }, [callbacks, getUrgency]);
+    const byMission = useMemo(() => {
+        const map: Record<string, number> = {};
+        callbacks.forEach((cb) => {
+            const name = cb.mission?.name ?? "Sans mission";
+            map[name] = (map[name] ?? 0) + 1;
+        });
+        return map;
+    }, [callbacks]);
+
+    return (
+        <div className="space-y-6">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Total</p>
+                    <p className="text-xl font-bold text-slate-900">{callbacks.length}</p>
+                </div>
+                <div className="rounded-xl bg-red-50 border border-red-200 p-3">
+                    <p className="text-xs font-medium text-red-700 uppercase tracking-wider">En retard</p>
+                    <p className="text-xl font-bold text-red-800">{byUrgency.overdue ?? 0}</p>
+                </div>
+                <div className="rounded-xl bg-amber-50 border border-amber-200 p-3">
+                    <p className="text-xs font-medium text-amber-700 uppercase tracking-wider">Imminent</p>
+                    <p className="text-xl font-bold text-amber-800">{byUrgency.due_now ?? 0}</p>
+                </div>
+                <div className="rounded-xl bg-blue-50 border border-blue-200 p-3">
+                    <p className="text-xs font-medium text-blue-700 uppercase tracking-wider">À venir</p>
+                    <p className="text-xl font-bold text-blue-800">{(byUrgency.upcoming ?? 0) + (byUrgency.future ?? 0)}</p>
+                </div>
+            </div>
+            <div>
+                <h4 className="text-sm font-semibold text-slate-700 mb-2">Par mission</h4>
+                <div className="flex flex-wrap gap-2">
+                    {Object.entries(byMission).map(([name, count]) => (
+                        <Badge key={name} className="bg-slate-100 text-slate-700 border-slate-200">{name}: {count}</Badge>
+                    ))}
+                </div>
+            </div>
+            <div>
+                <h4 className="text-sm font-semibold text-slate-700 mb-2">Tous les rappels</h4>
+                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-[320px] overflow-y-auto">
+                    {callbacks.length === 0 ? (
+                        <p className="text-center py-8 text-slate-500 text-sm">Aucun rappel.</p>
+                    ) : (
+                        <table className="w-full text-sm">
+                            <thead className="bg-slate-50 border-b border-slate-200 sticky top-0">
+                                <tr>
+                                    <th className="text-left py-2.5 px-3 font-medium text-slate-600">Contact / Société</th>
+                                    <th className="text-left py-2.5 px-3 font-medium text-slate-600">Urgence</th>
+                                    <th className="text-left py-2.5 px-3 font-medium text-slate-600">Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {callbacks.map((cb) => {
+                                    const name = cb.contact
+                                        ? `${cb.contact.firstName ?? ""} ${cb.contact.lastName ?? ""}`.trim() || "Contact"
+                                        : cb.company?.name ?? "Société";
+                                    const company = cb.contact?.company?.name ?? cb.company?.name ?? "—";
+                                    const urgency = getUrgency(cb);
+                                    return (
+                                        <tr
+                                            key={cb.id}
+                                            onClick={() => onRowClick(cb)}
+                                            className="border-b border-slate-100 last:border-0 hover:bg-amber-50/80 cursor-pointer transition-colors"
+                                        >
+                                            <td className="py-2.5 px-3">
+                                                <span className="font-medium text-slate-900">{name}</span>
+                                                <span className="text-slate-500 text-xs block">{company}</span>
+                                            </td>
+                                            <td className="py-2.5 px-3">
+                                                <Badge className={cn("text-xs border", urgency.color)}>{urgency.label}</Badge>
+                                            </td>
+                                            <td className="py-2.5 px-3 text-slate-600">
+                                                {cb.callbackDate ? formatCallbackDateTime(cb.callbackDate) : "—"}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ============================================
 // SDR CALLBACKS PAGE
 // ============================================
@@ -148,6 +254,7 @@ export default function SDRCallbacksPage() {
     // View & Sort
     const [viewMode, setViewMode] = useState<"card" | "table">("table");
     const [sortKey, setSortKey] = useState<SortKey>("urgency");
+    const [showStatsModal, setShowStatsModal] = useState(false);
     const [sortDir, setSortDir] = useState<SortDir>("asc");
 
     // Quick action inline (for table)
@@ -628,6 +735,15 @@ export default function SDRCallbacksPage() {
                                 </button>
                             </div>
 
+                            <Button
+                                type="button"
+                                onClick={() => setShowStatsModal(true)}
+                                className="rounded-xl border border-white/20 bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm gap-2 px-4 py-2 h-auto font-medium"
+                            >
+                                <BarChart2 className="w-4 h-4" />
+                                Stats
+                            </Button>
+
                             {/* Stats */}
                             <div className="flex items-center gap-3">
                                 <div className="px-3 py-2 rounded-xl bg-white/10 border border-white/10 backdrop-blur-sm">
@@ -661,8 +777,8 @@ export default function SDRCallbacksPage() {
                 </div>
             </div>
 
-            {/* Filters & Sort */}
-            <div className="bg-white/80 backdrop-blur-xl rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
+            {/* Filters & Sort - no overflow-hidden so Select dropdowns can extend outside */}
+            <div className="bg-white/80 backdrop-blur-xl rounded-2xl border border-slate-200/60 shadow-sm">
                 <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50/80 to-white">
                     <div className="flex flex-wrap items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
@@ -816,8 +932,8 @@ export default function SDRCallbacksPage() {
                         columns={tableColumns}
                         keyField={(cb) => cb.id}
                         searchable
-                        searchPlaceholder="Rechercher contact, société, note..."
-                        searchFields={["contact.firstName", "contact.lastName", "company.name", "note"]}
+                        searchPlaceholder="Rechercher contact, société, téléphone, note..."
+                        searchFields={["contact.firstName", "contact.lastName", "company.name", "contact.company.name", "contact.phone", "company.phone", "note"]}
                         pagination
                         pageSize={20}
                         emptyMessage="Aucun rappel trouvé avec ces filtres."
@@ -1036,6 +1152,25 @@ export default function SDRCallbacksPage() {
                     onActionRecorded={fetchCallbacks}
                 />
             )}
+
+            {/* Stats modal */}
+            <Modal
+                isOpen={showStatsModal}
+                onClose={() => setShowStatsModal(false)}
+                title="Statistiques des rappels"
+                description={selectedMissionId ? missions.find((m) => m.id === selectedMissionId)?.name : "Tous les rappels"}
+                size="xl"
+            >
+                <CallbacksStatsModalBody
+                    callbacks={sortedCallbacks}
+                    getUrgencyLevel={getUrgencyLevel}
+                    formatCallbackDateTime={formatCallbackDateTime}
+                    onRowClick={(cb) => {
+                        openDrawerForCallback(cb);
+                        setShowStatsModal(false);
+                    }}
+                />
+            </Modal>
 
             {/* Outcome modal */}
             <Modal
