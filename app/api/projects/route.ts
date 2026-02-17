@@ -28,16 +28,12 @@ export async function GET(req: NextRequest) {
         // Build where clause based on role
         let whereClause: any = {};
 
-        if (role === "MANAGER" || role === "DEVELOPER") {
+        if (role === "MANAGER" || role === "DEVELOPER" || role === "SDR" || role === "BUSINESS_DEVELOPER") {
             whereClause = {
                 OR: [
                     { ownerId: userId },
                     { members: { some: { userId } } },
                 ],
-            };
-        } else if (role === "SDR" || role === "BUSINESS_DEVELOPER") {
-            whereClause = {
-                members: { some: { userId } },
             };
         } else if (role === "CLIENT") {
             const user = await prisma.user.findUnique({
@@ -160,7 +156,7 @@ export async function POST(req: NextRequest) {
         }
 
         const role = session.user.role;
-        if (!["MANAGER", "DEVELOPER", "BUSINESS_DEVELOPER"].includes(role || "")) {
+        if (!["MANAGER", "DEVELOPER", "BUSINESS_DEVELOPER", "SDR"].includes(role || "")) {
             return NextResponse.json({ success: false, error: "Rôle non autorisé" }, { status: 403 });
         }
 

@@ -231,6 +231,17 @@ export const SDR_NAV: NavSection[] = [
       },
     ],
   },
+  {
+    title: "Organisation",
+    items: [
+      {
+        href: "/sdr/projects",
+        icon: FolderKanban,
+        label: "Projets",
+        permission: "pages.projects",
+      },
+    ],
+  },
 ];
 
 // ============================================

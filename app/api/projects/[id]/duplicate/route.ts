@@ -11,7 +11,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             return NextResponse.json({ success: false, error: "Non autorisé" }, { status: 401 });
         }
 
-        if (!["MANAGER", "DEVELOPER"].includes(session.user.role || "")) {
+        if (!["MANAGER", "DEVELOPER", "SDR"].includes(session.user.role || "")) {
             return NextResponse.json({ success: false, error: "Rôle non autorisé" }, { status: 403 });
         }
 

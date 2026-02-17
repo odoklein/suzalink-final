@@ -1,5 +1,0 @@
-{"location":"EmailComposer.tsx:attachments-effect","message":"attachments state","data":{"attachmentsLength":0},"timestamp":1770973122524,"hypothesisId":"H4-H5"}
-{"location":"EmailComposer.tsx:attachments-effect","message":"attachments state","data":{"attachmentsLength":0},"timestamp":1770973122525,"hypothesisId":"H4-H5"}
-{"location":"EmailComposer.tsx:handleFileSelect","message":"file select handler","data":{"filesIsNull":false,"filesLength":1,"fileNames":["1.png"]},"timestamp":1770973129988,"hypothesisId":"H1-H2"}
-{"location":"EmailComposer.tsx:handleFileSelect","message":"setAttachments called","data":{"addedCount":1},"timestamp":1770973129988,"hypothesisId":"H3"}
-{"location":"EmailComposer.tsx:attachments-effect","message":"attachments state","data":{"attachmentsLength":1},"timestamp":1770973129993,"hypothesisId":"H4-H5"}

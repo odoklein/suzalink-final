@@ -34,8 +34,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             (m) => m.userId === session.user.id && ["owner", "admin"].includes(m.role)
         );
         const isManager = session.user.role === "MANAGER";
+        const isSdr = session.user.role === "SDR";
 
-        if (!isOwner && !isAdmin && !isManager) {
+        if (!isOwner && !isAdmin && !isManager && !isSdr) {
             return NextResponse.json({ success: false, error: "Accès refusé" }, { status: 403 });
         }
 
@@ -105,9 +106,10 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
             (m) => m.userId === session.user.id && ["owner", "admin"].includes(m.role)
         );
         const isManager = session.user.role === "MANAGER";
+        const isSdr = session.user.role === "SDR";
         const isSelf = userId === session.user.id;
 
-        if (!isOwner && !isAdmin && !isManager && !isSelf) {
+        if (!isOwner && !isAdmin && !isManager && !isSdr && !isSelf) {
             return NextResponse.json({ success: false, error: "Accès refusé" }, { status: 403 });
         }
 

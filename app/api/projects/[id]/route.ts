@@ -134,8 +134,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         const isOwner = project.ownerId === session.user.id;
         const isAdmin = project.members.some((m) => m.userId === session.user.id && m.role === "admin");
         const isManager = session.user.role === "MANAGER";
+        const isSdr = session.user.role === "SDR";
 
-        if (!isOwner && !isAdmin && !isManager) {
+        if (!isOwner && !isAdmin && !isManager && !isSdr) {
             return NextResponse.json({ success: false, error: "Accès refusé" }, { status: 403 });
         }
 
@@ -211,7 +212,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
             return NextResponse.json({ success: false, error: "Projet non trouvé" }, { status: 404 });
         }
 
-        if (project.ownerId !== session.user.id && session.user.role !== "MANAGER") {
+        if (project.ownerId !== session.user.id && session.user.role !== "MANAGER" && session.user.role !== "SDR") {
             return NextResponse.json({ success: false, error: "Accès refusé" }, { status: 403 });
         }
 
