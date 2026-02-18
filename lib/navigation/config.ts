@@ -387,6 +387,12 @@ export const CLIENT_NAV: NavSection[] = [
         permission: "pages.dashboard",
       },
       {
+        href: "/client/portal/calls",
+        icon: Phone,
+        label: "Appels récents",
+        permission: "pages.dashboard",
+      },
+      {
         href: "/client/results",
         icon: BarChart3,
         label: "Resultats",
