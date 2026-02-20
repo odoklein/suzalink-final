@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useCallback, useState } from "react";
-import * as Ably from "ably";
+import { io, Socket } from "socket.io-client";
 import type {
   CommsRealtimePayload,
   CommsRealtimeEventType,
@@ -19,12 +19,15 @@ export interface UseCommsRealtimeOptions {
 export interface UseCommsRealtimeResult {
   isConnected: boolean;
   lastEvent: CommsRealtimePayload | null;
-  socket: Ably.Realtime | null; // Kept for interface compatibility, refers to Ably client
+  socket: Socket | null;
   onlineUsers: Set<string>;
   joinThread: (threadId: string) => void;
   leaveThread: (threadId: string) => void;
   startTyping: (threadId: string, userName: string) => void;
   stopTyping: (threadId: string, userName: string) => void;
+  markAsSeen: (threadId: string, messageId: string) => void;
+  broadcastMessage: (payload: CommsRealtimePayload) => void;
+  broadcastEvent: (payload: CommsRealtimePayload) => void;
 }
 
 export function useCommsRealtime(
@@ -34,12 +37,13 @@ export function useCommsRealtime(
   const [isConnected, setIsConnected] = useState(false);
   const [lastEvent, setLastEvent] = useState<CommsRealtimePayload | null>(null);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
-  const [ablyClient, setAblyClient] = useState<Ably.Realtime | null>(null);
+  const [socketClient, setSocketClient] = useState<Socket | null>(null);
 
-  const ablyRef = useRef<Ably.Realtime | null>(null);
-  const channelsRef = useRef<Map<string, Ably.RealtimeChannel>>(new Map());
+  const socketRef = useRef<Socket | null>(null);
   const onEventRef = useRef(onEvent);
   const onPresenceChangeRef = useRef(onPresenceChange);
+
+  const threadIdRef = useRef<string | null>(null);
 
   // Keep refs fresh
   useEffect(() => {
@@ -47,160 +51,130 @@ export function useCommsRealtime(
     onPresenceChangeRef.current = onPresenceChange;
   }, [onEvent, onPresenceChange]);
 
-  // Connect to Ably
+  // Connect to VPS Socket.io
   useEffect(() => {
     if (!enabled || !userId || typeof window === "undefined") return;
 
     let mounted = true;
-    console.log("Connecting to Ably for UserId:", userId);
+    const socketUrl =
+      process.env.NEXT_PUBLIC_SOCKET_URL || "http://173.212.231.174:4000";
 
-    const client = new Ably.Realtime({
-      authUrl: "/api/comms/ably-auth",
-      clientId: userId,
+    console.log(
+      "Connecting to VPS Socket.io:",
+      socketUrl,
+      "for UserId:",
+      userId,
+    );
+
+    const socket = io(socketUrl, {
+      query: { userId },
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      transports: ["websocket", "polling"], // Force websocket-first for instant speed
+      forceNew: true,
+      withCredentials: true,
     });
 
-    ablyRef.current = client;
+    socketRef.current = socket;
     // Set socket in a microtask to avoid cascading render warning in effect body
     Promise.resolve().then(() => {
-      if (mounted) setAblyClient(client);
+      if (mounted) setSocketClient(socket);
     });
 
-    client.connection.on("connected", () => {
-      console.log("Ably connected");
-      if (mounted) {
-        setIsConnected(true);
-        // Only enter presence when connected to avoid "Connection closed" issues if unmounted before connection
-        globalPresenceChannel.presence.enter().catch(() => {});
+    socket.on("connect", () => {
+      console.log("[SOCKET] Connected to VPS. Socket ID:", socket.id);
+      if (mounted) setIsConnected(true);
+
+      // Re-join current thread if we have one
+      if (threadIdRef.current) {
+        console.log("[SOCKET] Re-joining thread:", threadIdRef.current);
+        socket.emit("join_thread", threadIdRef.current);
       }
     });
 
-    client.connection.on("disconnected", () => {
-      console.log("Ably disconnected");
+    socket.on("disconnect", (reason) => {
+      console.log("[SOCKET] Disconnected. Reason:", reason);
       if (mounted) setIsConnected(false);
     });
 
-    client.connection.on("failed", () => {
-      console.error("Ably connection failed");
+    socket.on("connect_error", (err) => {
+      console.error("[SOCKET] Connection error:", err.message);
       if (mounted) setIsConnected(false);
     });
 
-    // Global presence channel
-    const globalPresenceChannel = client.channels.get("comms:global-presence");
+    socket.on("online_users", (userIds: string[]) => {
+      if (!mounted) return;
+      console.log("[SOCKET] Presence update:", userIds.length, "users online");
+      const nextSet = new Set(userIds);
 
-    globalPresenceChannel.presence.subscribe(
-      ["enter", "present"],
-      (member: Ably.PresenceMessage) => {
-        if (!mounted) return;
-        setOnlineUsers((prev) => {
-          const next = new Set(prev);
-          next.add(member.clientId);
-          return next;
+      setOnlineUsers((prev) => {
+        // Compute differences for onPresenceChange callback
+        userIds.forEach((id) => {
+          if (!prev.has(id)) onPresenceChangeRef.current?.(id, true);
         });
-        onPresenceChangeRef.current?.(member.clientId, true);
-      },
-    );
-
-    globalPresenceChannel.presence.subscribe(
-      "leave",
-      (member: Ably.PresenceMessage) => {
-        if (!mounted) return;
-        setOnlineUsers((prev) => {
-          const next = new Set(prev);
-          next.delete(member.clientId);
-          return next;
+        prev.forEach((id) => {
+          if (!nextSet.has(id)) onPresenceChangeRef.current?.(id, false);
         });
-        onPresenceChangeRef.current?.(member.clientId, false);
-      },
-    );
-
-    // Fetch initial presence
-    globalPresenceChannel.presence
-      .get()
-      .then((members) => {
-        if (mounted && members) {
-          const ids = members.map((m) => m.clientId);
-          setOnlineUsers(new Set(ids));
-        }
-      })
-      .catch((err) => {
-        if (mounted) {
-          console.error("Error fetching Ably presence:", err);
-        }
+        return nextSet;
       });
+    });
 
-    const currentChannels = channelsRef.current;
-    // Removed immediate enter() from here, moved to connection listener
+    // Event Handler Factory
+    const handleEvent =
+      (eventName: string) => (payload: CommsRealtimePayload) => {
+        console.log(
+          `[SOCKET] Incoming ${eventName}:`,
+          payload.type || eventName,
+          payload.threadId,
+        );
+        if (mounted) {
+          setLastEvent(payload);
+          onEventRef.current?.(payload);
+        }
+      };
+
+    // Global events relay
+    socket.on("message_created", handleEvent("message_created"));
+    socket.on("message_updated", handleEvent("message_updated"));
+    socket.on("message_deleted", handleEvent("message_deleted"));
+    socket.on("typing_start", handleEvent("typing_start"));
+    socket.on("typing_stop", handleEvent("typing_stop"));
+    socket.on("message_read", handleEvent("message_read"));
+    socket.on("thread_status_updated", handleEvent("thread_status_updated"));
+    socket.on("thread_updated", handleEvent("thread_updated"));
 
     return () => {
       mounted = false;
-      console.log("Cleaning up Ably connection...");
-      try {
-        // Unsubscribe and detach all thread channels
-        currentChannels.forEach((channel) => {
-          try {
-            channel.unsubscribe();
-            channel.detach();
-          } catch {
-            // No-op
-          }
-        });
-        currentChannels.clear();
-
-        // Don't explicitly call client.close() - it causes unhandled promise rejections
-        // during HMR/fast refresh. The connection will close automatically when the
-        // client is dereferenced and garbage collected.
-      } catch {
-        // Cleanup errors are non-fatal
-      } finally {
-        ablyRef.current = null;
-        setAblyClient(null);
-        setIsConnected(false);
-      }
+      console.log("[SOCKET] Disconnecting...");
+      socket.disconnect();
+      socketRef.current = null;
+      setSocketClient(null);
+      setIsConnected(false);
     };
   }, [enabled, userId]);
 
-  // Helper to subscribe to thread events
   const joinThread = useCallback((threadId: string) => {
-    if (!ablyRef.current) return;
-
-    const channelName = `thread:${threadId}`;
-    if (channelsRef.current.has(channelName)) return;
-
-    const channel = ablyRef.current.channels.get(channelName);
-    channelsRef.current.set(channelName, channel);
-
-    channel.subscribe((message) => {
-      const payload = message.data as CommsRealtimePayload;
-      // Map Ably message names to payload types if they differ
-      if (!payload.type) payload.type = message.name as CommsRealtimeEventType;
-
-      setLastEvent(payload);
-      onEventRef.current?.(payload);
-    });
+    threadIdRef.current = threadId;
+    if (socketRef.current?.connected) {
+      socketRef.current.emit("join_thread", threadId);
+    }
   }, []);
 
   const leaveThread = useCallback((threadId: string) => {
-    const channelName = `thread:${threadId}`;
-    const channel = channelsRef.current.get(channelName);
-    if (channel) {
-      channel.unsubscribe();
-      channel.detach();
-      channelsRef.current.delete(channelName);
-      console.log(`Left Ably channel: ${channelName}`);
+    threadIdRef.current = null;
+    // Socket.io standard way to leave is via room, but often handled implicitly or via explicit leave_thread
+    if (socketRef.current?.connected) {
+      socketRef.current.emit("leave_thread", threadId);
     }
   }, []);
 
   const startTyping = useCallback(
     (threadId: string, userName: string) => {
-      const channelName = `thread:${threadId}`;
-      const channel = channelsRef.current.get(channelName);
-      if (channel) {
-        channel.publish("typing_start", {
-          type: "typing_start",
+      if (socketRef.current?.connected) {
+        socketRef.current.emit("typing_start", {
           threadId,
           userId,
           userName,
-          timestamp: new Date().toISOString(),
         });
       }
     },
@@ -209,29 +183,63 @@ export function useCommsRealtime(
 
   const stopTyping = useCallback(
     (threadId: string, userName: string) => {
-      const channelName = `thread:${threadId}`;
-      const channel = channelsRef.current.get(channelName);
-      if (channel) {
-        channel.publish("typing_stop", {
-          type: "typing_stop",
+      if (socketRef.current?.connected) {
+        socketRef.current.emit("typing_stop", {
           threadId,
           userId,
           userName,
-          timestamp: new Date().toISOString(),
         });
       }
     },
     [userId],
   );
 
+  const markAsSeen = useCallback(
+    (threadId: string, messageId: string) => {
+      if (socketRef.current?.connected) {
+        socketRef.current.emit("message_seen", {
+          threadId,
+          messageId,
+          userId,
+        });
+      }
+    },
+    [userId],
+  );
+
+  const broadcastMessage = useCallback((payload: CommsRealtimePayload) => {
+    if (socketRef.current?.connected) {
+      console.log("[SOCKET] Emitting send_message:", payload);
+      socketRef.current.emit("send_message", payload);
+    } else {
+      console.warn("[SOCKET] Cannot broadcast message, socket not connected");
+    }
+  }, []);
+
+  const broadcastEvent = useCallback((payload: CommsRealtimePayload) => {
+    if (socketRef.current?.connected) {
+      // Map event types to socket events if needed
+      const eventName =
+        payload.type === "message_created"
+          ? "send_message"
+          : payload.type === "message_read"
+            ? "message_seen"
+            : payload.type;
+      socketRef.current.emit(eventName, payload);
+    }
+  }, []);
+
   return {
     isConnected,
     lastEvent,
-    socket: ablyClient,
+    socket: socketClient,
     onlineUsers,
     joinThread,
     leaveThread,
     startTyping,
     stopTyping,
+    markAsSeen,
+    broadcastMessage,
+    broadcastEvent,
   };
 }

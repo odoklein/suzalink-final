@@ -13,7 +13,9 @@ export type CommsRealtimeEventType =
   | "presence_online"
   | "presence_offline"
   | "message_reaction_added"
-  | "message_reaction_removed";
+  | "message_reaction_removed"
+  | "message_read"
+  | "message_seen";
 
 export interface CommsRealtimePayload {
   type: CommsRealtimeEventType;

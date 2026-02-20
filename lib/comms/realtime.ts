@@ -1,13 +1,30 @@
 // ============================================
 // COMMS REAL-TIME HELPERS
-// Publish events to Ably channels from API routes.
+// Publish events to Socket.io VPS server.
 // ============================================
 
 import { type CommsRealtimePayload } from "./events";
-import { getAblyRest } from "@/lib/ably";
+
+const SOCKET_URL =
+  process.env.NEXT_PUBLIC_SOCKET_URL || "http://173.212.231.174:4000";
+
+async function broadcast(event: string, payload: CommsRealtimePayload) {
+  try {
+    const res = await fetch(`${SOCKET_URL}/broadcast`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event, payload }),
+    });
+    if (!res.ok) {
+      console.error(`[REALTIME] Failed to broadcast ${event}:`, res.statusText);
+    }
+  } catch (err) {
+    console.error(`[REALTIME] Error broadcasting ${event}:`, err);
+  }
+}
 
 /**
- * Publish "message_created" to the thread channel.
+ * Publish "message_created" to all users.
  */
 export async function publishMessageCreated(
   threadId: string,
@@ -27,13 +44,11 @@ export async function publishMessageCreated(
     createdAt,
   };
 
-  const ably = getAblyRest();
-  const channel = ably.channels.get(`thread:${threadId}`);
-  await channel.publish("message_created", payload);
+  await broadcast("message_created", payload);
 }
 
 /**
- * Publish "message_updated" to the thread channel.
+ * Publish "message_updated" to the thread room.
  */
 export async function publishMessageUpdated(
   threadId: string,
@@ -47,13 +62,11 @@ export async function publishMessageUpdated(
     content,
   };
 
-  const ably = getAblyRest();
-  const channel = ably.channels.get(`thread:${threadId}`);
-  await channel.publish("message_updated", payload);
+  await broadcast("message_updated", payload);
 }
 
 /**
- * Publish "message_deleted" to the thread channel.
+ * Publish "message_deleted" to the thread room.
  */
 export async function publishMessageDeleted(
   threadId: string,
@@ -65,13 +78,11 @@ export async function publishMessageDeleted(
     messageId,
   };
 
-  const ably = getAblyRest();
-  const channel = ably.channels.get(`thread:${threadId}`);
-  await channel.publish("message_deleted", payload);
+  await broadcast("message_deleted", payload);
 }
 
 /**
- * Publish "thread_status_updated" to the thread channel.
+ * Publish "thread_status_updated" to all users.
  */
 export async function publishThreadStatusUpdated(
   threadId: string,
@@ -83,13 +94,11 @@ export async function publishThreadStatusUpdated(
     status,
   };
 
-  const ably = getAblyRest();
-  const channel = ably.channels.get(`thread:${threadId}`);
-  await channel.publish("thread_status_updated", payload);
+  await broadcast("thread_status_updated", payload);
 }
 
 /**
- * Notify typing to the thread channel.
+ * Notify typing (usually done via client directly for speed, but here for completeness).
  */
 export async function publishTyping(
   threadId: string,
@@ -104,13 +113,11 @@ export async function publishTyping(
     userName: typistUserName,
   };
 
-  const ably = getAblyRest();
-  const channel = ably.channels.get(`thread:${threadId}`);
-  await channel.publish(payload.type, payload);
+  await broadcast(payload.type as string, payload);
 }
 
 /**
- * Publish "message_reaction_added" to the thread channel.
+ * Publish "message_reaction_added".
  */
 export async function publishMessageReactionAdded(
   threadId: string,
@@ -126,13 +133,11 @@ export async function publishMessageReactionAdded(
     emoji,
   };
 
-  const ably = getAblyRest();
-  const channel = ably.channels.get(`thread:${threadId}`);
-  await channel.publish("message_reaction_added", payload);
+  await broadcast("message_reaction_added", payload);
 }
 
 /**
- * Publish "message_reaction_removed" to the thread channel.
+ * Publish "message_reaction_removed".
  */
 export async function publishMessageReactionRemoved(
   threadId: string,
@@ -148,7 +153,5 @@ export async function publishMessageReactionRemoved(
     emoji,
   };
 
-  const ably = getAblyRest();
-  const channel = ably.channels.get(`thread:${threadId}`);
-  await channel.publish("message_reaction_removed", payload);
+  await broadcast("message_reaction_removed", payload);
 }

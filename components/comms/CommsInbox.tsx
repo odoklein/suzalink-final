@@ -9,7 +9,6 @@ import type { CommsRealtimePayload } from "@/lib/comms/events";
 import {
     MessageSquare,
     Plus,
-    Filter,
     Search,
     RefreshCw,
     Target,
@@ -70,7 +69,6 @@ export function CommsInbox({ className, restrictToChannelTypes }: CommsInboxProp
     const [isSyncing, setIsSyncing] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [showNewThreadModal, setShowNewThreadModal] = useState(false);
-    const [showFilters, setShowFilters] = useState(false);
     const [showSearchPanel, setShowSearchPanel] = useState(false);
 
     // Filters
@@ -146,6 +144,7 @@ export function CommsInbox({ className, restrictToChannelTypes }: CommsInboxProp
     // Real-time: refetch on message/thread events; track typing
     const handleRealtimeEvent = useCallback(
         (payload: CommsRealtimePayload) => {
+            console.log("[INBOX] Realtime event:", payload.type, payload.threadId);
             const tid = payload.threadId;
             if (payload.type === "typing_start" && tid && payload.userName) {
                 if (typingTimeoutRef.current[tid]) {
@@ -181,21 +180,73 @@ export function CommsInbox({ className, restrictToChannelTypes }: CommsInboxProp
                 fetchThreads(true);
                 fetchStats();
                 if (selectedThreadIdRef.current === tid) {
-                    fetchThreadDetails(tid).then((data) => {
-                        if (data && selectedThreadIdRef.current === data.id) {
-                            setSelectedThread(data);
-                        }
-                    });
+                    // Update messages instantly if possible
+                    if (payload.type === "message_created" && payload.messageId) {
+                        setSelectedThread(prev => {
+                            if (!prev || prev.id !== tid) return prev;
+                            if (prev.messages.some(m => m.id === payload.messageId)) return prev;
+
+                            const newMsg: CommsMessageView = {
+                                id: payload.messageId!,
+                                threadId: tid,
+                                type: "TEXT",
+                                content: payload.content || "",
+                                author: {
+                                    id: payload.userId || "",
+                                    name: payload.userName || "Unknown",
+                                    role: "",
+                                    initials: (payload.userName || "?").charAt(0).toUpperCase(),
+                                },
+                                mentions: [],
+                                attachments: [],
+                                reactions: [],
+                                isEdited: false,
+                                isDeleted: false,
+                                isOwnMessage: payload.userId === session?.user?.id,
+                                createdAt: payload.createdAt || new Date().toISOString(),
+                            };
+                            return { ...prev, messages: [...prev.messages, newMsg] };
+                        });
+                    } else {
+                        // For updates/deletes, refetch details
+                        fetchThreadDetails(tid).then((data) => {
+                            if (data && selectedThreadIdRef.current === data.id) {
+                                setSelectedThread(data);
+                            }
+                        });
+                    }
                 }
             }
         },
-        [fetchThreads, fetchStats, fetchThreadDetails]
+        [fetchThreads, fetchStats, fetchThreadDetails, session?.user?.id]
     );
 
-    useCommsRealtime({
+    const {
+        onlineUsers,
+        markAsSeen,
+        startTyping,
+        stopTyping,
+        joinThread,
+        leaveThread,
+    } = useCommsRealtime({
         enabled: !!session?.user?.id,
+        userId: session?.user?.id,
         onEvent: handleRealtimeEvent,
     });
+
+    // Mark as seen when thread is selected
+    useEffect(() => {
+        if (selectedThreadId && session?.user?.id) {
+            markAsSeen(selectedThreadId, "all"); // Simple implementation for now
+        }
+    }, [selectedThreadId, session?.user?.id, markAsSeen]);
+
+    // Check if recipient is online (for direct messages)
+    const isRecipientOnline = useCallback(() => {
+        if (!selectedThread || selectedThread.channelType !== "DIRECT") return false;
+        const recipient = selectedThread.participants.find(p => p.userId !== session?.user?.id);
+        return recipient ? onlineUsers.has(recipient.userId) : false;
+    }, [selectedThread, onlineUsers, session?.user?.id]);
 
     // Initial load
     useEffect(() => {
@@ -220,6 +271,9 @@ export function CommsInbox({ className, restrictToChannelTypes }: CommsInboxProp
 
     // Handle thread selection — update list immediately, load details in background
     const handleSelectThread = (thread: CommsThreadListItem) => {
+        if (selectedThreadId) leaveThread(selectedThreadId);
+        joinThread(thread.id);
+
         selectedThreadIdRef.current = thread.id;
         setSelectedThreadId(thread.id);
         setSelectedThread(null);
@@ -330,21 +384,22 @@ export function CommsInbox({ className, restrictToChannelTypes }: CommsInboxProp
         const doSend = async () => {
             try {
                 const hasFiles = !!opts?.files?.length;
-                if (hasFiles) {
-                    const form = new FormData();
-                    form.set("content", content);
-                    if (opts.mentionIds?.length) {
-                        form.set("mentionIds", JSON.stringify(opts.mentionIds));
-                    }
-                    for (const f of opts.files!) {
-                        form.append("files", f);
-                    }
-                    await fetch(`/api/comms/threads/${threadId}/messages`, {
+                const res = hasFiles
+                    ? await fetch(`/api/comms/threads/${threadId}/messages`, {
                         method: "POST",
-                        body: form,
-                    });
-                } else {
-                    await fetch(`/api/comms/threads/${threadId}/messages`, {
+                        body: (function () {
+                            const form = new FormData();
+                            form.set("content", content);
+                            if (opts?.mentionIds?.length) {
+                                form.set("mentionIds", JSON.stringify(opts.mentionIds));
+                            }
+                            if (opts?.files) {
+                                for (const f of opts.files) form.append("files", f);
+                            }
+                            return form;
+                        })(),
+                    })
+                    : await fetch(`/api/comms/threads/${threadId}/messages`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
@@ -352,7 +407,14 @@ export function CommsInbox({ className, restrictToChannelTypes }: CommsInboxProp
                             mentionIds: opts?.mentionIds ?? [],
                         }),
                     });
+
+                if (res.ok) {
+                    await res.json();
+                    console.log("[INBOX] Message saved successfully. Server broadcast should trigger now.");
+                    // The API route now calls publishMessageCreated via Socket.io REST API,
+                    // so we don't need to broadcast manually from the client anymore.
                 }
+
                 fetchThreadDetails(threadId).then((data) => {
                     if (data && selectedThreadIdRef.current === data.id) setSelectedThread(data);
                 });
@@ -638,6 +700,11 @@ export function CommsInbox({ className, restrictToChannelTypes }: CommsInboxProp
                         onReactionToggle={handleReactionToggle}
                         currentUserId={session?.user?.id || ""}
                         typingUserName={typingByThread[selectedThread.id]}
+                        isRecipientOnline={isRecipientOnline()}
+                        onTyping={(isTyping) => {
+                            if (isTyping) startTyping(selectedThread.id, session?.user?.name || "User");
+                            else stopTyping(selectedThread.id, session?.user?.name || "User");
+                        }}
                     />
                 ) : (
                     <div className="flex-1 flex flex-col p-4 gap-4">
@@ -675,7 +742,7 @@ export function CommsInbox({ className, restrictToChannelTypes }: CommsInboxProp
             <SearchPanel
                 isOpen={showSearchPanel}
                 onClose={() => setShowSearchPanel(false)}
-                onResultClick={(threadId, _messageId) => {
+                onResultClick={(threadId) => {
                     setShowSearchPanel(false);
                     selectedThreadIdRef.current = threadId;
                     setSelectedThreadId(threadId);

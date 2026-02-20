@@ -35,7 +35,7 @@ Your `package.json` build script is correct:
 
 Ensure these services are configured for production:
 
-- [ ] **Ably** - Real-time chat (already configured)
+- [ ] **Socket.IO VPS** - Real-time chat (configured on VPS)
 - [ ] **AWS S3** - File storage
 - [ ] **Supabase** - Database
 - [ ] **Google Drive API** - Update redirect URI
@@ -79,10 +79,10 @@ npm run build
 
 #### Socket.IO Server
 
-⚠️ **Critical**: `server/socket.ts` won't work on Vercel serverless
+✅ **Status**: Migrated to external VPS (port 4000)
 
-- You're now using Ably for real-time (✅ Vercel-compatible)
-- Remove or deploy Socket.IO server separately if still needed
+- Real-time communication is now handled by a dedicated Node.js server on a VPS.
+- This bypasses Vercel serverless limitations for Socket.IO.
 
 ### 7. Deployment Steps
 
@@ -101,7 +101,7 @@ npm run build
 
 3. **Configure Environment Variables**
    - Add all variables from `.env.example`
-   - Update production URLs
+   - Update `NEXT_PUBLIC_SOCKET_URL` to point to the VPS IP
 
 4. **Deploy**
    - Vercel will automatically deploy
@@ -119,7 +119,7 @@ npm run build
 
 ### 8. Performance Optimizations for Production
 
-- ✅ Ably real-time (serverless-compatible)
+- ✅ Socket.IO VPS real-time communication
 - ✅ Optimistic UI updates
 - ✅ Lazy-loaded components
 - ✅ Database connection pooling
@@ -130,7 +130,7 @@ npm run build
 Monitor these after deployment:
 
 - [ ] Database connection limits (Supabase pooler)
-- [ ] Ably message quota
+- [ ] VPS server load and logs
 - [ ] AWS S3 storage usage
 - [ ] API rate limits (Apollo, Apify, etc.)
 - [ ] Vercel function execution time (10s limit on Hobby, 60s on Pro)
@@ -151,7 +151,7 @@ Based on your features:
 
 1. ❌ **Prisma build error** - Run clean install and test build locally
 2. ⚠️ **Workers/Background Jobs** - Deploy separately or use Vercel Cron
-3. ⚠️ **Socket.IO server** - Already migrated to Ably ✅
+3. ✅ **Real-time Migration** - Moved to Socket.IO VPS
 
 ### Optional Improvements:
 
