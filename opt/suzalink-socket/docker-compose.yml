@@ -1,0 +1,16 @@
+
+services:
+  suzalink-socket:
+    build: .
+    container_name: suzalink-socket
+    restart: always
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

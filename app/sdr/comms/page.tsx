@@ -94,37 +94,37 @@ function StatCard({
     };
 
     return (
-        <div className="relative overflow-hidden bg-white rounded-2xl border border-slate-200 p-5 group hover:shadow-lg hover:shadow-slate-200/50 transition-all duration-300">
-            <div className="flex items-start justify-between">
-                <div>
-                    <p className="text-sm font-medium text-slate-500 mb-1">{label}</p>
-                    <p className="text-3xl font-bold text-slate-900">{value}</p>
+        <div className="relative overflow-hidden bg-white dark:bg-[#1a2236] rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-800 p-3 sm:p-5 group hover:shadow-lg hover:shadow-slate-200/50 dark:hover:shadow-slate-900/30 transition-all duration-300">
+            <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                    <p className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 mb-0.5 sm:mb-1 truncate">{label}</p>
+                    <p className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">{value}</p>
                     {subValue && (
-                        <p className="text-sm text-slate-400 mt-1">{subValue}</p>
+                        <p className="text-xs sm:text-sm text-slate-400 mt-0.5 sm:mt-1">{subValue}</p>
                     )}
                     {trend && (
                         <div className={cn(
-                            "flex items-center gap-1 mt-2 text-sm font-medium",
+                            "flex items-center gap-1 mt-1.5 sm:mt-2 text-xs sm:text-sm font-medium",
                             trend.isPositive ? "text-emerald-600" : "text-rose-600"
                         )}>
                             {trend.isPositive ? (
-                                <ArrowUpRight className="w-4 h-4" />
+                                <ArrowUpRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                             ) : (
-                                <ArrowDownRight className="w-4 h-4" />
+                                <ArrowDownRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                             )}
                             <span>{trend.value}%</span>
                         </div>
                     )}
                 </div>
                 <div className={cn(
-                    "w-12 h-12 rounded-xl bg-gradient-to-br flex items-center justify-center shadow-lg",
+                    "w-9 h-9 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl bg-gradient-to-br flex items-center justify-center shadow-lg shrink-0",
                     colors[color]
                 )}>
-                    <Icon className="w-6 h-6 text-white" />
+                    <Icon className="w-4 h-4 sm:w-6 sm:h-6 text-white" />
                 </div>
             </div>
             <div className={cn(
-                "absolute -right-4 -bottom-4 w-24 h-24 rounded-full opacity-10 bg-gradient-to-br",
+                "absolute -right-4 -bottom-4 w-20 sm:w-24 h-20 sm:h-24 rounded-full opacity-10 bg-gradient-to-br",
                 colors[color]
             )} />
         </div>
@@ -299,7 +299,19 @@ export default function SDRCommsPage() {
                     if (msg) {
                         setSelectedThread((prev) => {
                             if (prev?.id !== tid) return prev;
+                            // Already have this exact message (by real id)
                             if (prev.messages.some((m) => m.id === msg.id)) return prev;
+                            // If message is from the current user, replace the optimistic temp message
+                            if (msg.isOwnMessage) {
+                                const optimisticIdx = prev.messages.findIndex(
+                                    (m) => (m as { isOptimistic?: boolean }).isOptimistic && m.author.id === currentUserId
+                                );
+                                if (optimisticIdx !== -1) {
+                                    const next = [...prev.messages];
+                                    next[optimisticIdx] = msg;
+                                    return { ...prev, messages: next };
+                                }
+                            }
                             return { ...prev, messages: [...prev.messages, msg] };
                         });
                         setThreads((prev) =>
@@ -388,7 +400,13 @@ export default function SDRCommsPage() {
         [session?.user?.id, debouncedFetchStats]
     );
 
-    const { onlineUsers } = useCommsRealtime({
+    const {
+        onlineUsers,
+        joinThread,
+        leaveThread,
+        startTyping,
+        stopTyping,
+    } = useCommsRealtime({
         enabled: !!session?.user?.id,
         userId: session?.user?.id,
         onEvent: handleRealtimeEvent,
@@ -402,6 +420,12 @@ export default function SDRCommsPage() {
 
     const handleSelectThread = useCallback(
         (thread: CommsThreadListItem) => {
+            // Leave the previous thread room
+            if (selectedThreadIdRef.current) leaveThread(selectedThreadIdRef.current);
+            // Join the new thread room
+            joinThread(thread.id);
+            selectedThreadIdRef.current = thread.id;
+
             const minimalThread: CommsThreadView = { ...thread, participants: [], messages: [] };
             setSelectedThread(minimalThread);
             setIsLoadingThread(true);
@@ -411,11 +435,13 @@ export default function SDRCommsPage() {
                 .catch(() => { error("Erreur", "Impossible de charger la discussion"); setSelectedThread((prev) => (prev?.id === thread.id ? null : prev)); })
                 .finally(() => setIsLoadingThread(false));
         },
-        [error]
+        [error, joinThread, leaveThread]
     );
 
     // Handle close thread panel
     const handleCloseThread = () => {
+        if (selectedThreadIdRef.current) leaveThread(selectedThreadIdRef.current);
+        selectedThreadIdRef.current = null;
         setSelectedThread(null);
         fetchThreads(true);
     };
@@ -544,7 +570,7 @@ export default function SDRCommsPage() {
     };
 
     return (
-        <div className="flex flex-col min-h-[calc(100vh-8rem)] pb-10">
+        <div className="flex flex-col min-h-[calc(100vh-8rem)] pb-4 sm:pb-10">
             {!focusMode && (
                 <>
                     <div className="shrink-0 space-y-4">
@@ -586,7 +612,7 @@ export default function SDRCommsPage() {
                     </div>
 
                     {/* Stats Cards */}
-                    <div className="shrink-0 grid grid-cols-4 gap-5 mt-4">
+                    <div className="shrink-0 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5 mt-4">
                         <StatCard
                             icon={Inbox}
                             label="Non lus"
@@ -620,17 +646,17 @@ export default function SDRCommsPage() {
             )}
 
             {/* Main Content - stretches to fill; when focusMode, list hidden and chat full width */}
-            <div className={cn("flex-1 min-h-0 flex flex-col", focusMode ? "mt-0" : "mt-4")}>
-                <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
-                    {/* Thread List Panel - hidden in focus mode */}
+            <div className={cn("flex-1 min-h-0 flex flex-col", focusMode ? "mt-0" : "mt-3 sm:mt-4")}>
+                <div className="flex gap-0 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-white dark:bg-[#151c2a] shadow-sm flex-1 min-h-0 relative">
+                    {/* Thread List Panel */}
                     <div className={cn(
-                        "transition-all duration-300 flex flex-col min-h-0",
-                        focusMode ? "hidden" : isListCollapsed ? "col-span-1" : "col-span-4"
+                        "transition-all duration-300 ease-in-out flex flex-col min-h-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-[#151c2a]",
+                        focusMode ? "hidden" : isListCollapsed ? "w-14 shrink-0" : "w-full sm:w-[320px] md:w-[360px] lg:w-[400px] shrink-0"
                     )}>
-                        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden flex-1 min-h-0 flex flex-col">
+                        <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
                             {/* List Header */}
                             <div className={cn(
-                                "border-b border-slate-200 p-4",
+                                "border-b border-slate-200 dark:border-slate-800 p-3 sm:p-4 shrink-0",
                                 isListCollapsed && "p-2 flex items-center justify-center"
                             )}>
                                 {!isListCollapsed ? (
@@ -765,12 +791,14 @@ export default function SDRCommsPage() {
                         </div>
                     </div>
 
-                    {/* Thread View Panel - full width in focus mode */}
+                    {/* Thread View Panel — overlay on mobile, side panel on desktop */}
                     <div className={cn(
-                        "transition-all duration-300 flex flex-col min-h-0",
-                        focusMode ? "col-span-12" : isListCollapsed ? "col-span-11" : "col-span-8"
+                        "flex flex-col min-w-0 min-h-0",
+                        selectedThread
+                            ? "absolute inset-0 z-30 sm:relative sm:inset-auto sm:z-auto flex-1"
+                            : "hidden sm:flex flex-1"
                     )}>
-                        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden flex-1 min-h-0 flex flex-col">
+                        <div className="bg-white dark:bg-[#151c2a] overflow-hidden flex-1 min-h-0 flex flex-col">
                             {isLoadingThread ? (
                                 <div className="flex items-center justify-center h-full">
                                     <div className="flex flex-col items-center gap-3">
@@ -794,6 +822,10 @@ export default function SDRCommsPage() {
                                         const other = selectedThread.participants.find(p => p.userId !== session?.user?.id);
                                         return other ? onlineUsers.has(other.userId) : false;
                                     })()}
+                                    onTyping={(isTyping) => {
+                                        if (isTyping) startTyping(selectedThread.id, session?.user?.name || "User");
+                                        else stopTyping(selectedThread.id, session?.user?.name || "User");
+                                    }}
                                 />
                             ) : (
                                 <div className="flex-1 flex flex-col items-center justify-center h-full">

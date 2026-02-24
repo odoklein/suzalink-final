@@ -10,7 +10,7 @@
     "db:reset": "tsx prisma/reset.ts",
     "db:verify": "tsx prisma/verify-reset.ts",
     "worker:enrichment": "tsx workers/enrichment.ts",
-    "dev:socket": "tsx server/socket.ts"
+    "dev:socket": "set PORT=3001 && node opt/suzalink-socket/server.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.968.0",

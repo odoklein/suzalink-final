@@ -148,24 +148,24 @@ function StatCard({
     };
 
     return (
-        <div className="relative overflow-hidden bg-white rounded-2xl border border-slate-200 p-5 group hover:shadow-lg hover:shadow-slate-200/50 transition-all duration-300">
-            <div className="flex items-start justify-between">
-                <div>
-                    <p className="text-sm font-medium text-slate-500 mb-1">{label}</p>
-                    <p className="text-3xl font-bold text-slate-900">{value}</p>
+        <div className="relative overflow-hidden bg-white dark:bg-[#1a2236] rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-800 p-3 sm:p-5 group hover:shadow-lg hover:shadow-slate-200/50 dark:hover:shadow-slate-900/30 transition-all duration-300">
+            <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                    <p className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 mb-0.5 sm:mb-1 truncate">{label}</p>
+                    <p className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">{value}</p>
                     {subValue && (
-                        <p className="text-sm text-slate-400 mt-1">{subValue}</p>
+                        <p className="text-xs sm:text-sm text-slate-400 mt-0.5 sm:mt-1">{subValue}</p>
                     )}
                 </div>
                 <div className={cn(
-                    "w-12 h-12 rounded-xl bg-gradient-to-br flex items-center justify-center shadow-lg",
+                    "w-9 h-9 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl bg-gradient-to-br flex items-center justify-center shadow-lg shrink-0",
                     colors[color]
                 )}>
-                    <Icon className="w-6 h-6 text-white" />
+                    <Icon className="w-4 h-4 sm:w-6 sm:h-6 text-white" />
                 </div>
             </div>
             <div className={cn(
-                "absolute -right-4 -bottom-4 w-24 h-24 rounded-full opacity-10 bg-gradient-to-br",
+                "absolute -right-4 -bottom-4 w-20 sm:w-24 h-20 sm:h-24 rounded-full opacity-10 bg-gradient-to-br",
                 colors[color]
             )} />
         </div>
@@ -358,7 +358,19 @@ export default function ManagerCommsPage() {
                     if (msg) {
                         setSelectedThread((prev) => {
                             if (prev?.id !== tid) return prev;
+                            // Already have this exact message (by real id)
                             if (prev.messages.some((m) => m.id === msg.id)) return prev;
+                            // If message is from the current user, replace the optimistic temp message
+                            if (msg.isOwnMessage) {
+                                const optimisticIdx = prev.messages.findIndex(
+                                    (m) => (m as { isOptimistic?: boolean }).isOptimistic && m.author.id === currentUserId
+                                );
+                                if (optimisticIdx !== -1) {
+                                    const next = [...prev.messages];
+                                    next[optimisticIdx] = msg;
+                                    return { ...prev, messages: next };
+                                }
+                            }
                             return { ...prev, messages: [...prev.messages, msg] };
                         });
                         setThreads((prev) =>
@@ -733,7 +745,7 @@ export default function ManagerCommsPage() {
     };
 
     return (
-        <div className="flex flex-col min-h-[calc(100vh-8rem)] pb-10">
+        <div className="flex flex-col min-h-[calc(100vh-8rem)] pb-4 sm:pb-10">
             {!focusMode && (
                 <>
                     <div className="shrink-0 space-y-4">
@@ -775,7 +787,7 @@ export default function ManagerCommsPage() {
                     </div>
 
                     {/* Stats Cards */}
-                    <div className="shrink-0 grid grid-cols-4 gap-5 mt-4">
+                    <div className="shrink-0 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5 mt-4">
                         <StatCard
                             icon={Inbox}
                             label="Non lus"
@@ -809,12 +821,12 @@ export default function ManagerCommsPage() {
             )}
 
             {/* Main Content - stretches to fill */}
-            <div className="flex-1 min-h-0 flex flex-col mt-4">
-                <div className="flex gap-0 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-white dark:bg-[#151c2a] shadow-sm flex-1 min-h-0">
-                    {/* Thread List Panel - fixed 400px like inspo */}
+            <div className="flex-1 min-h-0 flex flex-col mt-3 sm:mt-4">
+                <div className="flex gap-0 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-white dark:bg-[#151c2a] shadow-sm flex-1 min-h-0 relative">
+                    {/* Thread List Panel */}
                     <div className={cn(
-                        "flex flex-col shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-[#151c2a] transition-all duration-300 min-h-0",
-                        focusMode ? "hidden" : isListCollapsed ? "w-14" : "w-[400px]"
+                        "flex flex-col shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-[#151c2a] transition-all duration-300 ease-in-out min-h-0",
+                        focusMode ? "hidden" : isListCollapsed ? "w-14" : "w-full sm:w-[320px] md:w-[360px] lg:w-[400px]"
                     )}>
                         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
                             {/* List Header - inspo: Inbox title, filter btn, search */}
@@ -957,8 +969,13 @@ export default function ManagerCommsPage() {
                         </div>
                     </div>
 
-                    {/* Thread View Panel - flex-1 fills remaining height */}
-                    <div className="flex-1 flex flex-col min-w-0 min-h-0">
+                    {/* Thread View Panel — overlay on mobile, side panel on desktop */}
+                    <div className={cn(
+                        "flex flex-col min-w-0 min-h-0",
+                        selectedThread
+                            ? "absolute inset-0 z-30 sm:relative sm:inset-auto sm:z-auto flex-1"
+                            : "hidden sm:flex flex-1"
+                    )}>
                         {isLoadingThread ? (
                             <div className="flex items-center justify-center h-full">
                                 <div className="flex flex-col items-center gap-3">
