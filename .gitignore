@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+opt/suzalink-socket/node_modules
 /.pnp
 .pnp.*
 .yarn/*
