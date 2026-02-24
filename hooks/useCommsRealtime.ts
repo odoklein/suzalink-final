@@ -36,7 +36,7 @@ let sharedSocketRefCount = 0;
 
 function getOrCreateSocket(userId: string): Socket {
   const socketUrl =
-    process.env.NEXT_PUBLIC_SOCKET_URL || "http://173.212.231.174:4000";
+    process.env.NEXT_PUBLIC_SOCKET_URL || "https://mail.suzaliconseil.com";
 
   // Reuse existing socket if it's for the same user and still connected
   if (

@@ -6,7 +6,7 @@
 import { type CommsRealtimePayload } from "./events";
 
 const SOCKET_URL =
-  process.env.NEXT_PUBLIC_SOCKET_URL || "http://173.212.231.174:4000";
+  process.env.NEXT_PUBLIC_SOCKET_URL || "https://mail.suzaliconseil.com";
 
 async function broadcast(event: string, payload: CommsRealtimePayload) {
   try {

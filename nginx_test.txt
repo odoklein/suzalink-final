@@ -1,0 +1,9 @@
+2026/02/24 03:46:53 [emerg] 15#15: invalid number of arguments in "set" directive in /etc/nginx/conf.d/site.socket.custom:5
+nginx: [emerg] invalid number of arguments in "set" directive in /etc/nginx/conf.d/site.socket.custom:5
+nginx: configuration file /etc/nginx/nginx.conf test failed
+===
+2026/02/24 03:46:33 [emerg] 1#1: invalid number of arguments in "set" directive in /etc/nginx/conf.d/site.socket.custom:5
+nginx: [emerg] invalid number of arguments in "set" directive in /etc/nginx/conf.d/site.socket.custom:5
+Render config
+2026/02/24 03:46:40 [emerg] 1#1: invalid number of arguments in "set" directive in /etc/nginx/conf.d/site.socket.custom:5
+nginx: [emerg] invalid number of arguments in "set" directive in /etc/nginx/conf.d/site.socket.custom:5
