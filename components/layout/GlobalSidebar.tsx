@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
-import Image from "next/image";
 import { useSession, signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
@@ -21,7 +20,6 @@ import { usePermissions } from "@/lib/permissions/PermissionProvider";
 import { NavSection, NavItem, ROLE_CONFIG } from "@/lib/navigation/config";
 import { UserRole } from "@prisma/client";
 import { formatCallbackDate } from "@/lib/utils/parseDateFromNote";
-import logoCaptain from "../../logocaptainroseblanc.png";
 
 interface GlobalSidebarProps {
     navigation: NavSection[];
@@ -347,22 +345,17 @@ export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
                             !isExpanded && "cp-brand-collapsed"
                         )}
                     >
-                        <div className="flex items-center">
-                            <Image
-                                src={logoCaptain}
-                                alt="Captain Prospect"
-                                priority
-                                className={cn(
-                                    "h-7 w-auto",
-                                    !isExpanded && "h-8"
-                                )}
-                            />
-                        </div>
-                        {isExpanded && (
-                            <span className="cp-brand-name">
-                                <span className="cp-brand-name-accent">suzalink</span>
-                            </span>
-                        )}
+                        <span
+                            className="uppercase text-white"
+                            style={{
+                                fontFamily: '"DM Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                                fontWeight: 700,
+                                letterSpacing: "-0.12em",
+                                fontSize: isExpanded ? "1.15rem" : "1.25rem",
+                            }}
+                        >
+                            SUZALINK
+                        </span>
                     </Link>
 
                     {isExpanded && (

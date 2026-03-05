@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Mail, Lock, Eye, EyeOff, AlertCircle, ArrowRight, Zap, Shield, Loader2 } from "lucide-react";
-import Image from "next/image";
 
 /* ─── tiny util ─── */
 const cn = (...classes: (string | undefined | false)[]) => classes.filter(Boolean).join(" ");
@@ -289,16 +288,19 @@ export default function LoginForm() {
 
                     {/* Content Top */}
                     <div className="relative z-10 flex-none">
-                        {/* Logo */}
+                        {/* Text logo */}
                         <div className="opacity-0 animate-[logoReveal_0.7s_ease_0.1s_forwards]">
-                            <Image
-                                src="/suzalink_logo.png"
-                                alt="Suzalink"
-                                width={160}
-                                height={48}
-                                className="h-10 w-auto object-contain brightness-0 invert"
-                                priority
-                            />
+                            <span
+                                className="inline-block uppercase text-white"
+                                style={{
+                                    fontFamily: '"DM Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                                    fontWeight: 700,
+                                    letterSpacing: "-0.16em",
+                                    fontSize: "1.6rem",
+                                }}
+                            >
+                                SUZALINK
+                            </span>
                         </div>
                     </div>
 
@@ -341,16 +343,19 @@ export default function LoginForm() {
                             backgroundSize: "28px 28px",
                         }} />
 
-                    {/* Mobile logo */}
+                    {/* Mobile text logo */}
                     <div className="lg:hidden mb-8 opacity-0 animate-[logoReveal_0.6s_ease_0.1s_forwards]">
-                        <Image
-                            src="/suzalink_logo.png"
-                            alt="Suzalink"
-                            width={160}
-                            height={48}
-                            className="h-10 w-auto object-contain"
-                            priority
-                        />
+                        <span
+                            className="inline-block uppercase text-slate-900"
+                            style={{
+                                fontFamily: '"DM Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                                fontWeight: 700,
+                                letterSpacing: "-0.16em",
+                                fontSize: "1.6rem",
+                            }}
+                        >
+                            SUZALINK
+                        </span>
                     </div>
 
                     {/* Card */}
