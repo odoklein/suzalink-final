@@ -358,19 +358,18 @@ export default function ClientPortal() {
             {portalSettings?.portalShowDatabase && (
                 <div className="grid grid-cols-1 gap-4" style={{ animation: "dashFadeUp 0.4s ease both", animationDelay: "120ms" }}>
                     <Link
-                        <Link
-                            href="/client/portal/database"
-                            className="flex items-center gap-4 p-4 rounded-xl border border-[#E8EBF0] bg-white/80 backdrop-blur-sm hover:border-[#7C5CFC]/30 hover:shadow-md hover:shadow-[#7C5CFC]/5 transition-all duration-200 group"
-                        >
-                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 flex items-center justify-center shrink-0 group-hover:from-emerald-500/20 group-hover:to-teal-500/20 transition-colors">
-                                <Users className="w-5 h-5 text-emerald-600" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-[#12122A]">Base de données</p>
-                                <p className="text-xs text-[#6B7194] mt-0.5">Vue des entreprises et contacts suivis par l&apos;équipe.</p>
-                            </div>
-                            <ArrowRight className="w-4 h-4 text-[#A0A3BD] group-hover:text-[#7C5CFC] group-hover:translate-x-0.5 transition-all shrink-0" />
-                        </Link>
+                        href="/client/portal/database"
+                        className="flex items-center gap-4 p-4 rounded-xl border border-[#E8EBF0] bg-white/80 backdrop-blur-sm hover:border-[#7C5CFC]/30 hover:shadow-md hover:shadow-[#7C5CFC]/5 transition-all duration-200 group"
+                    >
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 flex items-center justify-center shrink-0 group-hover:from-emerald-500/20 group-hover:to-teal-500/20 transition-colors">
+                            <Users className="w-5 h-5 text-emerald-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-[#12122A]">Base de données</p>
+                            <p className="text-xs text-[#6B7194] mt-0.5">Vue des entreprises et contacts suivis par l&apos;équipe.</p>
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-[#A0A3BD] group-hover:text-[#7C5CFC] group-hover:translate-x-0.5 transition-all shrink-0" />
+                    </Link>
                 </div>
             )}
 
