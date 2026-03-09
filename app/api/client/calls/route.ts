@@ -10,6 +10,14 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         return successResponse({ items: [], total: 0 });
     }
 
+    const client = await prisma.client.findUnique({
+        where: { id: clientId },
+        select: { portalShowCallHistory: true },
+    });
+    if (!client?.portalShowCallHistory) {
+        return successResponse({ items: [], total: 0 });
+    }
+
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get("startDate");
     const endDate = searchParams.get("endDate");
