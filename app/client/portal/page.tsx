@@ -164,13 +164,8 @@ export default function ClientPortal() {
         fetchData();
     }, [fetchData]);
 
-    // Fetch call history only when client is allowed to see it
+    // Fetch call history for the selected month
     useEffect(() => {
-        if (!portalSettings?.portalShowCallHistory) {
-            setCallsCountForMonth(0);
-            setDailyCallStats([]);
-            return;
-        }
         const callsMonthDate = new Date(now.getFullYear(), now.getMonth() + callsMonthOffset, 1);
         const callsStart = new Date(callsMonthDate.getFullYear(), callsMonthDate.getMonth(), 1);
         const callsEnd = new Date(callsMonthDate.getFullYear(), callsMonthDate.getMonth() + 1, 0, 23, 59, 59, 999);
@@ -206,7 +201,7 @@ export default function ClientPortal() {
             setDailyCallStats(stats);
         })();
         return () => { cancelled = true; };
-    }, [portalSettings?.portalShowCallHistory, callsMonthOffset]);
+    }, [callsMonthOffset]);
 
     if (isLoading && !stats) {
         return <DashboardSkeleton />;
@@ -274,8 +269,7 @@ export default function ClientPortal() {
                 </div>
             </div>
 
-            {/* ── Historique des appels (only when portalShowCallHistory is enabled) ── */}
-            {portalSettings?.portalShowCallHistory && (
+            {/* ── Historique des appels ── */}
                 <div
                     className="premium-card overflow-hidden"
                     style={{ animation: "dashFadeUp 0.4s ease both", animationDelay: "100ms" }}
@@ -352,7 +346,6 @@ export default function ClientPortal() {
                         )}
                     </div>
                 </div>
-            )}
 
             {/* ── Database shortcut (only when portalShowDatabase is enabled) ── */}
             {portalSettings?.portalShowDatabase && (

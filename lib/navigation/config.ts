@@ -400,6 +400,12 @@ export const CLIENT_NAV: NavSection[] = [
         permission: "pages.dashboard",
       },
       {
+        href: "/client/portal/calls",
+        icon: Phone,
+        label: "Appels",
+        permission: "pages.dashboard",
+      },
+      {
         href: "/client/portal/reporting",
         icon: FileDown,
         label: "Rapports",
