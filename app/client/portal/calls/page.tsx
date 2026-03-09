@@ -59,7 +59,13 @@ export default function ClientPortalCallsPage() {
                 const res = await fetch("/api/client/calls");
                 const json = await res.json();
                 if (json.success) {
-                    setCalls(json.data);
+                    const data = json.data;
+                    const items = Array.isArray(data)
+                        ? data
+                        : Array.isArray(data?.items)
+                            ? data.items
+                            : [];
+                    setCalls(items);
                 } else {
                     showError("Erreur", json.error || "Impossible de charger l'historique d'appels");
                 }
