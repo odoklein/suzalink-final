@@ -29,64 +29,68 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
   const { page, limit, skip } = getPaginationParams(sp);
 
   const now = new Date();
+  const actionModel = (Prisma as any).dmmf?.datamodel?.models?.find((m: any) => m.name === "Action");
+  const hasConfirmationStatusField = !!actionModel?.fields?.some((f: any) => f.name === "confirmationStatus");
 
   // SAS RDV: auto-confirm booked meetings after 24h without confirmation
-  const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  const toAutoConfirm = await prisma.action.findMany({
-    where: {
-      result: "MEETING_BOOKED",
-      confirmationStatus: "PENDING",
-      createdAt: { lt: cutoff },
-    },
-    select: {
-      id: true,
-      callbackDate: true,
-      meetingType: true,
-      meetingJoinUrl: true,
-      meetingAddress: true,
-      meetingPhone: true,
-      contact: { select: { firstName: true, lastName: true, company: { select: { name: true } } } },
-      company: { select: { name: true } },
-      campaign: { select: { mission: { select: { id: true, name: true, clientId: true } } } },
-    },
-    take: 500,
-  });
-
-  if (toAutoConfirm.length > 0) {
-    await prisma.action.updateMany({
-      where: { id: { in: toAutoConfirm.map((m) => m.id) } },
-      data: {
-        confirmationStatus: "CONFIRMED",
-        confirmationUpdatedAt: now,
-        confirmedAt: now,
+  if (hasConfirmationStatusField) {
+    const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const toAutoConfirm = await prisma.action.findMany({
+      where: {
+        result: "MEETING_BOOKED",
+        confirmationStatus: "PENDING",
+        createdAt: { lt: cutoff },
       },
+      select: {
+        id: true,
+        callbackDate: true,
+        meetingType: true,
+        meetingJoinUrl: true,
+        meetingAddress: true,
+        meetingPhone: true,
+        contact: { select: { firstName: true, lastName: true, company: { select: { name: true } } } },
+        company: { select: { name: true } },
+        campaign: { select: { mission: { select: { id: true, name: true, clientId: true } } } },
+      },
+      take: 500,
     });
 
-    await Promise.allSettled(
-      toAutoConfirm
-        .filter((m) => !!m.campaign?.mission?.clientId)
-        .map(async (m) => {
-          const clientId = m.campaign!.mission!.clientId!;
-          await createClientPortalNotification(clientId, {
-            title: "Nouveau RDV confirmé",
-            message: "Un rendez-vous a été confirmé pour une de vos missions.",
-            type: "success",
-            link: "/client/portal/meetings",
-          });
+    if (toAutoConfirm.length > 0) {
+      await prisma.action.updateMany({
+        where: { id: { in: toAutoConfirm.map((m) => m.id) } },
+        data: {
+          confirmationStatus: "CONFIRMED",
+          confirmationUpdatedAt: now,
+          confirmedAt: now,
+        },
+      });
 
-          void sendNewRdvEmailNotification(clientId, {
-            contactFirstName: m.contact?.firstName ?? null,
-            contactLastName: m.contact?.lastName ?? null,
-            companyName: m.company?.name ?? m.contact?.company?.name ?? null,
-            missionName: m.campaign?.mission?.name ?? null,
-            scheduledAt: m.callbackDate ?? null,
-            meetingType: (m.meetingType as any) ?? null,
-            meetingJoinUrl: m.meetingJoinUrl ?? null,
-            meetingAddress: m.meetingAddress ?? null,
-            meetingPhone: m.meetingPhone ?? null,
-          });
-        })
-    );
+      await Promise.allSettled(
+        toAutoConfirm
+          .filter((m) => !!m.campaign?.mission?.clientId)
+          .map(async (m) => {
+            const clientId = m.campaign!.mission!.clientId!;
+            await createClientPortalNotification(clientId, {
+              title: "Nouveau RDV confirmé",
+              message: "Un rendez-vous a été confirmé pour une de vos missions.",
+              type: "success",
+              link: "/client/portal/meetings",
+            });
+
+            void sendNewRdvEmailNotification(clientId, {
+              contactFirstName: m.contact?.firstName ?? null,
+              contactLastName: m.contact?.lastName ?? null,
+              companyName: m.company?.name ?? m.contact?.company?.name ?? null,
+              missionName: m.campaign?.mission?.name ?? null,
+              scheduledAt: m.callbackDate ?? null,
+              meetingType: (m.meetingType as any) ?? null,
+              meetingJoinUrl: m.meetingJoinUrl ?? null,
+              meetingAddress: m.meetingAddress ?? null,
+              meetingPhone: m.meetingPhone ?? null,
+            });
+          })
+      );
+    }
   }
 
   const where: Prisma.ActionWhereInput = {
@@ -151,7 +155,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     andClauses.push({ meetingFeedback: { outcome: { in: outcomes as any[] } } });
   }
 
-  if (confirmationStatuses.length > 0) {
+  if (hasConfirmationStatusField && confirmationStatuses.length > 0) {
     andClauses.push({ confirmationStatus: { in: confirmationStatuses as any[] } });
   }
 
@@ -213,7 +217,6 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     weekCount,
     monthCount,
     sdrCounts,
-    confirmedBookedCount,
     totalBookedCount,
   ] = await Promise.all([
     prisma.action.count({
@@ -237,12 +240,15 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
       _count: true,
     }),
     prisma.action.count({
-      where: { AND: [aggBase, { result: "MEETING_BOOKED" }, { confirmationStatus: "CONFIRMED" as any }] },
-    }),
-    prisma.action.count({
       where: { AND: [aggBase, { result: "MEETING_BOOKED" }] },
     }),
   ]);
+
+  const confirmedBookedCount = hasConfirmationStatusField
+    ? await prisma.action.count({
+        where: { AND: [aggBase, { result: "MEETING_BOOKED" }, { confirmationStatus: "CONFIRMED" as any }] },
+      })
+    : totalBookedCount;
 
   const avgPerSdr = sdrCounts.length > 0 ? Math.round(totalBookedCount / sdrCounts.length) : 0;
   // SAS RDV conversion = % of booked meetings that are confirmed
@@ -252,12 +258,12 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
   const data = meetings.map((m) => ({
     id: m.id,
     result: m.result,
-    confirmationStatus: m.confirmationStatus,
-    confirmationUpdatedAt: m.confirmationUpdatedAt,
-    confirmedAt: m.confirmedAt,
-    confirmedById: m.confirmedById,
-    rdvFiche: m.rdvFiche,
-    rdvFicheUpdatedAt: m.rdvFicheUpdatedAt,
+    confirmationStatus: hasConfirmationStatusField ? (m as any).confirmationStatus : "CONFIRMED",
+    confirmationUpdatedAt: hasConfirmationStatusField ? (m as any).confirmationUpdatedAt : null,
+    confirmedAt: hasConfirmationStatusField ? (m as any).confirmedAt : null,
+    confirmedById: hasConfirmationStatusField ? (m as any).confirmedById : null,
+    rdvFiche: hasConfirmationStatusField ? (m as any).rdvFiche : null,
+    rdvFicheUpdatedAt: hasConfirmationStatusField ? (m as any).rdvFicheUpdatedAt : null,
     callbackDate: m.callbackDate,
     meetingType: m.meetingType,
     meetingCategory: m.meetingCategory,

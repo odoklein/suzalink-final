@@ -61,8 +61,6 @@ export const GET = withErrorHandler(async (
 
     const meetingWhere: Record<string, unknown> = {
         result: { in: ['MEETING_BOOKED', 'MEETING_CANCELLED'] },
-        // SAS RDV: clients see meetings only once confirmed
-        confirmationStatus: 'CONFIRMED',
         campaign: {
             missionId: { in: missionIds },
         },
@@ -148,7 +146,12 @@ export const GET = withErrorHandler(async (
         orderBy: { createdAt: 'desc' },
     });
 
-    const meetings = filterRdvList(rawMeetings);
+    const confirmedMeetings = rawMeetings.filter((meeting) => {
+        const confirmationStatus = (meeting as { confirmationStatus?: string }).confirmationStatus;
+        return !confirmationStatus || confirmationStatus === 'CONFIRMED';
+    });
+
+    const meetings = filterRdvList(confirmedMeetings);
 
     // Group by mission
     const byMission = new Map<string, {

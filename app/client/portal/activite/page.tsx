@@ -16,9 +16,20 @@ import {
     CheckCircle2,
     Activity,
     Target,
+    PhoneMissed,
+    PhoneOff,
+    ThumbsUp,
+    RotateCw,
+    CalendarPlus,
+    CalendarX,
+    Ban,
+    Send,
+    Linkedin,
+    XCircle,
 } from "lucide-react";
 import { useToast } from "@/components/ui";
 import { ACTION_RESULT_LABELS } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 // ─── Types (aligned with /api/client/calls) ───────────────────────────────────
 interface CallItem {
@@ -118,6 +129,124 @@ const RESULT_META_FALLBACK: Record<string, { label: string; color: string; bg: s
     DISQUALIFIED: { label: "Disqualifié", color: "#dc2626", bg: "#fef2f2", border: "#fecaca" },
 };
 
+const RESULT_CFG: Record<
+    string,
+    {
+        label: string;
+        icon: React.ComponentType<{ className?: string }>;
+        text: string;
+        bg: string;
+        border: string;
+    }
+> = {
+    NO_RESPONSE: {
+        label: "Pas de réponse",
+        icon: PhoneMissed,
+        text: "text-slate-500",
+        bg: "bg-slate-100",
+        border: "border-slate-200",
+    },
+    BAD_CONTACT: {
+        label: "Mauvais contact",
+        icon: PhoneOff,
+        text: "text-red-600",
+        bg: "bg-red-50",
+        border: "border-red-200",
+    },
+    INTERESTED: {
+        label: "Intéressé",
+        icon: ThumbsUp,
+        text: "text-emerald-700",
+        bg: "bg-emerald-50",
+        border: "border-emerald-200",
+    },
+    CALLBACK_REQUESTED: {
+        label: "Rappel demandé",
+        icon: RotateCw,
+        text: "text-amber-700",
+        bg: "bg-amber-50",
+        border: "border-amber-200",
+    },
+    MEETING_BOOKED: {
+        label: "RDV planifié",
+        icon: CalendarPlus,
+        text: "text-indigo-700",
+        bg: "bg-indigo-50",
+        border: "border-indigo-200",
+    },
+    MEETING_CANCELLED: {
+        label: "RDV annulé",
+        icon: CalendarX,
+        text: "text-red-600",
+        bg: "bg-red-50",
+        border: "border-red-200",
+    },
+    DISQUALIFIED: {
+        label: "Disqualifié",
+        icon: Ban,
+        text: "text-slate-500",
+        bg: "bg-slate-100",
+        border: "border-slate-200",
+    },
+    ENVOIE_MAIL: {
+        label: "Mail à envoyer",
+        icon: Send,
+        text: "text-blue-700",
+        bg: "bg-blue-50",
+        border: "border-blue-200",
+    },
+    MAIL_ENVOYE: {
+        label: "Mail envoyé",
+        icon: Send,
+        text: "text-emerald-700",
+        bg: "bg-emerald-50",
+        border: "border-emerald-200",
+    },
+    CONNECTION_SENT: {
+        label: "Connexion envoyée",
+        icon: Linkedin,
+        text: "text-sky-700",
+        bg: "bg-sky-50",
+        border: "border-sky-200",
+    },
+    MESSAGE_SENT: {
+        label: "Message envoyé",
+        icon: Linkedin,
+        text: "text-sky-700",
+        bg: "bg-sky-50",
+        border: "border-sky-200",
+    },
+    REPLIED: {
+        label: "A répondu",
+        icon: CheckCircle2,
+        text: "text-emerald-700",
+        bg: "bg-emerald-50",
+        border: "border-emerald-200",
+    },
+    NOT_INTERESTED: {
+        label: "Pas intéressé",
+        icon: XCircle,
+        text: "text-red-600",
+        bg: "bg-red-50",
+        border: "border-red-200",
+    },
+};
+
+function getCfg(
+    result: string,
+    resultMeta: Record<string, { label: string; color: string; bg: string; border: string }>
+) {
+    if (RESULT_CFG[result]) return RESULT_CFG[result];
+    const meta = resultMeta[result];
+    return {
+        label: meta?.label ?? ACTION_RESULT_LABELS[result] ?? result,
+        icon: Target,
+        text: "text-slate-500",
+        bg: "bg-slate-100",
+        border: "border-slate-200",
+    };
+}
+
 // ─── Result Badge ─────────────────────────────────────────────────────────────
 function ResultBadge({
     result,
@@ -126,30 +255,71 @@ function ResultBadge({
     result: string;
     resultMeta: Record<string, { label: string; color: string; bg: string; border: string }>;
 }) {
-    const meta = resultMeta[result];
-    const label = meta?.label ?? ACTION_RESULT_LABELS[result] ?? result;
-    const m =
-        meta || {
-            label,
-            color: "#64748b",
-            bg: "#f8fafc",
-            border: "#e2e8f0",
-        };
+    const c = getCfg(result, resultMeta);
+    const Icon = c.icon;
     return (
         <span
-            style={{
-                background: m.bg,
-                borderColor: m.border,
-                color: m.color,
-            }}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border leading-none whitespace-nowrap"
+            className={cn(
+                "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold whitespace-nowrap",
+                c.bg,
+                c.text,
+                c.border
+            )}
         >
-            <span
-                style={{ background: m.color }}
-                className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-            />
-            {m.label}
+            <Icon className="w-3 h-3 shrink-0" aria-hidden />
+            {c.label}
         </span>
+    );
+}
+
+function ResultFilterBar({
+    results,
+    active,
+    onToggle,
+    counts,
+    resultMeta,
+}: {
+    results: string[];
+    active: Set<string>;
+    onToggle: (r: string) => void;
+    counts: Record<string, number>;
+    resultMeta: Record<string, { label: string; color: string; bg: string; border: string }>;
+}) {
+    return (
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filtrer par résultat">
+            {results.map((r) => {
+                const c = getCfg(r, resultMeta);
+                const Icon = c.icon;
+                const isActive = active.has(r);
+                const count = counts[r] ?? 0;
+                return (
+                    <button
+                        key={r}
+                        type="button"
+                        onClick={() => onToggle(r)}
+                        aria-pressed={isActive}
+                        className={cn(
+                            "flex items-center gap-1.5 pl-2.5 pr-2 py-1.5 rounded-xl border text-[11px] font-bold transition-all duration-150",
+                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400",
+                            isActive
+                                ? cn(c.bg, c.text, c.border, "shadow-sm")
+                                : "bg-white border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50"
+                        )}
+                    >
+                        <Icon className="w-3 h-3 shrink-0" aria-hidden />
+                        {c.label}
+                        <span
+                            className={cn(
+                                "ml-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-black tabular-nums",
+                                isActive ? "bg-white/60" : "bg-slate-100 text-slate-500"
+                            )}
+                        >
+                            {count}
+                        </span>
+                    </button>
+                );
+            })}
+        </div>
     );
 }
 
@@ -546,6 +716,7 @@ export default function ClientPortalActivitePage() {
     const [isLoading, setIsLoading] = useState(true);
     const [search, setSearch] = useState("");
     const [dateRange, setDateRange] = useState("30");
+    const [activeResults, setActiveResults] = useState<Set<string>>(new Set());
 
     const resultMeta = useMemo(() => {
         if (statusConfig?.statuses?.length && statusConfig?.categories?.length) {
@@ -641,8 +812,25 @@ export default function ClientPortalActivitePage() {
                     .includes(q)
             );
         }
+        if (activeResults.size > 0) {
+            arr = arr.filter((c) => activeResults.has(c.result));
+        }
         return arr;
-    }, [calls, dateThreshold, search]);
+    }, [calls, dateThreshold, search, activeResults]);
+
+    const resultCounts = useMemo(() => {
+        const counts: Record<string, number> = {};
+        calls.forEach((c) => {
+            counts[c.result] = (counts[c.result] ?? 0) + 1;
+        });
+        return counts;
+    }, [calls]);
+
+    const availableResults = useMemo(() => {
+        const fromData = Object.keys(resultCounts).filter((r) => (resultCounts[r] ?? 0) > 0);
+        const merged = new Set<string>([...statusOrder, ...fromData]);
+        return Array.from(merged);
+    }, [statusOrder, resultCounts]);
 
     const normalizedFiltered = useMemo(
         () => filtered.map(normalizeCall),
@@ -805,6 +993,23 @@ export default function ClientPortalActivitePage() {
                     </button>
                 )}
             </div>
+
+            {availableResults.length > 0 && (
+                <ResultFilterBar
+                    results={availableResults}
+                    active={activeResults}
+                    onToggle={(result) => {
+                        setActiveResults((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(result)) next.delete(result);
+                            else next.add(result);
+                            return next;
+                        });
+                    }}
+                    counts={resultCounts}
+                    resultMeta={resultMeta}
+                />
+            )}
 
             {isLoading ? (
                 <div className="flex items-center justify-center py-24">

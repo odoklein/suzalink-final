@@ -303,7 +303,7 @@ export default function LoginForm() {
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                             src="/logocaptainblue-rose.png"
-                            alt="Captain Prospect"
+                            alt="Suzalink"
                             className="lp-logo"
                             draggable={false}
                         />
@@ -415,7 +415,7 @@ export default function LoginForm() {
                 </div>
 
                 <p className="lp-footer">
-                    Captain Prospect &copy; {new Date().getFullYear()}
+                    Suzalink &copy; {new Date().getFullYear()}
                 </p>
             </div>
         </>
