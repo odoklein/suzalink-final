@@ -44,8 +44,12 @@ export const authOptions: NextAuthOptions = {
                 password: { label: "Mot de passe", type: "password" },
             },
             async authorize(credentials, req) {
+                const authDebug = process.env.AUTH_DEBUG === "true";
                 try {
                     if (!credentials?.email || !credentials?.password) {
+                        if (authDebug) {
+                            console.warn("[auth] Missing credentials payload");
+                        }
                         return null;
                     }
 
@@ -56,12 +60,21 @@ export const authOptions: NextAuthOptions = {
 
                     // Check IP-based rate limiting (prevents enumeration attacks)
                     if (ip && !checkIpRateLimit(ip)) {
+                        console.warn("[auth] IP rate limit blocked login attempt", {
+                            email: normalizedEmail,
+                            hasIp: Boolean(ip),
+                        });
                         throw new Error("Trop de tentatives. Réessayez dans 1 minute.");
                     }
 
                     // Check account-specific rate limiting
                     const rateLimit = checkRateLimit(rateLimitKey, 5, 15 * 60 * 1000);
                     if (!rateLimit.allowed) {
+                        console.warn("[auth] Account rate limit blocked login attempt", {
+                            email: normalizedEmail,
+                            hasIp: Boolean(ip),
+                            lockoutMinutes: rateLimit.lockoutMinutes ?? null,
+                        });
                         if (rateLimit.lockoutMinutes) {
                             throw new Error(`Compte temporairement verrouillé. Réessayez dans ${rateLimit.lockoutMinutes} minutes.`);
                         }
@@ -73,12 +86,19 @@ export const authOptions: NextAuthOptions = {
                     });
 
                     if (!user) {
+                        if (authDebug) {
+                            console.warn("[auth] Unknown email", { email: normalizedEmail });
+                        }
                         // Don't reveal if email exists or not
                         return null;
                     }
 
                     // Check if user is active (explicitly check for false to allow null/undefined)
                     if (user.isActive === false) {
+                        console.warn("[auth] Inactive account blocked login", {
+                            email: normalizedEmail,
+                            userId: user.id,
+                        });
                         throw new Error("Votre compte a été désactivé. Contactez un administrateur.");
                     }
 
@@ -104,6 +124,12 @@ export const authOptions: NextAuthOptions = {
                     }
 
                     if (!isPasswordValid) {
+                        if (authDebug) {
+                            console.warn("[auth] Invalid password", {
+                                email: normalizedEmail,
+                                userId: user.id,
+                            });
+                        }
                         return null;
                     }
 
@@ -150,6 +176,10 @@ export const authOptions: NextAuthOptions = {
                     if (err instanceof Error && err.message.includes("désactivé")) throw err;
                     if (err instanceof Error && err.message.includes("Trop de tentatives")) throw err;
                     if (err instanceof Error && err.message.includes("verrouillé")) throw err;
+                    console.error("[auth] authorize failed unexpectedly", {
+                        message: err instanceof Error ? err.message : "Unknown error",
+                        email: credentials?.email?.toLowerCase?.().trim?.() ?? null,
+                    });
                     return null;
                 }
             },

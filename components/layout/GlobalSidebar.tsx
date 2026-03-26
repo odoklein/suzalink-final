@@ -347,6 +347,8 @@ export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
                             <Image
                                 src="/logocaptainblue-rose.png"
                                 alt="Suzalink"
+                                width={170}
+                                height={52}
                                 priority
                                 className={cn(
                                     "h-7 w-auto",
