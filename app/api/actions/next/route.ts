@@ -15,7 +15,7 @@ import { statusConfigService } from '@/lib/services/StatusConfigService';
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(['SDR', 'BUSINESS_DEVELOPER'], request);
+    const session = await requireRole(['SDR', 'BUSINESS_DEVELOPER', 'BOOKER'], request);
     const { searchParams } = new URL(request.url);
     const missionId = searchParams.get('missionId');
     const listId = searchParams.get('listId');
@@ -29,6 +29,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     const COOLDOWN_HOURS = 24;
     const cooldownDate = new Date(Date.now() - COOLDOWN_HOURS * 60 * 60 * 1000);
     const sdrId = session.user.id;
+    const isBooker = session.user.role === "BOOKER";
 
     // Build dynamic where clauses
     const missionFilter = missionId
@@ -37,6 +38,16 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     const listFilter = listId
         ? `AND l.id = '${listId.replace(/'/g, "''")}'`
         : '';
+
+    const shouldBypassAssignmentGate = Boolean(missionId);
+
+    // Booker and mission-filtered requests: no SDRAssignment join
+    const sdrAssignmentJoin = isBooker || shouldBypassAssignmentGate
+        ? ""
+        : `INNER JOIN "SDRAssignment" sa ON sa."missionId" = m.id`;
+    const sdrAssignmentWhere = isBooker || shouldBypassAssignmentGate
+        ? ""
+        : `AND sa."sdrId" = $1`;
 
     // ============================================
     // OPTIMIZED QUERY: Single CTE-based query
@@ -62,6 +73,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         mission_name: string;
         mission_channel: string;
         client_id: string;
+        client_booking_url: string | null;
         last_action_result: string | null;
         last_action_note: string | null;
         last_action_created: Date | null;
@@ -71,8 +83,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         priority_label: string;
     }>>(`
         WITH sdr_contacts AS (
-            -- Get all contacts for SDR's active missions
-            -- Include ALL statuses (INCOMPLETE, PARTIAL, ACTIONABLE) - SDRs can work with all
+            -- Get all contacts for active missions
             SELECT DISTINCT
                 c.id as contact_id,
                 co.id as company_id,
@@ -92,19 +103,19 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                 camp.script as campaign_script,
                 m.name as mission_name,
                 m.channel as mission_channel,
-                cl.id as client_id
+                cl.id as client_id,
+                cl."bookingUrl" as client_booking_url
             FROM "Contact" c
             INNER JOIN "Company" co ON c."companyId" = co.id
             INNER JOIN "List" l ON co."listId" = l.id
             INNER JOIN "Mission" m ON l."missionId" = m.id
             INNER JOIN "Client" cl ON m."clientId" = cl.id
             INNER JOIN "Campaign" camp ON camp."missionId" = m.id
-            INNER JOIN "SDRAssignment" sa ON sa."missionId" = m.id
-            WHERE sa."sdrId" = $1
-              AND m."isActive" = true
+            ${sdrAssignmentJoin}
+            WHERE m."isActive" = true
+              AND (l."isActive" IS NULL OR l."isActive" = true)
               AND camp."isActive" = true
-              -- Include all contacts regardless of status (INCOMPLETE, PARTIAL, ACTIONABLE)
-              -- Only check that they have the required channel info for the mission (mission can be multi-channel)
+              ${sdrAssignmentWhere}
               AND (
                   ('CALL' = ANY(m.channels) AND (c.phone IS NOT NULL AND c.phone != '' OR co.phone IS NOT NULL AND co.phone != '')) OR
                   ('EMAIL' = ANY(m.channels) AND c.email IS NOT NULL AND c.email != '') OR
@@ -115,7 +126,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
               ${channelFilter}
         ),
         sdr_companies AS (
-            -- Get companies that can be called directly (have phone but maybe no contacts, or we want to call company)
+            -- Get companies that can be called directly
             SELECT DISTINCT
                 NULL::text as contact_id,
                 co.id as company_id,
@@ -135,21 +146,21 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                 camp.script as campaign_script,
                 m.name as mission_name,
                 m.channel as mission_channel,
-                cl.id as client_id
+                cl.id as client_id,
+                cl."bookingUrl" as client_booking_url
             FROM "Company" co
             INNER JOIN "List" l ON co."listId" = l.id
             INNER JOIN "Mission" m ON l."missionId" = m.id
             INNER JOIN "Client" cl ON m."clientId" = cl.id
             INNER JOIN "Campaign" camp ON camp."missionId" = m.id
-            INNER JOIN "SDRAssignment" sa ON sa."missionId" = m.id
-            WHERE sa."sdrId" = $1
-              AND m."isActive" = true
+            ${sdrAssignmentJoin}
+            WHERE m."isActive" = true
+              AND (l."isActive" IS NULL OR l."isActive" = true)
               AND camp."isActive" = true
-              -- Only include companies with phone for CALL missions (mission can be multi-channel)
+              ${sdrAssignmentWhere}
               AND 'CALL' = ANY(m.channels)
               AND co.phone IS NOT NULL
               AND co.phone != ''
-              -- Exclude companies that already have actionable contacts (to avoid duplicates)
               AND NOT EXISTS (
                   SELECT 1 FROM "Contact" c2 
                   WHERE c2."companyId" = co.id 
@@ -212,35 +223,39 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         )
         SELECT *
         FROM targets_with_last_action
-        WHERE (last_action_created IS NULL OR last_action_created < $2)
+        WHERE (last_action_created IS NULL OR last_action_created < $${isBooker || shouldBypassAssignmentGate ? 1 : 2})
         ORDER BY 
             CASE WHEN contact_status = 'ACTIONABLE' THEN 0 WHEN contact_status = 'PARTIAL' THEN 1 WHEN contact_status = 'INCOMPLETE' THEN 2 ELSE 3 END,
             COALESCE(last_action_created, '1970-01-01'::timestamp) ASC
         LIMIT 500
-    `, sdrId, cooldownDate);
+    `, ...(isBooker || shouldBypassAssignmentGate ? [cooldownDate] : [sdrId, cooldownDate]));
 
-    // Resolve missionId for config (from params or first row's campaign)
-    let configMissionId = missionId ?? null;
-    if (!configMissionId && listId) {
-        const list = await prisma.list.findUnique({
-            where: { id: listId },
-            select: { missionId: true },
-        });
-        configMissionId = list?.missionId ?? null;
-    }
-    if (!configMissionId && result.length > 0) {
-        const camp = await prisma.campaign.findUnique({
-            where: { id: result[0].campaign_id },
-            select: { missionId: true },
-        });
-        configMissionId = camp?.missionId ?? null;
-    }
+    // Resolve missionId for config and fetch interlocuteurs in parallel
+    const configMissionIdPromise = (async () => {
+        if (missionId) return missionId;
+        if (listId) {
+            const list = await prisma.list.findUnique({
+                where: { id: listId },
+                select: { missionId: true },
+            });
+            if (list?.missionId) return list.missionId;
+        }
+        if (result.length > 0) {
+            const camp = await prisma.campaign.findUnique({
+                where: { id: result[0].campaign_id },
+                select: { missionId: true },
+            });
+            return camp?.missionId ?? null;
+        }
+        return null;
+    })();
 
+    // Sort by config once we have it
+    const configMissionId = await configMissionIdPromise;
     const config = await statusConfigService.getEffectiveStatusConfig(
         configMissionId ? { missionId: configMissionId } : {}
     );
 
-    // Sort by config-driven priority, filter out SKIP (999)
     const withPriority = result.map((row) => {
         const { priorityOrder, priorityLabel } = statusConfigService.getPriorityForResult(
             row.last_action_result,
@@ -258,10 +273,6 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     );
     const next = sorted[0];
 
-    // ============================================
-    // HANDLE RESULT
-    // ============================================
-
     if (!next) {
         return successResponse({
             hasNext: false,
@@ -273,17 +284,17 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         });
     }
 
-    // Fetch client bookingUrl separately (handles case where column doesn't exist yet)
-    let clientBookingUrl: string | undefined = undefined;
+    // bookingUrl comes from the raw SQL now; only fetch interlocuteurs separately
+    const clientBookingUrl = next.client_booking_url || undefined;
+    let clientInterlocuteurs: Array<Record<string, unknown>> = [];
     try {
-        const client = await prisma.client.findUnique({
-            where: { id: next.client_id },
-            select: { bookingUrl: true },
+        const interlocuteurs = await prisma.clientInterlocuteur.findMany({
+            where: { clientId: next.client_id, isActive: true },
+            orderBy: { createdAt: 'asc' },
         });
-        clientBookingUrl = client?.bookingUrl || undefined;
+        clientInterlocuteurs = interlocuteurs as Array<Record<string, unknown>>;
     } catch (err) {
-        // Column might not exist yet, ignore
-        console.warn('Could not fetch client bookingUrl:', err);
+        console.warn('Could not fetch client interlocuteurs:', err);
     }
 
     return successResponse({
@@ -312,6 +323,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         channel: next.mission_channel,
         script: next.campaign_script,
         clientBookingUrl,
+        clientInterlocuteurs,
         lastAction: next.last_action_result ? {
             result: next.last_action_result,
             note: next.last_action_note,

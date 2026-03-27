@@ -53,7 +53,7 @@ const updateMissionSchema = z.object({
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(['MANAGER', 'CLIENT', 'SDR', 'BUSINESS_DEVELOPER'], request);
+    const session = await requireRole(['MANAGER', 'CLIENT', 'SDR', 'BUSINESS_DEVELOPER', 'BOOKER'], request);
     const { searchParams } = new URL(request.url);
     const { page, limit, skip } = getPaginationParams(searchParams);
 
@@ -61,23 +61,29 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     const clientId = searchParams.get('clientId');
     const isActive = searchParams.get('isActive');
     const search = searchParams.get('search');
+    const channel = searchParams.get('channel');
 
     const where: Record<string, unknown> = {};
 
     // Role-based filtering
     if (session.user.role === 'CLIENT') {
+        // Clients only see missions for their own company
         where.client = { users: { some: { id: session.user.id } } };
-    } else if (session.user.role === 'SDR' || session.user.role === 'BUSINESS_DEVELOPER') {
-        // SDR and BD see missions they're assigned to
+    } else if (session.user.role === 'SDR') {
+        // SDRs only see missions they're assigned to
         where.sdrAssignments = { some: { sdrId: session.user.id } };
     }
 
     if (clientId) where.clientId = clientId;
     if (isActive !== null) where.isActive = isActive === 'true';
-    if (search) {
+    if (channel && ['CALL', 'EMAIL', 'LINKEDIN'].includes(channel)) {
+        where.channels = { has: channel };
+    }
+    if (search?.trim()) {
         where.OR = [
-            { name: { contains: search, mode: 'insensitive' } },
-            { objective: { contains: search, mode: 'insensitive' } },
+            { name: { contains: search.trim(), mode: 'insensitive' } },
+            { objective: { contains: search.trim(), mode: 'insensitive' } },
+            { client: { name: { contains: search.trim(), mode: 'insensitive' } } },
         ];
     }
 
@@ -114,7 +120,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER'], request);
+    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER', 'BOOKER'], request);
     const data = await validateRequest(request, createMissionSchema);
 
     // Verify client exists

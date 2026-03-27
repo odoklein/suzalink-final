@@ -15,8 +15,8 @@ export default withAuth(
         }
 
         // Role-based route protection
-        // SDR routes are accessible by both SDR and BUSINESS_DEVELOPER (shared Sales execution)
-        if (path.startsWith("/sdr") && token?.role !== "SDR" && token?.role !== "BUSINESS_DEVELOPER") {
+        // SDR routes are accessible by SDR, BUSINESS_DEVELOPER and BOOKER (shared Sales execution)
+        if (path.startsWith("/sdr") && token?.role !== "SDR" && token?.role !== "BUSINESS_DEVELOPER" && token?.role !== "BOOKER") {
             return NextResponse.redirect(new URL("/unauthorized", req.url));
         }
 
@@ -36,6 +36,10 @@ export default withAuth(
             return NextResponse.redirect(new URL("/unauthorized", req.url));
         }
 
+        if (path.startsWith("/commercial") && token?.role !== "COMMERCIAL") {
+            return NextResponse.redirect(new URL("/unauthorized", req.url));
+        }
+
         return NextResponse.next();
     },
     {
@@ -46,5 +50,5 @@ export default withAuth(
 );
 
 export const config = {
-    matcher: ["/sdr/:path*", "/manager/:path*", "/client/:path*", "/developer/:path*", "/bd/:path*"],
+    matcher: ["/sdr/:path*", "/manager/:path*", "/client/:path*", "/developer/:path*", "/bd/:path*", "/commercial/:path*"],
 };

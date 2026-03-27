@@ -48,6 +48,10 @@ export const POST = withErrorHandler(async (
         throw new NotFoundError("Action introuvable");
     }
 
+    if (action.confirmationStatus !== "CONFIRMED") {
+        throw new AuthError("Ce rendez-vous n'est pas encore confirmé", 403);
+    }
+
     if (action.result !== "MEETING_BOOKED") {
         return errorResponse("Ce rendez-vous est déjà annulé", 400);
     }
@@ -68,6 +72,8 @@ export const POST = withErrorHandler(async (
             result: "MEETING_CANCELLED",
             cancellationReason: cancellationReason,
             note: note && String(note).trim() ? (action.note ? `${action.note}\n${String(note).trim()}` : String(note).trim()) : action.note ?? undefined,
+            confirmationStatus: "CANCELLED",
+            confirmationUpdatedAt: new Date(),
         },
         include: {
             contact: {

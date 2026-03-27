@@ -46,6 +46,12 @@ interface Mission {
     name: string;
 }
 
+interface ListOption {
+    id: string;
+    name: string;
+    missionId: string;
+}
+
 interface ColumnMapping {
     csvColumn: string;
     targetField: string;
@@ -77,6 +83,7 @@ interface ChannelMapping {
 interface ActionColumnMapping {
     statusColumn: string;
     dateColumn: string;
+    callbackDateColumn: string;
     noteColumn: string;
     channelColumn: string;
 }
@@ -96,6 +103,7 @@ const COMPANY_FIELDS = [
     { value: "company.country", label: "Pays" },
     { value: "company.website", label: "Site web" },
     { value: "company.phone", label: "Téléphone société" },
+    { value: "company.additionalPhones", label: "Téléphones société (suppl.)" },
     { value: "company.size", label: "Taille" },
     { value: "__custom_company__", label: "➕ Champ personnalisé société..." },
 ];
@@ -105,6 +113,7 @@ const CONTACT_FIELDS = [
     { value: "contact.lastName", label: "Nom" },
     { value: "contact.email", label: "Email" },
     { value: "contact.phone", label: "Téléphone" },
+     { value: "contact.additionalPhones", label: "Téléphones (suppl.)" },
     { value: "contact.title", label: "Fonction" },
     { value: "contact.linkedin", label: "LinkedIn" },
     { value: "__custom_contact__", label: "➕ Champ personnalisé contact..." },
@@ -146,8 +155,12 @@ export default function ImportListPage() {
 
     // Step 1: File & Mission
     const [file, setFile] = useState<File | null>(null);
+    const [importMode, setImportMode] = useState<"new" | "existing">("new");
     const [missionId, setMissionId] = useState("");
     const [listName, setListName] = useState("");
+    const [listId, setListId] = useState("");
+    const [lists, setLists] = useState<ListOption[]>([]);
+    const [whenAlreadyWorkedOn, setWhenAlreadyWorkedOn] = useState<"skip" | "add_anyway">("skip");
 
     // Step 2: Import Type Selection
     const [importType, setImportType] = useState<"companies-only" | "companies-contacts">("companies-contacts");
@@ -167,6 +180,7 @@ export default function ImportListPage() {
     const [actionColumnMapping, setActionColumnMapping] = useState<ActionColumnMapping>({
         statusColumn: "",
         dateColumn: "",
+        callbackDateColumn: "",
         noteColumn: "",
         channelColumn: "",
     });
@@ -222,6 +236,29 @@ export default function ImportListPage() {
         };
         fetchMissions();
     }, []);
+
+    // Fetch lists when mission changes (for "add to existing list")
+    useEffect(() => {
+        if (importMode !== "existing" || !missionId) {
+            setLists([]);
+            setListId("");
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch(`/api/lists?missionId=${missionId}&limit=200`);
+                const json = await res.json();
+                if (cancelled || !json.success) return;
+                const items = (json.data ?? []) as { id: string; name: string; missionId: string }[];
+                setLists(items);
+                setListId((prev) => (items.some((l) => l.id === prev) ? prev : items[0]?.id ?? ""));
+            } catch {
+                if (!cancelled) setLists([]);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [importMode, missionId]);
 
     // Detect unique status values when status column is selected (uses ALL rows, not just preview)
     useEffect(() => {
@@ -527,8 +564,13 @@ export default function ImportListPage() {
             const totalRows = await countFileLines(file);
             const formData = new FormData();
             formData.append("file", file);
-            formData.append("missionId", missionId);
-            formData.append("listName", listName);
+            if (importMode === "existing" && listId) {
+                formData.append("listId", listId);
+                formData.append("whenAlreadyWorkedOn", whenAlreadyWorkedOn);
+            } else {
+                formData.append("missionId", missionId);
+                formData.append("listName", listName);
+            }
             formData.append("mappings", JSON.stringify(mappings));
             formData.append("importType", importType);
             formData.append("importActions", String(importActions));
@@ -666,27 +708,87 @@ export default function ImportListPage() {
             {step === 1 && (
                 <Card>
                     <div className="space-y-6">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                                Destination
+                            </label>
+                            <div className="flex gap-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setImportMode("new")}
+                                    className={`flex-1 p-4 rounded-xl border-2 text-left transition-all ${importMode === "new"
+                                        ? "border-indigo-500 bg-indigo-50"
+                                        : "border-slate-200 bg-white hover:border-slate-300"
+                                        }`}
+                                >
+                                    <span className="font-semibold text-slate-900">Nouvelle liste</span>
+                                    <p className="text-sm text-slate-500 mt-1">Créer une nouvelle liste dans la mission</p>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setImportMode("existing")}
+                                    className={`flex-1 p-4 rounded-xl border-2 text-left transition-all ${importMode === "existing"
+                                        ? "border-indigo-500 bg-indigo-50"
+                                        : "border-slate-200 bg-white hover:border-slate-300"
+                                        }`}
+                                >
+                                    <span className="font-semibold text-slate-900">Ajouter à une liste existante</span>
+                                    <p className="text-sm text-slate-500 mt-1">Mapper les colonnes et fusionner avec la liste</p>
+                                </button>
+                            </div>
+                        </div>
+
                         <Select
                             label="Mission *"
                             placeholder="Sélectionner une mission..."
                             options={missions.map(m => ({ value: m.id, label: m.name }))}
                             value={missionId}
-                            onChange={setMissionId}
+                            onChange={(v) => { setMissionId(v); setListId(""); }}
                             searchable
                         />
 
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">
-                                Nom de la liste
-                            </label>
-                            <input
-                                type="text"
-                                value={listName}
-                                onChange={(e) => setListName(e.target.value)}
-                                placeholder="Sera généré automatiquement depuis le fichier"
-                                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
-                            />
-                        </div>
+                        {importMode === "new" ? (
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-2">
+                                    Nom de la liste *
+                                </label>
+                                <input
+                                    type="text"
+                                    value={listName}
+                                    onChange={(e) => setListName(e.target.value)}
+                                    placeholder="Ex: Liste CSV Mars 2025"
+                                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                                />
+                            </div>
+                        ) : (
+                            <>
+                                <Select
+                                    label="Liste existante *"
+                                    placeholder={missionId ? "Choisir une liste..." : "Sélectionnez d'abord une mission"}
+                                    options={lists.map(l => ({ value: l.id, label: l.name }))}
+                                    value={listId}
+                                    onChange={setListId}
+                                    searchable
+                                    disabled={!missionId || lists.length === 0}
+                                />
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                                        Si la société existe déjà et a déjà été travaillée
+                                    </label>
+                                    <select
+                                        value={whenAlreadyWorkedOn}
+                                        onChange={(e) => setWhenAlreadyWorkedOn(e.target.value as "skip" | "add_anyway")}
+                                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                                    >
+                                        <option value="skip">Ignorer la ligne (ne pas ajouter)</option>
+                                        <option value="add_anyway">Ajouter quand même (nouveaux contacts possibles)</option>
+                                    </select>
+                                    <p className="text-xs text-slate-500 mt-1">
+                                        « Déjà travaillée » = la société a au moins une action enregistrée.
+                                    </p>
+                                </div>
+                            </>
+                        )}
 
                         <FileUpload
                             label="Fichier CSV *"
@@ -699,7 +801,11 @@ export default function ImportListPage() {
                             <Button
                                 variant="primary"
                                 onClick={() => setStep(2)}
-                                disabled={!file || !missionId}
+                                disabled={
+                                    !file ||
+                                    !missionId ||
+                                    (importMode === "new" ? !listName?.trim() : !listId)
+                                }
                                 className="gap-2"
                             >
                                 Suivant
@@ -956,6 +1062,9 @@ export default function ImportListPage() {
                                         <p className="text-xs text-slate-500">
                                             Valeurs comme &quot;Tentative&quot;, &quot;Meeting booké&quot;, etc.
                                         </p>
+                                        <p className="text-xs text-slate-400">
+                                            Plusieurs actions possibles dans une même ligne avec &quot;;&quot;.
+                                        </p>
                                     </div>
                                     <div className="space-y-1">
                                         <p className="text-xs font-medium text-slate-700">Colonne date</p>
@@ -971,6 +1080,25 @@ export default function ImportListPage() {
                                         />
                                         <p className="text-xs text-slate-500">
                                             Date à laquelle l&apos;action a eu lieu (optionnel).
+                                        </p>
+                                        <p className="text-xs text-slate-400">
+                                            Si besoin, séparez plusieurs dates avec &quot;;&quot;.
+                                        </p>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-xs font-medium text-slate-700">Colonne date callback / RDV</p>
+                                        <Select
+                                            options={[
+                                                { value: "", label: "Ignorer" },
+                                                ...csvHeaders.map(h => ({ value: h, label: h })),
+                                            ]}
+                                            value={actionColumnMapping.callbackDateColumn}
+                                            onChange={(value) =>
+                                                setActionColumnMapping(prev => ({ ...prev, callbackDateColumn: value }))
+                                            }
+                                        />
+                                        <p className="text-xs text-slate-500">
+                                            Date planifiée du rappel / RDV (optionnel).
                                         </p>
                                     </div>
                                     <div className="space-y-1">
@@ -988,6 +1116,9 @@ export default function ImportListPage() {
                                         <p className="text-xs text-slate-500">
                                             Notes d&apos;appel ou commentaires (optionnel).
                                         </p>
+                                        <p className="text-xs text-slate-400">
+                                            Optionnel: plusieurs notes avec &quot;;&quot;.
+                                        </p>
                                     </div>
                                     <div className="space-y-1">
                                         <p className="text-xs font-medium text-slate-700">Colonne canal</p>
@@ -1003,6 +1134,9 @@ export default function ImportListPage() {
                                         />
                                         <p className="text-xs text-slate-500">
                                             Canal utilisé (téléphone, email, LinkedIn). Par défaut: Appel.
+                                        </p>
+                                        <p className="text-xs text-slate-400">
+                                            Optionnel: plusieurs canaux avec &quot;;&quot;.
                                         </p>
                                     </div>
                                 </div>
@@ -1177,7 +1311,7 @@ export default function ImportListPage() {
                         <div className="bg-slate-50 rounded-xl p-4">
                             <h3 className="font-medium text-slate-900 mb-2">Résumé de l&apos;import</h3>
                             <ul className="text-sm text-slate-600 space-y-1">
-                                <li>• Liste: <span className="text-slate-900 font-medium">{listName}</span></li>
+                                <li>• {importMode === "existing" ? "Liste existante: " : "Liste: "}<span className="text-slate-900 font-medium">{importMode === "existing" ? lists.find(l => l.id === listId)?.name ?? listId : listName}</span></li>
                                 <li>• Mission: <span className="text-slate-900 font-medium">{missions.find(m => m.id === missionId)?.name}</span></li>
                                 <li>• Type: <span className="text-slate-900 font-medium">
                                     {importType === "companies-only" ? "Sociétés uniquement" : "Sociétés + Contacts"}

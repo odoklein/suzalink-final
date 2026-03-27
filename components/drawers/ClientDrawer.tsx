@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Drawer, DrawerSection, DrawerField, Button, Input, useToast, ConfirmModal, Badge } from "@/components/ui";
+import { CLIENTS_QUERY_KEY, clientDetailQueryKey } from "@/lib/query-keys";
 import {
     Building2,
     Mail,
@@ -55,6 +57,13 @@ interface ClientDrawerProps {
 // CLIENT DRAWER COMPONENT
 // ============================================
 
+async function fetchClientDetail(clientId: string) {
+    const res = await fetch(`/api/clients/${clientId}`);
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || "Impossible de charger le client");
+    return json.data;
+}
+
 export function ClientDrawer({
     isOpen,
     onClose,
@@ -62,6 +71,7 @@ export function ClientDrawer({
     onUpdate,
     onDelete,
 }: ClientDrawerProps) {
+    const queryClient = useQueryClient();
     const { success, error: showError } = useToast();
     const [isEditing, setIsEditing] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -75,23 +85,60 @@ export function ClientDrawer({
         bookingUrl: "",
         portalShowCallHistory: false,
         portalShowDatabase: false,
+        rdvEmailNotificationsEnabled: true,
+        defaultMailboxId: "",
+    });
+    const [mailboxes, setMailboxes] = useState<Array<{ id: string; email: string; displayName: string | null }>>([]);
+    const [isLoadingMailboxes, setIsLoadingMailboxes] = useState(false);
+
+    // React Query: full client details when drawer is open (for defaultMailboxId and form)
+    const { data: clientDetail } = useQuery({
+        queryKey: clientDetailQueryKey(client?.id ?? null),
+        queryFn: () => fetchClientDetail(client!.id),
+        enabled: isOpen && !!client?.id,
     });
 
-    // Reset form when client changes
+    // Sync form from list client + detail when they change
     useEffect(() => {
         if (client) {
+            const onboardingData = (clientDetail?.onboarding?.onboardingData ?? {}) as { defaultMailboxId?: string };
             setFormData({
                 name: client.name || "",
                 industry: client.industry || "",
                 email: client.email || "",
                 phone: client.phone || "",
-                bookingUrl: (client as any).bookingUrl || "",
-                portalShowCallHistory: (client as any).portalShowCallHistory ?? false,
-                portalShowDatabase: (client as any).portalShowDatabase ?? false,
+                bookingUrl: (client as any).bookingUrl ?? (clientDetail as any)?.bookingUrl ?? "",
+                portalShowCallHistory: (client as any).portalShowCallHistory ?? (clientDetail as any)?.portalShowCallHistory ?? false,
+                portalShowDatabase: (client as any).portalShowDatabase ?? (clientDetail as any)?.portalShowDatabase ?? false,
+                rdvEmailNotificationsEnabled: (client as any).rdvEmailNotificationsEnabled ?? (clientDetail as any)?.rdvEmailNotificationsEnabled ?? true,
+                defaultMailboxId: onboardingData.defaultMailboxId ?? "",
             });
             setIsEditing(false);
         }
-    }, [client]);
+    }, [client, clientDetail]);
+
+    // Load available mailboxes for managers (owned + shared)
+    useEffect(() => {
+        if (!isOpen) return;
+        setIsLoadingMailboxes(true);
+        fetch("/api/email/mailboxes?includeShared=true")
+            .then((r) => r.json())
+            .then((json) => {
+                if (json.success && Array.isArray(json.data)) {
+                    setMailboxes(
+                        json.data.map((mb: { id: string; email: string; displayName: string | null }) => ({
+                            id: mb.id,
+                            email: mb.email,
+                            displayName: mb.displayName,
+                        }))
+                    );
+                }
+            })
+            .catch(() => {
+                // silent fail, mailbox selection is optional
+            })
+            .finally(() => setIsLoadingMailboxes(false));
+    }, [isOpen]);
 
     // ============================================
     // SAVE HANDLER
@@ -113,6 +160,8 @@ export function ClientDrawer({
             if (json.success) {
                 success("Client mis à jour", `${formData.name} a été mis à jour`);
                 setIsEditing(false);
+                queryClient.invalidateQueries({ queryKey: clientDetailQueryKey(client.id) });
+                queryClient.invalidateQueries({ queryKey: CLIENTS_QUERY_KEY });
                 if (onUpdate) {
                     onUpdate({ ...client, ...formData });
                 }
@@ -148,6 +197,8 @@ export function ClientDrawer({
             if (json.success) {
                 success("Client supprimé", `${client.name} et toutes les données associées ont été supprimés`);
                 setShowDeleteConfirm(false);
+                queryClient.invalidateQueries({ queryKey: clientDetailQueryKey(client.id) });
+                queryClient.invalidateQueries({ queryKey: CLIENTS_QUERY_KEY });
                 onClose();
                 onDelete?.();
             } else {
@@ -358,6 +409,71 @@ export function ClientDrawer({
                                         }
                                     />
                                 </label>
+                            </div>
+
+                            <div className="mt-4 border-t border-slate-200 pt-4 space-y-3">
+                                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                                    Notifications email
+                                </p>
+                                <label className="flex items-center justify-between gap-3 text-sm">
+                                    <span className="text-slate-700">
+                                        Envoyer un email au client à chaque nouveau RDV
+                                    </span>
+                                    <input
+                                        type="checkbox"
+                                        className="h-4 w-4 accent-indigo-600"
+                                        checked={formData.rdvEmailNotificationsEnabled}
+                                        onChange={(e) =>
+                                            setFormData(prev => ({
+                                                ...prev,
+                                                rdvEmailNotificationsEnabled: e.target.checked,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                            </div>
+
+                            <div className="mt-4 border-t border-slate-200 pt-4 space-y-3">
+                                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                                    Boîte mail par défaut
+                                </p>
+                                {isLoadingMailboxes ? (
+                                    <p className="text-xs text-slate-400">Chargement des boîtes mail…</p>
+                                ) : mailboxes.length === 0 ? (
+                                    <p className="text-xs text-slate-500">
+                                        Aucune boîte mail disponible. Configurez-les dans{" "}
+                                        <a
+                                            href="/manager/email/mailboxes"
+                                            className="text-indigo-600 hover:underline"
+                                        >
+                                            la page Boîtes mail
+                                        </a>.
+                                    </p>
+                                ) : (
+                                    <>
+                                        <select
+                                            className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-700"
+                                            value={formData.defaultMailboxId}
+                                            onChange={(e) =>
+                                                setFormData((prev) => ({
+                                                    ...prev,
+                                                    defaultMailboxId: e.target.value,
+                                                }))
+                                            }
+                                        >
+                                            <option value="">Aucune (le SDR choisit sa boîte mail)</option>
+                                            {mailboxes.map((mb) => (
+                                                <option key={mb.id} value={mb.id}>
+                                                    {mb.displayName ? `${mb.displayName} <${mb.email}>` : mb.email}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <p className="text-[11px] text-slate-500">
+                                            Cette boîte mail sera proposée par défaut aux SDRs pour les emails liés
+                                            aux missions de ce client.
+                                        </p>
+                                    </>
+                                )}
                             </div>
                         </div>
                     ) : (

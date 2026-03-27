@@ -38,13 +38,17 @@ export async function GET(request: Request) {
 
         const userRole = (session.user as { role?: string }).role;
         const isBusinessDeveloper = userRole === "BUSINESS_DEVELOPER";
+        const isBooker = userRole === "BOOKER";
 
-        // Missions assigned to current user
-        const assignments = await prisma.sDRAssignment.findMany({
-            where: { sdrId: session.user.id },
-            select: { missionId: true },
-        });
-        const assignedMissionIds = assignments.map((a) => a.missionId);
+        // Missions assigned to current user (for SDR/BD). Bookers see all missions.
+        const assignedMissionIds = isBooker
+            ? []
+            : (
+                  await prisma.sDRAssignment.findMany({
+                      where: { sdrId: session.user.id },
+                      select: { missionId: true },
+                  })
+              ).map((a) => a.missionId);
 
         // Missions where current user is team lead (can see all teammates' callbacks)
         const teamLeadMissions = await prisma.mission.findMany({
@@ -53,13 +57,15 @@ export async function GET(request: Request) {
         });
         const teamLeadMissionIds = teamLeadMissions.map((m) => m.id);
 
-        // BD: scope by assigned missions. SDR: own callbacks + all callbacks for missions where they are team lead.
+        // BD: scope by assigned missions.
+        // Bookers: see callbacks on all missions (no mission restriction).
+        // SDR: own callbacks + all callbacks for missions where they are team lead.
         const whereClause: {
             sdrId?: string;
             result: "CALLBACK_REQUESTED";
             campaign?: { missionId: string | { in: string[] } };
             callbackDate?: { gte?: Date; lte?: Date };
-            OR?: Array<{ sdrId: string; campaign: { missionId: string | { in: string[] } } } | { campaign: { missionId: { in: string[] } } }>;
+            OR?: Array<{ sdrId: string; campaign: { missionId: string | { in: string[] } } } | { campaign: { missionId: string | { in: string[] } } }>;
         } = {
             result: "CALLBACK_REQUESTED",
         };
@@ -73,25 +79,21 @@ export async function GET(request: Request) {
             } else {
                 whereClause.campaign = { missionId: { in: assignedMissionIds } };
             }
+        } else if (!isBooker) {
+            // SDR: When mission is selected, show ALL callbacks for that mission
+            // When no mission selected, show all callbacks created by this SDR
+            if (missionIdParam) {
+                // Show ALL callbacks for this specific mission (no assignment check)
+                whereClause.campaign = { missionId: missionIdParam };
+            } else {
+                // No mission filter: show all callbacks created by this SDR
+                whereClause.sdrId = session.user.id;
+            }
         } else {
-            // SDR: own callbacks for assigned missions + all callbacks for missions where they are team lead
-            if (missionIdParam && !assignedMissionIds.includes(missionIdParam) && !teamLeadMissionIds.includes(missionIdParam)) {
-                return NextResponse.json({ success: true, data: [] });
+            // Booker: only filter by missionId if provided; otherwise all missions
+            if (missionIdParam) {
+                whereClause.campaign = { missionId: missionIdParam };
             }
-            const missionFilter = missionIdParam
-                ? { missionId: missionIdParam }
-                : { missionId: { in: [...new Set([...assignedMissionIds, ...teamLeadMissionIds])] } };
-            const orParts: Array<{ sdrId: string; campaign: { missionId: string | { in: string[] } } } | { campaign: { missionId: string | { in: string[] } } }> = [
-                { sdrId: session.user.id, campaign: missionFilter },
-            ];
-            if (teamLeadMissionIds.length > 0) {
-                orParts.push({
-                    campaign: missionIdParam && teamLeadMissionIds.includes(missionIdParam)
-                        ? { missionId: missionIdParam }
-                        : { missionId: { in: teamLeadMissionIds } },
-                });
-            }
-            whereClause.OR = orParts;
         }
 
         // Date filter: callbackDate range
@@ -124,7 +126,7 @@ export async function GET(request: Request) {
             skip,
             ...(limit > 0 ? { take: limit } : {}),
             include: {
-                sdr: (isBusinessDeveloper || teamLeadMissionIds.length > 0)
+                sdr: (isBusinessDeveloper || isBooker || teamLeadMissionIds.length > 0)
                     ? { select: { id: true, name: true } }
                     : false,
                 contact: {
@@ -229,7 +231,7 @@ export async function GET(request: Request) {
                     client: action.campaign.mission.client,
                 } : null,
             };
-            if ((isBusinessDeveloper || teamLeadMissionIds.length > 0) && action.sdr) {
+            if ((isBusinessDeveloper || isBooker || teamLeadMissionIds.length > 0) && action.sdr) {
                 item.sdr = { id: action.sdr.id, name: action.sdr.name };
             }
             activeCallbacks.push(item);

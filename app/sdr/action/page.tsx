@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useSession } from "next-auth/react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
     Phone,
     Mail,
@@ -34,16 +35,28 @@ import {
     PenLine,
     BarChart2,
     Trash2,
+    Send,
 } from "lucide-react";
-import { Card, Badge, Button, LoadingState, EmptyState, Tabs, Drawer, DataTable, Select, useToast, TableSkeleton, CardSkeleton, Modal } from "@/components/ui";
+import { Card, Badge, Button, LoadingState, EmptyState, Tabs, Drawer, DataTable, Select, useToast, TableSkeleton, CardSkeleton, Modal, DateTimePicker } from "@/components/ui";
 import type { Column } from "@/components/ui/DataTable";
+import dynamic from "next/dynamic";
 import { CompanyDrawer, ContactDrawer } from "@/components/drawers";
-import { UnifiedActionDrawer } from "@/components/drawers/UnifiedActionDrawer";
 import { BookingDrawer } from "@/components/sdr/BookingDrawer";
+
+const UnifiedActionDrawer = dynamic(
+    () => import("@/components/drawers/UnifiedActionDrawer").then((m) => ({ default: m.UnifiedActionDrawer })),
+    { ssr: false }
+);
 import { QuickEmailModal } from "@/components/email/QuickEmailModal";
 import type { ActionResult, Channel } from "@/lib/types";
 import { ACTION_RESULT_LABELS, CHANNEL_LABELS } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import {
+    sdrActionQueueKey,
+    sdrDrawerContactKey,
+    sdrDrawerCompanyKey,
+    sdrClientBookingKey,
+} from "@/lib/query-keys";
 
 // ============================================
 // TYPES
@@ -76,6 +89,13 @@ interface NextActionData {
     channel?: Channel;
     script?: string;
     clientBookingUrl?: string;
+    clientInterlocuteurs?: Array<{
+        id: string; firstName: string; lastName: string; title?: string;
+        emails: Array<{ value: string; label: string; isPrimary: boolean }>;
+        phones: Array<{ value: string; label: string; isPrimary: boolean }>;
+        bookingLinks: Array<{ label: string; url: string; durationMinutes: number }>;
+        isActive: boolean;
+    }>;
     lastAction?: {
         result: string;
         note?: string;
@@ -89,6 +109,7 @@ interface Mission {
     name: string;
     channel: string;
     client: { name: string };
+    defaultMailboxId?: string | null;
 }
 
 interface ListItem {
@@ -163,7 +184,8 @@ const RESULT_OPTIONS_FALLBACK: { value: ActionResult; label: string; icon: React
     { value: "CALLBACK_REQUESTED", label: "Rappel demandé", icon: <Clock className="w-4 h-4" />, key: "4", color: "amber" },
     { value: "MEETING_BOOKED", label: "RDV pris", icon: <Calendar className="w-4 h-4" />, key: "5", color: "indigo" },
     { value: "DISQUALIFIED", label: "Disqualifié", icon: <XCircle className="w-4 h-4" />, key: "6", color: "slate" },
-    { value: "ENVOIE_MAIL", label: "Envoie mail", icon: <Mail className="w-4 h-4" />, key: "7", color: "blue" },
+    { value: "ENVOIE_MAIL", label: "Mail à envoyer", icon: <Mail className="w-4 h-4" />, key: "7", color: "blue" },
+    { value: "MAIL_ENVOYE", label: "Mail envoyé", icon: <Send className="w-4 h-4" />, key: "8", color: "emerald" },
 ];
 
 const RESULT_ICON_MAP: Record<string, React.ReactNode> = {
@@ -175,7 +197,10 @@ const RESULT_ICON_MAP: Record<string, React.ReactNode> = {
     MEETING_CANCELLED: <XCircle className="w-4 h-4" />,
     DISQUALIFIED: <XCircle className="w-4 h-4" />,
     ENVOIE_MAIL: <Mail className="w-4 h-4" />,
+    MAIL_ENVOYE: <Send className="w-4 h-4" />,
 };
+const TABLE_QUEUE_LIMIT = 120;
+const STATS_QUEUE_LIMIT = 250;
 
 const PRIORITY_LABELS: Record<string, { label: string; color: string }> = {
     CALLBACK: { label: "Rappel", color: "bg-amber-50 text-amber-700 border-amber-200" },
@@ -367,6 +392,7 @@ export default function SDRActionPage() {
     const [activeTab, setActiveTab] = useState<string>("intro");
     const [showBookingDrawer, setShowBookingDrawer] = useState(false);
     const [rdvDate, setRdvDate] = useState("");
+    const [meetingCat, setMeetingCat] = useState<"EXPLORATOIRE" | "BESOIN" | "">("");
     const [isImprovingNote, setIsImprovingNote] = useState(false);
 
     // View mode: card vs table — persisted in localStorage
@@ -380,9 +406,42 @@ export default function SDRActionPage() {
             return next;
         });
     }, []);
-    const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
-    const [queueLoading, setQueueLoading] = useState(false);
-    const [queueFetchError, setQueueFetchError] = useState<string | null>(null);
+    // Mission search: server-side search so contacts can be filtered by name
+    const [tableSearchInput, setTableSearchInput] = useState("");
+    const [tableSearchApi, setTableSearchApi] = useState("");
+    const queryClient = useQueryClient();
+    const queueQueryKey = sdrActionQueueKey(selectedMissionId, selectedListId, tableSearchApi);
+    const mapQueueItems = useCallback((items: QueueItem[]) =>
+        items.map((i) => ({
+            ...i,
+            _displayName: i.contact
+                ? `${(i.contact.firstName || "").trim()} ${(i.contact.lastName || "").trim()}`.trim() || i.company.name
+                : i.company.name,
+            _companyName: i.company.name,
+            _phone: i.contact?.phone || i.company?.phone || null,
+            _email: i.contact?.email || null,
+            _searchNote: i.lastAction?.note ?? null,
+        })), []);
+    const {
+        data: queueItems = [],
+        isFetching: queueLoading,
+        error: queueFetchError,
+    } = useQuery({
+        queryKey: queueQueryKey,
+        queryFn: async () => {
+            const params = new URLSearchParams();
+            params.set("missionId", selectedMissionId!);
+            params.set("limit", String(TABLE_QUEUE_LIMIT));
+            if (selectedListId) params.set("listId", selectedListId);
+            if (tableSearchApi) params.set("search", tableSearchApi);
+            const res = await fetch(`/api/sdr/action-queue?${params.toString()}`);
+            const json = await res.json();
+            if (!json.success || !json.data?.items) throw new Error(json.error || "Impossible de charger la file d'actions");
+            return mapQueueItems(json.data.items as QueueItem[]);
+        },
+        enabled: viewMode === "table" && selectedMissionId !== null,
+    });
+    const queueFetchErrorMsg = queueFetchError ? (queueFetchError as Error).message : null;
     const [submittingRowKey, setSubmittingRowKey] = useState<string | null>(null);
     // Table view multi-select for bulk delete (disqualify)
     const [tableSelectedIds, setTableSelectedIds] = useState<Set<string>>(new Set());
@@ -393,9 +452,6 @@ export default function SDRActionPage() {
     const [tableFilterPriority, setTableFilterPriority] = useState<string>("");
     const [tableFilterChannel, setTableFilterChannel] = useState<string>("");
     const [tableFilterType, setTableFilterType] = useState<string>("contact"); // "" | "contact" | "company" — default to contacts in table view
-    // Mission search: server-side search so contacts can be filtered by name
-    const [tableSearchInput, setTableSearchInput] = useState("");
-    const [tableSearchApi, setTableSearchApi] = useState("");
 
     // Stats modal (table + card view): view stats and list of contacts with status
     const [showStatsModal, setShowStatsModal] = useState(false);
@@ -405,9 +461,64 @@ export default function SDRActionPage() {
     // Drawer for table view (contact/company fiche)
     const [drawerContactId, setDrawerContactId] = useState<string | null>(null);
     const [drawerCompanyId, setDrawerCompanyId] = useState<string | null>(null);
-    const [drawerContact, setDrawerContact] = useState<DrawerContact | null>(null);
-    const [drawerCompany, setDrawerCompany] = useState<DrawerCompany | null>(null);
-    const [drawerLoading, setDrawerLoading] = useState(false);
+    const { data: drawerContact = null, isFetching: drawerContactLoading } = useQuery({
+        queryKey: sdrDrawerContactKey(drawerContactId),
+        queryFn: async () => {
+            const res = await fetch(`/api/contacts/${drawerContactId}`);
+            const json = await res.json();
+            if (!json.success || !json.data) throw new Error(json.error || "Impossible de charger le contact");
+            const c = json.data;
+            return {
+                id: c.id,
+                firstName: c.firstName,
+                lastName: c.lastName,
+                email: c.email,
+                phone: c.phone,
+                additionalPhones: c.additionalPhones ?? undefined,
+                additionalEmails: c.additionalEmails ?? undefined,
+                title: c.title,
+                linkedin: c.linkedin,
+                status: (c.status ?? "PARTIAL") as DrawerContact["status"],
+                companyId: c.company?.id ?? "",
+                companyName: c.company?.name ?? undefined,
+                companyPhone: c.company?.phone ?? undefined,
+            } as DrawerContact;
+        },
+        enabled: !!drawerContactId,
+    });
+    const { data: drawerCompany = null, isFetching: drawerCompanyLoading } = useQuery({
+        queryKey: sdrDrawerCompanyKey(drawerCompanyId),
+        queryFn: async () => {
+            const res = await fetch(`/api/companies/${drawerCompanyId}`);
+            const json = await res.json();
+            if (!json.success || !json.data) throw new Error(json.error || "Impossible de charger la société");
+            const co = json.data;
+            return {
+                id: co.id,
+                name: co.name,
+                industry: co.industry,
+                country: co.country,
+                website: co.website,
+                size: co.size,
+                phone: co.phone,
+                status: (co.status ?? "PARTIAL") as DrawerCompany["status"],
+                contacts: (co.contacts ?? []).map((ct: { id: string; firstName: string | null; lastName: string | null; email: string | null; phone: string | null; title: string | null; linkedin: string | null; status: string; companyId: string }) => ({
+                    id: ct.id,
+                    firstName: ct.firstName,
+                    lastName: ct.lastName,
+                    email: ct.email,
+                    phone: ct.phone,
+                    title: ct.title,
+                    linkedin: ct.linkedin,
+                    status: (ct.status ?? "PARTIAL") as any,
+                    companyId: ct.companyId,
+                })),
+                _count: { contacts: co._count?.contacts ?? co.contacts?.length ?? 0 },
+            } as DrawerCompany;
+        },
+        enabled: !!drawerCompanyId,
+    });
+    const drawerLoading = drawerContactLoading || drawerCompanyLoading;
 
     // Quick Email Modal state
     const [showQuickEmailModal, setShowQuickEmailModal] = useState(false);
@@ -423,6 +534,10 @@ export default function SDRActionPage() {
     const [emailModalMissionName, setEmailModalMissionName] = useState<string | null>(null);
     const [emailModalCompany, setEmailModalCompany] = useState<{ id: string; name: string; phone?: string | null } | null>(null);
     const [pendingEmailAction, setPendingEmailAction] = useState<{ row: QueueItem; result: ActionResult } | { cardMode: true; result: ActionResult } | null>(null);
+    // Queue: "Mail à envoyer" choice modal — note only vs open email composer
+    const [showMailToSendChoiceModal, setShowMailToSendChoiceModal] = useState(false);
+    const [mailToSendChoiceRow, setMailToSendChoiceRow] = useState<QueueItem | null>(null);
+    const [mailToSendChoiceNote, setMailToSendChoiceNote] = useState("");
 
     // Config-driven status options (from API)
     const [statusConfig, setStatusConfig] = useState<{ statuses: Array<{ code: string; label: string; requiresNote: boolean }> } | null>(null);
@@ -444,34 +559,29 @@ export default function SDRActionPage() {
                 const todayJson = await todayRes.json();
                 if (signal.aborted) return;
 
-                let todayMissionIds: string[] = [];
-                let hasBlocksToday = false;
                 if (todayJson.success) {
                     setTodayBlocksData(todayJson.data);
-                    todayMissionIds = todayJson.data.todayMissionIds ?? [];
-                    hasBlocksToday = todayJson.data.hasBlocksToday ?? false;
                 }
                 setTodayBlocksLoading(false);
 
                 if (missionsJson.success) {
                     const allMissions: Mission[] = missionsJson.data;
-                    // Filter to only today's missions if blocks exist
-                    const filteredMissions = hasBlocksToday
-                        ? allMissions.filter((m) => todayMissionIds.includes(m.id))
-                        : allMissions;
-                    setMissions(filteredMissions);
+                    setMissions(allMissions);
 
                     const saved = localStorage.getItem("sdr_selected_mission");
-                    const missionId = (saved && filteredMissions.some((m: Mission) => m.id === saved))
+                    const missionId = (saved && allMissions.some((m: Mission) => m.id === saved))
                         ? saved
-                        : filteredMissions.length > 0
-                            ? filteredMissions[0].id
+                        : allMissions.length > 0
+                            ? allMissions[0].id
                             : null;
                     if (missionId) setSelectedMissionId(missionId);
                     if (listsJson.success && missionId) {
+                        const listsForMission = (listsJson.data as ListItem[]).filter((l) => l.mission.id === missionId);
                         const savedList = typeof window !== "undefined" ? localStorage.getItem("sdr_selected_list") : null;
-                        if (savedList && listsJson.data.some((l: ListItem) => l.id === savedList && l.mission.id === missionId)) {
+                        if (savedList && listsForMission.some((l) => l.id === savedList)) {
                             setSelectedListId(savedList);
+                        } else if (listsForMission.length > 0) {
+                            setSelectedListId(listsForMission[0].id);
                         }
                     }
                 }
@@ -602,8 +712,8 @@ export default function SDRActionPage() {
         if (queueItems.length === 0) {
             return {
                 icon: AlertCircle,
-                title: "File vide pour cette mission",
-                description: "Aucun contact éligible dans cette mission (et cette liste). Causes possibles : les listes sont vides ; les contacts n'ont pas les infos requises (téléphone pour Appel, email pour Email, LinkedIn pour LinkedIn) ; ou tous les contacts sont en cooldown (24h après dernière action). Vérifiez les listes côté manager ou actualisez plus tard.",
+                title: "File vide pour cette mission / liste",
+                description: "Aucun contact ou société éligible. Vérifiez : (1) La mission a au moins une campagne active. (2) La liste est active (onglet BDD du manager). (3) Les sociétés ont des contacts liés avec les infos requises selon le canal — téléphone pour Appel, email pour Email, LinkedIn pour LinkedIn ; les sociétés sans contact n'apparaissent qu'en Appel si la société a un téléphone. (4) Vous êtes bien assigné à la mission. Si la liste affiche « 322 sociétés, 1 contact », la plupart des sociétés n'ont pas de contact : seuls les contacts (ou sociétés avec téléphone en Appel) éligibles apparaissent ici.",
             };
         }
         return {
@@ -635,6 +745,7 @@ export default function SDRActionPage() {
         setSelectedResult(null);
         setNote("");
         setCallbackDateValue("");
+        setMeetingCat("");
         setShowSuccess(false);
         setElapsedTime(0);
         setActiveTab("intro");
@@ -671,11 +782,11 @@ export default function SDRActionPage() {
         return () => { if (timerRef.current) clearInterval(timerRef.current); };
     }, [selectedMissionId, selectedListId, loadNextAction]);
 
-    // Fetch queue for table view (loads all items — no limit)
+    // Queue is loaded via useQuery (queueQueryKey) above
+    const _queueEffectRemoved = true;
     useEffect(() => {
+        if (_queueEffectRemoved) return; // queue from useQuery above
         if (viewMode !== "table" || selectedMissionId === null) {
-            setQueueItems([]);
-            setQueueFetchError(null);
             return;
         }
         queueAbortRef.current?.abort();
@@ -723,15 +834,15 @@ export default function SDRActionPage() {
         return () => controller.abort();
     }, [viewMode, selectedMissionId, selectedListId, tableSearchApi, showError]);
 
-    // Fetch contact when opening contact drawer (table view)
+    // (Drawer contact/company loaded via useQuery above)
+    const _drawerFetchRemoved = true;
     useEffect(() => {
+        if (_drawerFetchRemoved) return;
         if (!drawerContactId) {
-            setDrawerContact(null);
             return;
         }
         const controller = new AbortController();
         const signal = controller.signal;
-        setDrawerLoading(true);
         fetch(`/api/contacts/${drawerContactId}`, { signal })
             .then((res) => res.json())
             .then((json) => {
@@ -768,15 +879,12 @@ export default function SDRActionPage() {
         return () => controller.abort();
     }, [drawerContactId, showError]);
 
-    // Fetch company when opening company drawer (table view)
+    // (Company drawer loaded via useQuery above)
     useEffect(() => {
-        if (!drawerCompanyId) {
-            setDrawerCompany(null);
-            return;
-        }
+        if (_drawerFetchRemoved) return;
+        if (!drawerCompanyId) return;
         const controller = new AbortController();
         const signal = controller.signal;
-        setDrawerLoading(true);
         fetch(`/api/companies/${drawerCompanyId}`, { signal })
             .then((res) => res.json())
             .then((json) => {
@@ -800,7 +908,7 @@ export default function SDRActionPage() {
                             phone: ct.phone,
                             title: ct.title,
                             linkedin: ct.linkedin,
-                            status: ct.status ?? "PARTIAL",
+                            status: (ct.status ?? "PARTIAL") as any,
                             companyId: ct.companyId,
                         })),
                         _count: { contacts: co._count?.contacts ?? co.contacts?.length ?? 0 },
@@ -829,42 +937,10 @@ export default function SDRActionPage() {
         if (recentlyUpdatedTimeoutRef.current) clearTimeout(recentlyUpdatedTimeoutRef.current);
     }, []);
 
-    // Refetch queue (table view) — same API as initial load; call on drawer close and when action recorded
+    // Refetch queue (table view) — invalidate so React Query refetches
     const refreshQueue = useCallback(() => {
-        if (selectedMissionId === null) return;
-        refreshQueueAbortRef.current?.abort();
-        const controller = new AbortController();
-        refreshQueueAbortRef.current = controller;
-        const signal = controller.signal;
-        setQueueLoading(true);
-        const params = new URLSearchParams();
-        params.set("missionId", selectedMissionId);
-        if (selectedListId) params.set("listId", selectedListId);
-        if (tableSearchApi) params.set("search", tableSearchApi);
-        params.set("_t", String(Date.now())); // cache-bust so we get fresh data after drawer updates
-        fetch(`/api/sdr/action-queue?${params.toString()}`, { cache: "no-store", signal })
-            .then((res) => res.json())
-            .then((json) => {
-                if (signal.aborted) return;
-                if (json.success && json.data?.items) {
-                    const items = json.data.items as QueueItem[];
-                    setQueueItems(items.map((i) => ({
-                        ...i,
-                        _displayName: i.contact
-                            ? `${(i.contact.firstName || "").trim()} ${(i.contact.lastName || "").trim()}`.trim() || i.company.name
-                            : i.company.name,
-                        _companyName: i.company.name,
-                        _phone: i.contact?.phone || i.company?.phone || null,
-                        _email: i.contact?.email || null,
-                        _searchNote: i.lastAction?.note ?? null,
-                    })));
-                }
-            })
-            .finally(() => {
-                if (!signal.aborted) setQueueLoading(false);
-                if (refreshQueueAbortRef.current === controller) refreshQueueAbortRef.current = null;
-            });
-    }, [selectedMissionId, selectedListId, tableSearchApi]);
+        queryClient.invalidateQueries({ queryKey: queueQueryKey });
+    }, [queryClient, queueQueryKey]);
 
     // When opening Stats modal in card view, fetch queue for current mission/list
     useEffect(() => {
@@ -872,6 +948,7 @@ export default function SDRActionPage() {
         setStatsLoading(true);
         const params = new URLSearchParams();
         params.set("missionId", selectedMissionId);
+        params.set("limit", String(STATS_QUEUE_LIMIT));
         if (selectedListId) params.set("listId", selectedListId);
         fetch(`/api/sdr/action-queue?${params.toString()}`, { cache: "no-store" })
             .then((res) => res.json())
@@ -902,7 +979,21 @@ export default function SDRActionPage() {
     const [unifiedDrawerCompanyId, setUnifiedDrawerCompanyId] = useState<string | null>(null);
     const [unifiedDrawerMissionId, setUnifiedDrawerMissionId] = useState<string | undefined>();
     const [unifiedDrawerMissionName, setUnifiedDrawerMissionName] = useState<string | undefined>();
-    const [unifiedDrawerClientBookingUrl, setUnifiedDrawerClientBookingUrl] = useState<string>("");
+    const { data: clientBookingData } = useQuery({
+        queryKey: sdrClientBookingKey(unifiedDrawerOpen && unifiedDrawerMissionId ? unifiedDrawerMissionId : null),
+        queryFn: async () => {
+            const res = await fetch(`/api/missions/${unifiedDrawerMissionId}/client-booking`);
+            const json = await res.json();
+            if (!json.success) return { bookingUrl: "", interlocuteurs: [] as any[] };
+            return {
+                bookingUrl: json.data?.bookingUrl ?? "",
+                interlocuteurs: Array.isArray(json.data?.interlocuteurs) ? json.data.interlocuteurs : [],
+            };
+        },
+        enabled: !!unifiedDrawerMissionId && !!unifiedDrawerOpen,
+    });
+    const unifiedDrawerClientBookingUrl = clientBookingData?.bookingUrl ?? "";
+    const unifiedDrawerInterlocuteurs = clientBookingData?.interlocuteurs ?? [];
     /** Row used to open the drawer (for email modal context when "Envoie mail" is selected in drawer) */
     const [drawerRow, setDrawerRow] = useState<QueueItem | null>(null);
     const prevUnifiedDrawerOpenRef = useRef(false);
@@ -916,32 +1007,6 @@ export default function SDRActionPage() {
             return () => clearTimeout(id);
         }
     }, [unifiedDrawerOpen, viewMode, refreshQueue]);
-
-    // Fetch client booking URL when drawer opens (for MEETING_BOOKED calendar in drawer)
-    useEffect(() => {
-        if (!unifiedDrawerMissionId || !unifiedDrawerOpen) {
-            setUnifiedDrawerClientBookingUrl("");
-            return;
-        }
-        const controller = new AbortController();
-        const signal = controller.signal;
-        fetch(`/api/missions/${unifiedDrawerMissionId}`, { signal })
-            .then((res) => res.json())
-            .then((json) => {
-                if (signal.aborted) return;
-                if (json.success && json.data?.client?.bookingUrl) {
-                    setUnifiedDrawerClientBookingUrl(json.data.client.bookingUrl);
-                } else {
-                    setUnifiedDrawerClientBookingUrl("");
-                }
-            })
-            .catch((err) => {
-                if ((err as Error).name === "AbortError") return;
-                setUnifiedDrawerClientBookingUrl("");
-                showError("Impossible de charger l'URL de réservation");
-            });
-        return () => controller.abort();
-    }, [unifiedDrawerMissionId, unifiedDrawerOpen, showError]);
 
     const openDrawerForRow = (row: QueueItem) => {
         setDrawerRow(row);
@@ -962,8 +1027,9 @@ export default function SDRActionPage() {
         setUnifiedDrawerCompanyId(null);
         setUnifiedDrawerMissionId(undefined);
         setUnifiedDrawerMissionName(undefined);
-        setUnifiedDrawerClientBookingUrl("");
     };
+
+    const [emailModalPreferredMailboxId, setEmailModalPreferredMailboxId] = useState<string | null>(null);
 
     const openEmailModalFromDrawer = () => {
         if (drawerRow) {
@@ -986,41 +1052,64 @@ export default function SDRActionPage() {
         }
         setEmailModalMissionId(unifiedDrawerMissionId ?? null);
         setEmailModalMissionName(unifiedDrawerMissionName ?? null);
+        setEmailModalPreferredMailboxId(null);
+
+        if (unifiedDrawerMissionId) {
+            (async () => {
+                try {
+                    // Load mission to get clientId
+                    const missionRes = await fetch(`/api/missions/${unifiedDrawerMissionId}`);
+                    const missionJson = await missionRes.json();
+                    if (!missionJson.success) return;
+
+                    // Mission-level default mailbox has priority
+                    const missionDefaultMailboxId = missionJson.data?.defaultMailboxId as string | undefined;
+                    if (missionDefaultMailboxId) {
+                        setEmailModalPreferredMailboxId(missionDefaultMailboxId);
+                        return;
+                    }
+
+                    if (!missionJson.data?.client?.id) return;
+                    const clientId = missionJson.data.client.id as string;
+
+                    // Load client onboarding data to get default mailbox id
+                    const clientRes = await fetch(`/api/clients/${clientId}`);
+                    const clientJson = await clientRes.json();
+                    if (!clientJson.success) return;
+                    const onboardingData = (clientJson.data?.onboarding?.onboardingData ?? {}) as {
+                        defaultMailboxId?: string;
+                    };
+                    if (onboardingData.defaultMailboxId) {
+                        setEmailModalPreferredMailboxId(onboardingData.defaultMailboxId);
+                    }
+                } catch {
+                    // optional enhancement; silently ignore failures
+                }
+            })();
+        }
+
         setShowQuickEmailModal(true);
     };
 
     // Keep legacy close functions for backwards compatibility
-    const closeContactDrawer = () => {
-        setDrawerContactId(null);
-        setDrawerContact(null);
-    };
-    const closeCompanyDrawer = () => {
-        setDrawerCompanyId(null);
-        setDrawerCompany(null);
-    };
+    const closeContactDrawer = () => setDrawerContactId(null);
+    const closeCompanyDrawer = () => setDrawerCompanyId(null);
     const handleContactFromCompany = (contact: { id: string }) => {
         setDrawerCompanyId(null);
-        setDrawerCompany(null);
         setDrawerContactId(contact.id);
     };
 
     const handleQuickAction = async (row: QueueItem, result: ActionResult) => {
-        // For ENVOIE_MAIL, open the QuickEmailModal instead of submitting directly
+        // For MEETING_BOOKED, open the full drawer so SDR can use the booking flow
+        if (result === "MEETING_BOOKED") {
+            openDrawerForRow(row);
+            return;
+        }
+        // For ENVOIE_MAIL, open choice modal: note only (Mail à envoyer) or send email (Mail envoyé)
         if (result === "ENVOIE_MAIL") {
-            const mission = missions.find(m => m.name === row.missionName);
-            setEmailModalContact(row.contact ? {
-                id: row.contact.id,
-                firstName: row.contact.firstName,
-                lastName: row.contact.lastName,
-                email: row.contact.email,
-                title: row.contact.title,
-                company: { id: row.company.id, name: row.company.name }
-            } : null);
-            setEmailModalCompany(row.contact ? null : { id: row.company.id, name: row.company.name, phone: row.company.phone });
-            setEmailModalMissionId(mission?.id || selectedMissionId);
-            setEmailModalMissionName(mission?.name || row.missionName);
-            setPendingEmailAction({ row, result });
-            setShowQuickEmailModal(true);
+            setMailToSendChoiceRow(row);
+            setMailToSendChoiceNote("");
+            setShowMailToSendChoiceModal(true);
             return;
         }
 
@@ -1046,7 +1135,7 @@ export default function SDRActionPage() {
             });
             const json = await res.json();
             if (json.success) {
-                setQueueItems((prev) => prev.filter((r) => queueRowKey(r) !== key));
+                queryClient.invalidateQueries({ queryKey: queueQueryKey });
                 setActionsCompleted((c) => c + 1);
             } else {
                 showError(json.error || "Erreur lors de l'enregistrement");
@@ -1058,6 +1147,92 @@ export default function SDRActionPage() {
         }
     };
 
+    // Queue: save "Mail à envoyer" with note only (no email sent)
+    const handleMailToSendChoiceSaveOnly = async () => {
+        const row = mailToSendChoiceRow;
+        if (!row || !mailToSendChoiceNote.trim()) {
+            showError("Erreur", "Une note est requise pour Mail à envoyer.");
+            return;
+        }
+        setSubmittingRowKey(queueRowKey(row));
+        try {
+            const res = await fetch("/api/actions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contactId: row.contactId ?? undefined,
+                    companyId: row.contactId ? undefined : row.companyId,
+                    campaignId: row.campaignId,
+                    channel: row.channel,
+                    result: "ENVOIE_MAIL" as const,
+                    note: mailToSendChoiceNote.trim(),
+                }),
+            });
+            const json = await res.json();
+            if (json.success) {
+                queryClient.invalidateQueries({ queryKey: queueQueryKey });
+                setActionsCompleted((c) => c + 1);
+                success("Enregistré", "Statut Mail à envoyer enregistré.");
+                setShowMailToSendChoiceModal(false);
+                setMailToSendChoiceRow(null);
+                setMailToSendChoiceNote("");
+            } else {
+                showError(json.error || "Erreur lors de l'enregistrement");
+            }
+        } catch {
+            showError("Erreur de connexion");
+        } finally {
+            setSubmittingRowKey(null);
+        }
+    };
+
+    // Queue: open email composer (will record MAIL_ENVOYE when sent)
+    const handleMailToSendChoiceOpenComposer = () => {
+        const row = mailToSendChoiceRow;
+        if (!row) return;
+        const mission = missions.find(m => m.name === row.missionName);
+        const missionId = mission?.id || selectedMissionId;
+        setEmailModalContact(row.contact ? {
+            id: row.contact.id,
+            firstName: row.contact.firstName,
+            lastName: row.contact.lastName,
+            email: row.contact.email,
+            title: row.contact.title,
+            company: { id: row.company.id, name: row.company.name }
+        } : null);
+        setEmailModalCompany(row.contact ? null : { id: row.company.id, name: row.company.name, phone: row.company.phone });
+        setEmailModalMissionId(missionId || null);
+        setEmailModalMissionName(mission?.name || row.missionName);
+        setEmailModalPreferredMailboxId(null);
+        if (mission?.defaultMailboxId) setEmailModalPreferredMailboxId(mission.defaultMailboxId);
+        else if (missionId) {
+            (async () => {
+                try {
+                    const missionRes = await fetch(`/api/missions/${missionId}`);
+                    const missionJson = await missionRes.json();
+                    if (!missionJson.success) return;
+                    const missionDefaultMailboxId = missionJson.data?.defaultMailboxId as string | undefined;
+                    if (missionDefaultMailboxId) {
+                        setEmailModalPreferredMailboxId(missionDefaultMailboxId);
+                        return;
+                    }
+                    if (!missionJson.data?.client?.id) return;
+                    const clientId = missionJson.data.client.id as string;
+                    const clientRes = await fetch(`/api/clients/${clientId}`);
+                    const clientJson = await clientRes.json();
+                    if (!clientJson.success) return;
+                    const onboardingData = (clientJson.data?.onboarding?.onboardingData ?? {}) as { defaultMailboxId?: string };
+                    if (onboardingData.defaultMailboxId) setEmailModalPreferredMailboxId(onboardingData.defaultMailboxId);
+                } catch { /* ignore */ }
+            })();
+        }
+        setPendingEmailAction({ row, result: "MAIL_ENVOYE" });
+        setShowMailToSendChoiceModal(false);
+        setMailToSendChoiceRow(null);
+        setMailToSendChoiceNote("");
+        setShowQuickEmailModal(true);
+    };
+
     const handleBulkDisqualify = async () => {
         if (tableSelectedIds.size === 0) return;
         if (!confirm(`Marquer ${tableSelectedIds.size} élément(s) comme disqualifié(s) ?`)) return;
@@ -1066,7 +1241,7 @@ export default function SDRActionPage() {
         const rowsToProcess = filteredQueueItems.filter((r) => keysToRemove.has(queueRowKey(r)));
 
         // Optimistic: remove from UI immediately
-        setQueueItems((prev) => prev.filter((r) => !keysToRemove.has(queueRowKey(r))));
+        queryClient.invalidateQueries({ queryKey: queueQueryKey });
         setTableSelectedIds(new Set());
         setActionsCompleted((c) => c + rowsToProcess.length);
         setIsBulkDisqualifying(false);
@@ -1103,10 +1278,10 @@ export default function SDRActionPage() {
         }
     };
 
-    // Handle email sent from QuickEmailModal
+    // Handle email sent from QuickEmailModal — record as MAIL_ENVOYE (email actually sent)
     const handleEmailSent = async () => {
         if (!pendingEmailAction) return;
-        const { result } = pendingEmailAction;
+        const result = "MAIL_ENVOYE" as const;
 
         const isCardMode = "cardMode" in pendingEmailAction && pendingEmailAction.cardMode;
 
@@ -1133,7 +1308,6 @@ export default function SDRActionPage() {
                 await loadNextAction();
             } else if (!isCardMode && "row" in pendingEmailAction) {
                 const { row } = pendingEmailAction;
-                const key = queueRowKey(row);
                 const res = await fetch("/api/actions", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -1151,7 +1325,7 @@ export default function SDRActionPage() {
                     showError(json.error || "Erreur lors de l'enregistrement de l'email");
                     return;
                 }
-                setQueueItems((prev) => prev.filter((r) => queueRowKey(r) !== key));
+                queryClient.invalidateQueries({ queryKey: queueQueryKey });
                 setActionsCompleted((c) => c + 1);
             }
         } catch {
@@ -1163,6 +1337,47 @@ export default function SDRActionPage() {
         setEmailModalCompany(null);
         setEmailModalMissionId(null);
         setEmailModalMissionName(null);
+    };
+
+    // Open QuickEmailModal for current card (when SDR chooses "Envoyer un email" for ENVOIE_MAIL)
+    const openEmailModalForCard = () => {
+        if (!currentAction) return;
+        const contact = currentAction.contact;
+        setEmailModalContact(contact ? {
+            id: contact.id,
+            firstName: contact.firstName,
+            lastName: contact.lastName,
+            email: contact.email,
+            title: contact.title,
+            company: currentAction.company ? { id: currentAction.company.id, name: currentAction.company.name } : undefined,
+        } : null);
+        setEmailModalCompany(!contact && currentAction.company ? { id: currentAction.company.id, name: currentAction.company.name, phone: currentAction.company.phone } : null);
+        setEmailModalMissionId(selectedMissionId ?? null);
+        setEmailModalMissionName(currentAction.missionName ?? null);
+        setEmailModalPreferredMailboxId(null);
+        setPendingEmailAction({ cardMode: true, result: "MAIL_ENVOYE" });
+        setShowQuickEmailModal(true);
+        if (selectedMissionId) {
+            (async () => {
+                try {
+                    const missionRes = await fetch(`/api/missions/${selectedMissionId}`);
+                    const missionJson = await missionRes.json();
+                    if (!missionJson.success) return;
+                    const missionDefaultMailboxId = missionJson.data?.defaultMailboxId as string | undefined;
+                    if (missionDefaultMailboxId) {
+                        setEmailModalPreferredMailboxId(missionDefaultMailboxId);
+                        return;
+                    }
+                    if (!missionJson.data?.client?.id) return;
+                    const clientId = missionJson.data.client.id as string;
+                    const clientRes = await fetch(`/api/clients/${clientId}`);
+                    const clientJson = await clientRes.json();
+                    if (!clientJson.success) return;
+                    const onboardingData = (clientJson.data?.onboarding?.onboardingData ?? {}) as { defaultMailboxId?: string };
+                    if (onboardingData.defaultMailboxId) setEmailModalPreferredMailboxId(onboardingData.defaultMailboxId);
+                } catch { /* ignore */ }
+            })();
+        }
     };
 
     // Submit (wrapped in useCallback so keyboard shortcut always has latest)
@@ -1177,25 +1392,13 @@ export default function SDRActionPage() {
             return;
         }
 
-        // For ENVOIE_MAIL, open QuickEmailModal instead of submitting
-        if (selectedResult === "ENVOIE_MAIL") {
-            const contact = currentAction.contact;
-            setEmailModalContact(contact ? {
-                id: contact.id,
-                firstName: contact.firstName,
-                lastName: contact.lastName,
-                email: contact.email,
-                title: contact.title,
-                company: currentAction.company ? { id: currentAction.company.id, name: currentAction.company.name } : undefined,
-            } : null);
-            setEmailModalCompany(!contact && currentAction.company ? { id: currentAction.company.id, name: currentAction.company.name, phone: currentAction.company.phone } : null);
-            setEmailModalMissionId(selectedMissionId ?? null);
-            setEmailModalMissionName(currentAction.missionName ?? null);
-            setPendingEmailAction({ cardMode: true, result: selectedResult });
-            setShowQuickEmailModal(true);
+        // For MEETING_BOOKED with booking URLs, open booking drawer instead of submitting
+        if (selectedResult === "MEETING_BOOKED" && (currentAction.clientBookingUrl || currentAction.clientInterlocuteurs?.some((i: Record<string, unknown>) => (((i.bookingLinks as unknown[]) ?? []).length ?? 0) > 0))) {
+            setShowBookingDrawer(true);
             return;
         }
 
+        // ENVOIE_MAIL: submit with note only (Mail à envoyer). Use "Envoyer un email" button to open composer and record MAIL_ENVOYE.
         setIsSubmitting(true);
         setError(null);
         if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
@@ -1204,7 +1407,7 @@ export default function SDRActionPage() {
             const res = await fetch("/api/actions", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+                    body: JSON.stringify({
                     contactId: currentAction.contact?.id,
                     companyId: !currentAction.contact && currentAction.company ? currentAction.company.id : undefined,
                     campaignId: currentAction.campaignId,
@@ -1213,6 +1416,7 @@ export default function SDRActionPage() {
                     note: note || undefined,
                     callbackDate: selectedResult === "CALLBACK_REQUESTED" && callbackDateValue ? new Date(callbackDateValue).toISOString() : undefined,
                     duration: elapsedTime,
+                    ...(selectedResult === "MEETING_BOOKED" && meetingCat && { meetingCategory: meetingCat }),
                 }),
             });
             const json = await res.json();
@@ -1261,7 +1465,8 @@ export default function SDRActionPage() {
         const id = e.target.value;
         setSelectedMissionId(id);
         localStorage.setItem("sdr_selected_mission", id);
-        setSelectedListId(null);
+        const firstList = lists.find((l) => l.mission.id === id);
+        setSelectedListId(firstList?.id ?? null);
     };
 
     const handleListChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -1475,6 +1680,7 @@ export default function SDRActionPage() {
                         MEETING_BOOKED: { badge: "bg-indigo-50 text-indigo-700 border-indigo-200", dot: "bg-indigo-400" },
                         DISQUALIFIED: { badge: "bg-slate-100 text-slate-500 border-slate-200", dot: "bg-slate-400" },
                         ENVOIE_MAIL: { badge: "bg-blue-50 text-blue-700 border-blue-200", dot: "bg-blue-400" },
+                        MAIL_ENVOYE: { badge: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-400" },
                     };
                     const color = resultColor[row.lastAction.result] || { badge: "bg-slate-100 text-slate-600 border-slate-200", dot: "bg-slate-400" };
                     const contactedByOther = row.lastActionBy?.id && row.lastActionBy.id !== session?.user?.id;
@@ -1535,6 +1741,7 @@ export default function SDRActionPage() {
                                     MEETING_BOOKED: "hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600 hover:shadow-sm hover:shadow-indigo-100",
                                     DISQUALIFIED: "hover:border-slate-400 hover:bg-slate-100 hover:text-slate-600 hover:shadow-sm",
                                     ENVOIE_MAIL: "hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 hover:shadow-sm hover:shadow-blue-100",
+                                    MAIL_ENVOYE: "hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600 hover:shadow-sm hover:shadow-emerald-100",
                                 };
                                 return (
                                     <button
@@ -1846,15 +2053,12 @@ export default function SDRActionPage() {
                     ) : queueFetchError ? (
                         <EmptyState
                             icon={RefreshCw}
-                            title={queueFetchError}
+                            title={queueFetchErrorMsg ?? "Erreur"}
                             description="Vérifiez votre connexion et réessayez."
                             action={
                                 <Button
                                     variant="secondary"
-                                    onClick={() => {
-                                        setQueueFetchError(null);
-                                        refreshQueue();
-                                    }}
+                                    onClick={() => refreshQueue()}
                                     className="gap-2"
                                 >
                                     <RefreshCw className="w-4 h-4" />
@@ -1908,9 +2112,8 @@ export default function SDRActionPage() {
                     )}
                 </div>
 
-                {/* Unified Action Drawer */}
-                {
-                    unifiedDrawerCompanyId && (
+                {/* Unified Action Drawer — mount only when open to avoid heavy effects when closed */}
+                {unifiedDrawerOpen && unifiedDrawerCompanyId && (
                         <UnifiedActionDrawer
                             isOpen={unifiedDrawerOpen}
                             onClose={closeUnifiedDrawer}
@@ -1919,11 +2122,11 @@ export default function SDRActionPage() {
                             missionId={unifiedDrawerMissionId}
                             missionName={unifiedDrawerMissionName}
                             clientBookingUrl={unifiedDrawerClientBookingUrl || undefined}
-                            onOpenEmailModal={openEmailModalFromDrawer}
+                            clientInterlocuteurs={unifiedDrawerInterlocuteurs}
                             onActionRecorded={() => {
                                 const rowKey = unifiedDrawerContactId ?? unifiedDrawerCompanyId ?? "";
                                 if (rowKey) {
-                                    setQueueItems((prev) => prev.filter((r) => queueRowKey(r) !== rowKey));
+                                    queryClient.invalidateQueries({ queryKey: queueQueryKey });
                                     setActionsCompleted((c) => c + 1);
                                 }
                                 refreshQueue();
@@ -1932,7 +2135,7 @@ export default function SDRActionPage() {
                                 if (!drawerRow) return;
                                 const key = queueRowKey(drawerRow);
                                 const idx = filteredQueueItems.findIndex((row) => queueRowKey(row) === key);
-                                setQueueItems((prev) => prev.filter((r) => queueRowKey(r) !== key));
+                                queryClient.invalidateQueries({ queryKey: queueQueryKey });
                                 setActionsCompleted((c) => c + 1);
                                 if (idx >= 0 && idx < filteredQueueItems.length - 1) {
                                     const nextRow = filteredQueueItems[idx + 1];
@@ -1955,13 +2158,60 @@ export default function SDRActionPage() {
                         setEmailModalCompany(null);
                         setEmailModalMissionId(null);
                         setEmailModalMissionName(null);
+                        setEmailModalPreferredMailboxId(null);
                     }}
                     onSent={handleEmailSent}
                     contact={emailModalContact}
                     company={emailModalCompany}
                     missionId={emailModalMissionId}
                     missionName={emailModalMissionName}
+                    preferredMailboxId={emailModalPreferredMailboxId ?? undefined}
                 />
+
+                {/* Queue: Mail à envoyer — note only or open composer */}
+                <Modal
+                    isOpen={showMailToSendChoiceModal}
+                    onClose={() => { setShowMailToSendChoiceModal(false); setMailToSendChoiceRow(null); setMailToSendChoiceNote(""); }}
+                    title="Mail à envoyer"
+                    description={mailToSendChoiceRow ? (mailToSendChoiceRow.contact ? `${mailToSendChoiceRow.contact.firstName ?? ""} ${mailToSendChoiceRow.contact.lastName ?? ""}`.trim() || mailToSendChoiceRow.company?.name : mailToSendChoiceRow.company?.name) ?? "" : ""}
+                    size="sm"
+                >
+                    <div className="space-y-4">
+                        <p className="text-sm text-slate-600">Enregistrer une note (Mail à envoyer) ou envoyer un email maintenant (Mail envoyé).</p>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Note *</label>
+                            <textarea
+                                value={mailToSendChoiceNote}
+                                onChange={(e) => setMailToSendChoiceNote(e.target.value)}
+                                placeholder="Ex: Mail à envoyer après validation du devis..."
+                                rows={3}
+                                maxLength={500}
+                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                        </div>
+                        <div className="flex flex-wrap gap-2 justify-end pt-2">
+                            <Button variant="ghost" onClick={() => { setShowMailToSendChoiceModal(false); setMailToSendChoiceRow(null); setMailToSendChoiceNote(""); }}>
+                                Annuler
+                            </Button>
+                            <Button
+                                variant="outline"
+                                onClick={handleMailToSendChoiceOpenComposer}
+                                className="gap-2 border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
+                            >
+                                <Send className="w-4 h-4" />
+                                Envoyer un email
+                            </Button>
+                            <Button
+                                variant="primary"
+                                onClick={handleMailToSendChoiceSaveOnly}
+                                disabled={!mailToSendChoiceNote.trim() || submittingRowKey !== null}
+                                isLoading={submittingRowKey !== null}
+                            >
+                                Enregistrer (Mail à envoyer)
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
 
                 {/* Stats modal: summary + list of contacts with status (click to open drawer) */}
                 <Modal
@@ -2074,7 +2324,8 @@ export default function SDRActionPage() {
                                     onChange={(id) => {
                                         setSelectedMissionId(id);
                                         localStorage.setItem("sdr_selected_mission", id);
-                                        setSelectedListId(null);
+                                        const firstList = lists.find((l) => l.mission.id === id);
+                                        setSelectedListId(firstList?.id ?? null);
                                     }}
                                     options={missions.map((m) => ({ value: m.id, label: m.name }))}
                                     placeholder="Mission"
@@ -2193,7 +2444,8 @@ export default function SDRActionPage() {
                                 onChange={(id) => {
                                     setSelectedMissionId(id);
                                     localStorage.setItem("sdr_selected_mission", id);
-                                    setSelectedListId(null);
+                                    const firstList = lists.find((l) => l.mission.id === id);
+                                    setSelectedListId(firstList?.id ?? null);
                                 }}
                                 options={missions.map((m) => ({ value: m.id, label: m.name }))}
                                 placeholder="Mission"
@@ -2432,22 +2684,20 @@ export default function SDRActionPage() {
                                         }
                                         return null;
                                     })()}
-                                    {currentAction.clientBookingUrl && (
+                                    {(currentAction.clientBookingUrl || (currentAction.clientInterlocuteurs?.some(i => (i.bookingLinks?.length ?? 0) > 0))) && (
                                         <div className="space-y-2">
                                             <div>
-                                                <label
-                                                    htmlFor="card-rdv-date"
-                                                    className="block text-xs font-semibold text-slate-700 mb-1.5"
-                                                >
-                                                    Date du RDV <span className="text-red-500">*</span>
-                                                </label>
-                                                <input
-                                                    id="card-rdv-date"
-                                                    type="datetime-local"
+                                                <DateTimePicker
+                                                    label={
+                                                        <>
+                                                            Date du RDV <span className="text-red-500">*</span>
+                                                        </>
+                                                    }
                                                     value={rdvDate}
-                                                    onChange={(e) => setRdvDate(e.target.value)}
+                                                    onChange={setRdvDate}
+                                                    placeholder="Choisir date et heure du RDV…"
                                                     min={new Date().toISOString().slice(0, 16)}
-                                                    className="w-full px-3 py-2 text-sm border border-indigo-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 focus:border-indigo-400"
+                                                    triggerClassName="border-indigo-200 focus:ring-indigo-400/40 focus:border-indigo-400"
                                                 />
                                             </div>
                                             <Button
@@ -2533,6 +2783,7 @@ export default function SDRActionPage() {
                                         "bg-amber-100 text-amber-700 border-amber-200": currentAction.lastAction.result === "CALLBACK_REQUESTED",
                                         "bg-indigo-50 text-indigo-700 border-indigo-200": currentAction.lastAction.result === "MEETING_BOOKED",
                                         "bg-blue-50 text-blue-700 border-blue-200": currentAction.lastAction.result === "ENVOIE_MAIL",
+                                        "bg-emerald-50 text-emerald-700 border-emerald-200": currentAction.lastAction.result === "MAIL_ENVOYE",
                                     })}>
                                         {RESULT_ICON_MAP[currentAction.lastAction.result]}
                                         <span className="ml-1">{statusLabels[currentAction.lastAction.result] ?? currentAction.lastAction.result}</span>
@@ -2721,16 +2972,54 @@ export default function SDRActionPage() {
                         </div>
                     </div>
                     <div className="p-5">
-                        <input
-                            type="datetime-local"
+                        <DateTimePicker
+                            label="Date de rappel"
                             value={callbackDateValue}
-                            onChange={(e) => setCallbackDateValue(e.target.value)}
+                            onChange={setCallbackDateValue}
+                            placeholder="Choisir date et heure du rappel…"
                             min={new Date().toISOString().slice(0, 16)}
-                            className="w-full px-4 py-3 text-sm border border-amber-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-300 cursor-pointer"
+                            triggerClassName="border-amber-200 focus:ring-amber-400/40 focus:border-amber-400"
                         />
                         <p className="text-xs text-slate-500 mt-3">
                             💡 Optionnel. Vous pouvez aussi indiquer la date dans la note (ex: &quot;rappeler demain 14h&quot;).
                         </p>
+                    </div>
+                </div>
+            )}
+
+            {/* Meeting category (Exploratoire / Besoin) — only for MEETING_BOOKED */}
+            {selectedResult === "MEETING_BOOKED" && (
+                <div className="rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50/60 to-blue-50/40 shadow-sm overflow-hidden">
+                    <div className="px-5 py-3 border-b border-indigo-100">
+                        <h3 className="text-sm font-bold text-slate-900">Catégorie du RDV</h3>
+                        <p className="text-xs text-slate-500 mt-0.5">Optionnel — sinon détecté automatiquement depuis la note</p>
+                    </div>
+                    <div className="px-5 py-4 flex gap-3">
+                        {([["EXPLORATOIRE", "Exploratoire", "Prise de contact / découverte"], ["BESOIN", "Besoin", "Projet concret / budget identifié"]] as const).map(([value, label, desc]) => (
+                            <button
+                                key={value}
+                                type="button"
+                                onClick={() => setMeetingCat(prev => prev === value ? "" : value)}
+                                className={cn(
+                                    "flex-1 rounded-xl border-2 p-3 text-left transition-all duration-150",
+                                    meetingCat === value
+                                        ? value === "BESOIN"
+                                            ? "border-emerald-400 bg-emerald-50 shadow-sm"
+                                            : "border-blue-400 bg-blue-50 shadow-sm"
+                                        : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm"
+                                )}
+                            >
+                                <span className={cn(
+                                    "text-sm font-semibold",
+                                    meetingCat === value
+                                        ? value === "BESOIN" ? "text-emerald-700" : "text-blue-700"
+                                        : "text-slate-700"
+                                )}>
+                                    {label}
+                                </span>
+                                <span className="block text-xs text-slate-500 mt-0.5">{desc}</span>
+                            </button>
+                        ))}
                     </div>
                 </div>
             )}
@@ -2777,6 +3066,19 @@ export default function SDRActionPage() {
                     Passer
                 </Button>
 
+                {selectedResult === "ENVOIE_MAIL" && (
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="lg"
+                        onClick={openEmailModalForCard}
+                        disabled={isSubmitting}
+                        className="gap-2 border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
+                    >
+                        <Send className="w-4 h-4" />
+                        Envoyer un email
+                    </Button>
+                )}
                 <Button
                     variant="primary"
                     size="lg"
@@ -2785,7 +3087,7 @@ export default function SDRActionPage() {
                     isLoading={isSubmitting}
                     className="gap-2 px-8 shadow-lg shadow-indigo-500/20 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600"
                 >
-                    {isSubmitting ? "Enregistrement..." : "Valider & Suivant"}
+                    {isSubmitting ? "Enregistrement..." : selectedResult === "ENVOIE_MAIL" ? "Enregistrer (Mail à envoyer)" : "Valider & Suivant"}
                     <ChevronRight className="w-4 h-4" />
                 </Button>
             </div>
@@ -2800,12 +3102,14 @@ export default function SDRActionPage() {
                     setEmailModalCompany(null);
                     setEmailModalMissionId(null);
                     setEmailModalMissionName(null);
+                    setEmailModalPreferredMailboxId(null);
                 }}
                 onSent={handleEmailSent}
                 contact={emailModalContact}
                 company={emailModalCompany}
                 missionId={emailModalMissionId}
                 missionName={emailModalMissionName}
+                preferredMailboxId={emailModalPreferredMailboxId ?? undefined}
             />
 
             {/* Stats modal (card view) */}
@@ -2831,7 +3135,7 @@ export default function SDRActionPage() {
             </Modal>
 
             {/* Unified Action Drawer (card view: when opened from Stats modal) */}
-            {unifiedDrawerCompanyId && (
+            {unifiedDrawerOpen && unifiedDrawerCompanyId && (
                 <UnifiedActionDrawer
                     isOpen={unifiedDrawerOpen}
                     onClose={closeUnifiedDrawer}
@@ -2840,7 +3144,7 @@ export default function SDRActionPage() {
                     missionId={unifiedDrawerMissionId}
                     missionName={unifiedDrawerMissionName}
                     clientBookingUrl={unifiedDrawerClientBookingUrl || undefined}
-                    onOpenEmailModal={openEmailModalFromDrawer}
+                    clientInterlocuteurs={unifiedDrawerInterlocuteurs}
                     onActionRecorded={() => {
                         const rowKey = unifiedDrawerContactId ?? unifiedDrawerCompanyId ?? "";
                         if (rowKey) setActionsCompleted((c) => c + 1);
@@ -2854,11 +3158,11 @@ export default function SDRActionPage() {
             )}
 
             {/* Booking Drawer */}
-            {currentAction?.clientBookingUrl && currentAction.contact && (
+            {currentAction?.contact && (currentAction.clientBookingUrl || (currentAction.clientInterlocuteurs?.some(i => (i.bookingLinks?.length ?? 0) > 0))) && (
                 <BookingDrawer
                     isOpen={showBookingDrawer}
                     onClose={() => setShowBookingDrawer(false)}
-                    bookingUrl={currentAction.clientBookingUrl}
+                    bookingUrl={currentAction.clientBookingUrl || ""}
                     contactId={currentAction.contact.id}
                     contactName={`${currentAction.contact.firstName || ""} ${currentAction.contact.lastName || ""}`.trim() || "Contact"}
                     contactInfo={{
@@ -2870,6 +3174,8 @@ export default function SDRActionPage() {
                         companyName: currentAction.company?.name,
                     }}
                     rdvDate={rdvDate ? new Date(rdvDate).toISOString() : undefined}
+                    meetingCategory={meetingCat || undefined}
+                    interlocuteurs={currentAction.clientInterlocuteurs}
                     onBookingSuccess={() => {
                         setShowBookingDrawer(false);
                         setRdvDate("");

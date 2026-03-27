@@ -24,6 +24,7 @@ import {
   LucideIcon,
   Database,
   FileDown,
+  Activity,
 } from "lucide-react";
 import { UserRole } from "@prisma/client";
 
@@ -97,6 +98,12 @@ export const MANAGER_NAV: NavSection[] = [
         permission: "pages.clients",
       },
       {
+        href: "/manager/rdv",
+        icon: Calendar,
+        label: "SAS RDV",
+        permission: "pages.analytics",
+      },
+      {
         href: "/manager/analytics",
         icon: BarChart3,
         label: "Statistiques",
@@ -150,6 +157,12 @@ export const MANAGER_NAV: NavSection[] = [
         permission: "pages.sdrs",
       },
       {
+        href: "/manager/settings",
+        icon: Mail,
+        label: "Notifications email",
+        permission: "pages.sdrs",
+      },
+      {
         href: "/manager/billing",
         icon: Receipt,
         label: "Facturation",
@@ -194,6 +207,12 @@ export const SDR_NAV: NavSection[] = [
         href: "/sdr/callbacks",
         icon: Calendar,
         label: "Rappels",
+        permission: "pages.action",
+      },
+      {
+        href: "/sdr/calendar",
+        icon: Calendar,
+        label: "Calendrier",
         permission: "pages.action",
       },
       {
@@ -246,6 +265,65 @@ export const SDR_NAV: NavSection[] = [
         icon: Phone,
         label: "Configuration VOIP",
         permission: "pages.action",
+      },
+    ],
+  },
+];
+
+// ============================================
+// BOOKER NAVIGATION — Focused: Lists, Missions, Calling
+// No planning, no projects, no VOIP, no comms
+// ============================================
+
+export const BOOKER_NAV: NavSection[] = [
+  {
+    // No title — home
+    items: [
+      {
+        href: "/sdr",
+        icon: LayoutDashboard,
+        label: "Accueil",
+        permission: "pages.dashboard",
+      },
+    ],
+  },
+  {
+    title: "Prospection",
+    items: [
+      {
+        href: "/sdr/lists",
+        icon: Database,
+        label: "Listes",
+        permission: "pages.action",
+      },
+      {
+        href: "/sdr/action",
+        icon: Phone,
+        label: "Appeler",
+        permission: "pages.action",
+      },
+    ],
+  },
+  {
+    title: "Suivi",
+    items: [
+      {
+        href: "/sdr/callbacks",
+        icon: Calendar,
+        label: "Rappels",
+        permission: "pages.action",
+      },
+      {
+        href: "/sdr/history",
+        icon: History,
+        label: "Historique",
+        permission: "pages.action",
+      },
+      {
+        href: "/sdr/meetings",
+        icon: Calendar,
+        label: "Mes RDV",
+        permission: "pages.opportunities",
       },
     ],
   },
@@ -412,6 +490,12 @@ export const CLIENT_NAV: NavSection[] = [
         permission: "pages.dashboard",
       },
       {
+        href: "/client/portal/activite",
+        icon: Activity,
+        label: "Activité",
+        permission: "pages.dashboard",
+      },
+      {
         href: "/client/contact",
         icon: MessageSquare,
         label: "Messages",
@@ -462,6 +546,47 @@ export const CLIENT_NAV: NavSection[] = [
 ];
 
 // ============================================
+// COMMERCIAL NAVIGATION — Portal for ClientInterlocuteurs
+// ============================================
+
+export const COMMERCIAL_NAV: NavSection[] = [
+  {
+    items: [
+      {
+        href: "/commercial/portal",
+        icon: LayoutDashboard,
+        label: "Accueil",
+      },
+    ],
+  },
+  {
+    title: "Suivi",
+    items: [
+      {
+        href: "/commercial/portal/meetings",
+        icon: Calendar,
+        label: "Mes RDV",
+      },
+      {
+        href: "/commercial/portal/contacts",
+        icon: Users,
+        label: "Contacts",
+      },
+    ],
+  },
+  {
+    title: "Compte",
+    items: [
+      {
+        href: "/commercial/portal/settings",
+        icon: Settings,
+        label: "Paramètres",
+      },
+    ],
+  },
+];
+
+// ============================================
 // GET NAVIGATION BY ROLE
 // ============================================
 
@@ -471,12 +596,16 @@ export function getNavByRole(role: UserRole): NavSection[] {
       return MANAGER_NAV;
     case "SDR":
       return SDR_NAV;
+    case "BOOKER":
+      return BOOKER_NAV;
     case "BUSINESS_DEVELOPER":
       return BD_NAV;
     case "DEVELOPER":
       return DEVELOPER_NAV;
     case "CLIENT":
       return CLIENT_NAV;
+    case "COMMERCIAL":
+      return COMMERCIAL_NAV;
     default:
       return [];
   }
@@ -506,6 +635,12 @@ export const ROLE_CONFIG: Record<UserRole, RoleConfig> = {
     gradient: "from-indigo-500 to-indigo-600",
     defaultPath: "/sdr/action",
   },
+  BOOKER: {
+    label: "Booker",
+    color: "indigo",
+    gradient: "from-indigo-500 to-indigo-600",
+    defaultPath: "/sdr/action",
+  },
   BUSINESS_DEVELOPER: {
     label: "BD",
     color: "emerald",
@@ -523,5 +658,11 @@ export const ROLE_CONFIG: Record<UserRole, RoleConfig> = {
     color: "indigo",
     gradient: "from-indigo-500 to-violet-600",
     defaultPath: "/client/portal",
+  },
+  COMMERCIAL: {
+    label: "Commercial",
+    color: "emerald",
+    gradient: "from-emerald-500 to-teal-600",
+    defaultPath: "/commercial/portal",
   },
 };

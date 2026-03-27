@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { Prisma } from '@prisma/client';
 import { parseDateFromNote } from '@/lib/utils/parseDateFromNote';
-import { createClientPortalNotification } from '@/lib/notifications';
+import { createClientPortalNotification, sendNewRdvEmailNotification, createNotification } from '@/lib/notifications';
 import type { EffectiveStatusDefinition } from './StatusConfigService';
 
 // ============================================
@@ -12,18 +12,21 @@ import type { EffectiveStatusDefinition } from './StatusConfigService';
 // ============================================
 
 export interface CreateActionInput {
- contactId?: string;
- companyId?: string;
- sdrId: string;
- campaignId: string;
- channel: 'CALL' | 'EMAIL' | 'LINKEDIN';
- result: string;
- note?: string;
- /** When result triggers callback: set from calendar UI; if not provided, parsed from note. */
- callbackDate?: Date;
- duration?: number;
- meetingType?: string;
- meetingAddress?: string;
+    contactId?: string;
+    companyId?: string;
+    sdrId: string;
+    campaignId: string;
+    channel: 'CALL' | 'EMAIL' | 'LINKEDIN';
+    result: string;
+    note?: string;
+    /** When result triggers callback: set from calendar UI; if not provided, parsed from note. */
+    callbackDate?: Date;
+    duration?: number;
+    meetingType?: string;
+    meetingCategory?: string;
+    meetingAddress?: string;
+    meetingJoinUrl?: string;
+    meetingPhone?: string;
 }
 
 export interface ActionWithRelations {
@@ -41,6 +44,34 @@ export interface ActionWithRelations {
  createdAt: Date;
 }
 
+/**
+ * Auto-detect meeting category from note text.
+ * "BESOIN" = concrete project/need, "EXPLORATOIRE" = discovery/information.
+ */
+export function detectMeetingCategoryFromNote(note: string | null | undefined): string | null {
+    if (!note) return null;
+    const lower = note.toLowerCase();
+    const besoinKw = [
+        "besoin", "projet", "budget", "cahier des charges", "appel d'offre",
+        "devis", "proposition", "lancement", "deadline", "urgent",
+        "décision", "achat", "investir", "investissement", "signer",
+        "go", "valider", "validation", "contractualiser", "déployer",
+    ];
+    const exploKw = [
+        "exploratoire", "découverte", "premier contact", "prise de contact",
+        "veille", "information", "se renseigner", "benchmark", "curieux",
+        "pas de besoin", "pas de projet", "aucun projet", "à voir", "réflexion",
+        "échange", "introduction", "présentation", "demo", "démo",
+    ];
+    let bScore = 0, eScore = 0;
+    for (const kw of besoinKw) if (lower.includes(kw)) bScore++;
+    for (const kw of exploKw) if (lower.includes(kw)) eScore++;
+    if (bScore > eScore) return "BESOIN";
+    if (eScore > bScore) return "EXPLORATOIRE";
+    if (bScore > 0) return "BESOIN";
+    return null;
+}
+
 export class ActionService {
  // ============================================
  // CREATE ACTION WITH TRANSACTION
@@ -49,7 +80,7 @@ export class ActionService {
  input: CreateActionInput,
  statusDef?: EffectiveStatusDefinition | null
  ): Promise<any> {
- const triggersCallback = statusDef?.triggersCallback ?? (input.result === 'CALLBACK_REQUESTED');
+        const triggersCallback = statusDef?.triggersCallback ?? (input.result === 'CALLBACK_REQUESTED');
  const triggersOpportunity = statusDef?.triggersOpportunity ??
  (input.result === 'MEETING_BOOKED' || input.result === 'INTERESTED');
 
@@ -60,71 +91,75 @@ export class ActionService {
  throw new Error('Either contactId or companyId must be provided');
  }
 
- // Callback date: from calendar (callbackDate) or parsed from note
- let callbackDate: Date | null = null;
- let noteToStore = input.note;
- if (triggersCallback) {
- if (input.callbackDate) {
- callbackDate = input.callbackDate;
- // Keep note in sync with calendar so note and callbackDate don't diverge
- const scheduledText = `Rappel programmé: ${callbackDate.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`;
- noteToStore = (input.note?.trim() ? `${input.note.trim()} (${scheduledText})` : scheduledText).slice(0, 500);
- } else if (input.note) {
- callbackDate = parseDateFromNote(input.note);
- }
- }
+            // Callback date: from calendar (callbackDate) or parsed from note
+            let callbackDate: Date | null = null;
+            let noteToStore = input.note;
+            if (triggersCallback) {
+                if (input.callbackDate) {
+                    callbackDate = input.callbackDate;
+                    // Keep note in sync with calendar so note and callbackDate don't diverge
+                    const scheduledText = `Rappel programmé: ${callbackDate.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`;
+                    noteToStore = (input.note?.trim() ? `${input.note.trim()} (${scheduledText})` : scheduledText).slice(0, 500);
+                } else if (input.note) {
+                    callbackDate = parseDateFromNote(input.note);
+                }
+            } else if (input.callbackDate) {
+                // For non-callback results (e.g. MEETING_BOOKED), store the provided date directement
+                callbackDate = input.callbackDate;
+            }
 
- // Duplicate prevention: one pending callback per contact/company per campaign.
- // "Pending" = callback not yet due: callbackDate null (open-ended) or > now (scheduled in future).
- // When callbackDate <= now (rappel already happened / time has passed), allow anyone to place a new rappel.
- if (triggersCallback) {
- const existingPending = await tx.action.findFirst({
- where: {
- campaignId: input.campaignId,
- result: input.result as any,
- ...(input.contactId ? { contactId: input.contactId } : { companyId: input.companyId! }),
- OR: [{ callbackDate: null }, { callbackDate: { gt: new Date() } }],
- },
- orderBy: { createdAt: 'desc' },
- select: { id: true, createdAt: true },
- });
- if (existingPending) {
- // Only block if no newer action supersedes it (same contact/company, later createdAt)
- const newerAction = await tx.action.findFirst({
- where: {
- ...(input.contactId ? { contactId: input.contactId } : { companyId: input.companyId! }),
- createdAt: { gt: existingPending.createdAt },
- },
- select: { id: true },
- });
- if (!newerAction) {
- throw new Error('DUPLICATE_CALLBACK');
- }
- }
- }
+            // Auto-generate note label if none provided
+            if (!noteToStore?.trim()) {
+                const resultLabels: Record<string, string> = {
+                    NO_RESPONSE: 'Pas de réponse',
+                    BAD_CONTACT: 'Mauvais contact — pas la bonne personne',
+                    BARRAGE_STANDARD: 'Barrage standard',
+                    NUMERO_KO: 'Numéro invalide / hors service',
+                    INTERESTED: 'Contact intéressé',
+                    CALLBACK_REQUESTED: 'Rappel demandé',
+                    MEETING_BOOKED: 'Rendez-vous planifié',
+                    MEETING_CANCELLED: 'Rendez-vous annulé',
+                    INVALIDE: 'Lead invalide',
+                    DISQUALIFIED: 'Contact disqualifié',
+                    ENVOIE_MAIL: 'Email à envoyer',
+                    MAIL_ENVOYE: 'Email envoyé',
+                    CONNECTION_SENT: 'Demande de connexion envoyée',
+                    MESSAGE_SENT: 'Message envoyé',
+                    REPLIED: 'Réponse reçue',
+                    NOT_INTERESTED: 'Pas intéressé',
+                };
+                noteToStore = resultLabels[input.result] ?? input.result;
+            }
 
- // 1. Create the action
- const action = await tx.action.create({
- data: {
- contactId: input.contactId || null,
- companyId: input.companyId || null,
- sdrId: input.sdrId,
- campaignId: input.campaignId,
- channel: input.channel,
- result: input.result as any,
- note: noteToStore,
- callbackDate: callbackDate,
- duration: input.duration,
- meetingType: input.meetingType,
- meetingAddress: input.meetingAddress,
- },
- include: {
- contact: input.contactId ? {
- include: { company: true },
- } : undefined,
- company: input.companyId ? true : undefined,
- },
- });
+            // 1. Create the action — prefer explicit category, fallback to auto-detection from note
+            const autoCategory = (input.result === 'MEETING_BOOKED')
+                ? (input.meetingCategory || detectMeetingCategoryFromNote(noteToStore || input.note))
+                : null;
+
+            const action = await tx.action.create({
+                data: {
+                    contactId: input.contactId || null,
+                    companyId: input.companyId || null,
+                    sdrId: input.sdrId,
+                    campaignId: input.campaignId,
+                    channel: input.channel,
+                    result: input.result as any,
+                    note: noteToStore,
+                    callbackDate: callbackDate,
+                    duration: input.duration,
+                    meetingType: input.meetingType,
+                    meetingCategory: autoCategory,
+                    meetingAddress: input.meetingAddress,
+                    meetingJoinUrl: input.meetingJoinUrl,
+                    meetingPhone: input.meetingPhone,
+                },
+                include: {
+                    contact: input.contactId ? {
+                        include: { company: true },
+                    } : undefined,
+                    company: input.companyId ? true : undefined,
+                },
+            });
 
  // 2. Auto-create opportunity for positive outcomes (only for contacts)
  if (input.contactId && triggersOpportunity && input.note?.trim()) {
@@ -144,33 +179,79 @@ export class ActionService {
  return action;
  });
 
- // 4. Notify client portal (outside transaction)
- if (actionRecord.result === 'MEETING_BOOKED' || actionRecord.result === 'INTERESTED') {
- const campaign = await prisma.campaign.findUnique({
- where: { id: actionRecord.campaignId },
- select: { mission: { select: { clientId: true } } },
- });
- const clientId = campaign?.mission?.clientId;
- if (clientId) {
- if (actionRecord.result === 'MEETING_BOOKED') {
- await createClientPortalNotification(clientId, {
- title: 'Nouveau RDV réservé',
- message: 'Un nouveau rendez-vous a été réservé pour une de vos missions.',
- type: 'success',
- link: '/client/portal/meetings',
- });
- } else {
- await createClientPortalNotification(clientId, {
- title: 'Nouvelle opportunité',
- message: 'Un nouveau contact qualifié est disponible sur votre tableau de bord.',
- type: 'info',
- link: '/client/portal',
- });
- }
- }
- }
- return actionRecord as any;
- }
+        // 4. Notify client portal (outside transaction)
+        if (actionRecord.result === 'MEETING_BOOKED' || actionRecord.result === 'INTERESTED') {
+            const campaign = await prisma.campaign.findUnique({
+                where: { id: actionRecord.campaignId },
+                select: { mission: { select: { clientId: true, name: true } } },
+            });
+            const clientId = campaign?.mission?.clientId;
+            if (clientId) {
+                if (actionRecord.result === 'MEETING_BOOKED') {
+                    await createClientPortalNotification(clientId, {
+                        title: 'Nouveau RDV réservé',
+                        message: 'Un nouveau rendez-vous a été réservé pour une de vos missions.',
+                        type: 'success',
+                        link: '/client/portal/meetings',
+                    });
+
+                    const contactData = (actionRecord as any).contact as {
+                        firstName?: string | null;
+                        lastName?: string | null;
+                        company?: { name?: string | null } | null;
+                    } | null | undefined;
+
+                    const anyRecord = actionRecord as any;
+                    void sendNewRdvEmailNotification(clientId, {
+                        contactFirstName: contactData?.firstName,
+                        contactLastName: contactData?.lastName,
+                        companyName: contactData?.company?.name,
+                        missionName: campaign?.mission?.name,
+                        scheduledAt: anyRecord.callbackDate ?? undefined,
+                        meetingType: anyRecord.meetingType ?? undefined,
+                        meetingJoinUrl: anyRecord.meetingJoinUrl ?? undefined,
+                        meetingAddress: anyRecord.meetingAddress ?? undefined,
+                        meetingPhone: anyRecord.meetingPhone ?? undefined,
+                    });
+                } else {
+                    await createClientPortalNotification(clientId, {
+                        title: 'Nouvelle opportunité',
+                        message: 'Un nouveau contact qualifié est disponible sur votre tableau de bord.',
+                        type: 'info',
+                        link: '/client/portal',
+                    });
+                }
+            }
+        }
+
+        // 5. Auto-create reminder notification 24h before RDV for the SDR
+        if (actionRecord.result === 'MEETING_BOOKED' && (actionRecord as any).callbackDate) {
+            const rdvDate = new Date((actionRecord as any).callbackDate);
+            const reminderDate = new Date(rdvDate.getTime() - 24 * 60 * 60 * 1000);
+            const now = new Date();
+
+            if (reminderDate > now) {
+                const contactData = (actionRecord as any).contact as {
+                    firstName?: string | null;
+                    lastName?: string | null;
+                    company?: { name?: string | null } | null;
+                } | null | undefined;
+                const contactName = [contactData?.firstName, contactData?.lastName].filter(Boolean).join(' ') || 'le prospect';
+                const companyName = contactData?.company?.name;
+                const dateStr = rdvDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+
+                void createNotification({
+                    userId: input.sdrId,
+                    title: 'Confirmer le RDV',
+                    message: `Pensez à confirmer le RDV du ${dateStr} avec ${contactName}${companyName ? ` (${companyName})` : ''}`,
+                    type: 'info',
+                    link: '/manager/rdv',
+                });
+            }
+        }
+
+        return actionRecord as any;
+    }
 
  // ============================================
  // OPPORTUNITY CREATION LOGIC
@@ -337,7 +418,7 @@ export class ActionService {
  ? ((resultBreakdown.MEETING_BOOKED ?? 0) / total * 100).toFixed(2)
  : '0.00';
 
- const sent = (resultBreakdown.ENVOIE_MAIL ?? 0) + (resultBreakdown.CONNECTION_SENT ?? 0) + (resultBreakdown.MESSAGE_SENT ?? 0);
+ const sent = (resultBreakdown.MAIL_ENVOYE ?? 0) + (resultBreakdown.CONNECTION_SENT ?? 0) + (resultBreakdown.MESSAGE_SENT ?? 0);
  const replied = resultBreakdown.REPLIED ?? 0;
  const repliedRate = total > 0 ? ((replied / total) * 100).toFixed(2) : '0.00';
 

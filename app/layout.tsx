@@ -14,14 +14,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Suzalink | Plateforme d'Exécution Commerciale",
-  description: "Outil interne d'exécution commerciale - Suzalink",
+  title: "Suzalink CRM",
+  description: "Plateforme d'exécution commerciale - Suzalink CRM",
 icons: {
       icon: [
-        { url: "/suzalink_logo.png", type: "image/png" },
+        { url: "/logocaptainblue-rose.png", type: "image/png" },
         { url: "/favicon.ico", sizes: "any" },
       ],
-    apple: "/suzalink_logo.png",
+    apple: "/logocaptainblue-rose.png",
     },
 };
 

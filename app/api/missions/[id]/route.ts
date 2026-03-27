@@ -15,22 +15,33 @@ import { z } from 'zod';
 // ============================================
 
 const channelEnum = z.enum(['CALL', 'EMAIL', 'LINKEDIN']);
-const updateMissionSchema = z.object({
-    clientId: z.string().min(1).optional(),
-    name: z.string().min(1).optional(),
-    objective: z.string().min(1).optional(),
-    channel: channelEnum.optional(),
-    channels: z.array(channelEnum).min(1).optional(),
-    startDate: z.string().transform((s) => new Date(s)).optional(),
-    endDate: z.string().transform((s) => new Date(s)).optional(),
-    isActive: z.boolean().optional(),
-    teamLeadSdrId: z.string().nullable().optional(),
-}).partial().transform((data) => {
-    if (data.channels !== undefined) {
-        return { ...data, channel: data.channels[0] };
-    }
-    return data;
-});
+const updateMissionSchema = z
+    .object({
+        clientId: z.string().min(1).optional(),
+        name: z.string().min(1).optional(),
+        objective: z
+            .union([z.string().min(1), z.literal(null)])
+            .optional()
+            .transform((v) => (v === null ? '' : v)),
+        channel: channelEnum.optional(),
+        channels: z.array(channelEnum).min(1).optional(),
+        startDate: z.string().transform((s) => new Date(s)).optional(),
+        endDate: z.string().transform((s) => new Date(s)).optional(),
+        isActive: z.boolean().optional(),
+        teamLeadSdrId: z.string().nullable().optional(),
+        defaultInterlocuteurId: z.string().nullable().optional(),
+        // Allow empty string from UI but normalize to null later
+        defaultMailboxId: z.string().optional().or(z.literal('')),
+    })
+    .partial()
+    .transform((data) => {
+        const base = data.channels !== undefined ? { ...data, channel: data.channels[0] } : data;
+        // Normalize empty string to null so we can safely disconnect the relation
+        if (base.defaultMailboxId === '') {
+            return { ...base, defaultMailboxId: null };
+        }
+        return base;
+    });
 
 const assignSdrSchema = z.object({
     sdrId: z.string().min(1, 'SDR ID requis'),
@@ -44,23 +55,66 @@ export const GET = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    const session = await requireRole(['MANAGER', 'CLIENT', 'SDR', 'BUSINESS_DEVELOPER'], request);
+    const session = await requireRole(['MANAGER', 'CLIENT', 'SDR', 'BUSINESS_DEVELOPER', 'BOOKER'], request);
     const { id } = await params;
 
     const mission = await prisma.mission.findUnique({
         where: { id },
         include: {
-            client: true,
+            client: {
+                include: {
+                    interlocuteurs: {
+                        where: { isActive: true },
+                        orderBy: { createdAt: 'asc' },
+                    },
+                },
+            },
             campaigns: true,
             lists: {
                 include: {
+                    // List has no "contacts" relation; only "companies". Contact count is per company below.
                     _count: { select: { companies: true } },
+                    companies: {
+                        select: {
+                            status: true,
+                            _count: { select: { contacts: true } },
+                        },
+                    },
+                    commercialInterlocuteur: {
+                        select: {
+                            id: true,
+                            firstName: true,
+                            lastName: true,
+                            title: true,
+                        },
+                    },
+                },
+            },
+            defaultInterlocuteur: {
+                select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    title: true,
                 },
             },
             sdrAssignments: {
-                include: { sdr: { select: { id: true, name: true, email: true, role: true, selectedListId: true, selectedMissionId: true } } },
+                include: {
+                    sdr: {
+                        select: {
+                            id: true,
+                            name: true,
+                            email: true,
+                            role: true,
+                            selectedListId: true,
+                            selectedMissionId: true,
+                        },
+                    },
+                },
             },
             teamLeadSdr: { select: { id: true, name: true, email: true } },
+            // Include default mailbox so SDR flows can use mission-level mailbox
+            defaultMailbox: { select: { id: true, email: true, displayName: true } },
             _count: {
                 select: {
                     sdrAssignments: true,
@@ -137,7 +191,7 @@ export const PUT = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER'], request);
+    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER', 'BOOKER'], request);
     const { id } = await params;
     const data = await validateRequest(request, updateMissionSchema);
 
@@ -153,14 +207,29 @@ export const PUT = withErrorHandler(async (
         }
     }
 
-    // Build Prisma update data: relations (client, teamLeadSdr) and array (channels) use special syntax
-    const { clientId, teamLeadSdrId, channels, ...scalars } = data;
+    // Build Prisma update data: relations (client, teamLeadSdr, defaultMailbox) and array (channels) use special syntax
+    const {
+        clientId,
+        teamLeadSdrId,
+        channels,
+        defaultMailboxId,
+        defaultInterlocuteurId,
+        ...scalars
+    } = data;
     const updateData: Parameters<typeof prisma.mission.update>[0]['data'] = {
         ...scalars,
         ...(channels !== undefined && { channels: { set: channels } }),
         ...(clientId !== undefined && { client: { connect: { id: clientId } } }),
         ...(teamLeadSdrId !== undefined && {
             teamLeadSdr: teamLeadSdrId ? { connect: { id: teamLeadSdrId } } : { disconnect: true },
+        }),
+        ...(defaultMailboxId !== undefined && {
+            defaultMailbox: defaultMailboxId ? { connect: { id: defaultMailboxId } } : { disconnect: true },
+        }),
+        ...(defaultInterlocuteurId !== undefined && {
+            defaultInterlocuteur: defaultInterlocuteurId
+                ? { connect: { id: defaultInterlocuteurId } }
+                : { disconnect: true },
         }),
     };
 
@@ -202,13 +271,13 @@ export const PATCH = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER'], request);
+    await requireRole(['MANAGER', 'BUSINESS_DEVELOPER', 'BOOKER'], request);
     const { id } = await params;
     const { sdrId } = await validateRequest(request, assignSdrSchema);
 
     // Verify user exists and has SDR or BUSINESS_DEVELOPER role
     const sdr = await prisma.user.findFirst({
-        where: { id: sdrId, role: { in: ['SDR', 'BUSINESS_DEVELOPER'] } },
+        where: { id: sdrId, role: { in: ['SDR', 'BUSINESS_DEVELOPER', 'BOOKER'] } },
     });
 
     if (!sdr) {

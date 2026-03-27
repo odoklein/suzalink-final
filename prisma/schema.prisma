@@ -17,10 +17,12 @@ datasource db {
 
 enum UserRole {
   SDR
+  BOOKER
   MANAGER
   CLIENT
   DEVELOPER
   BUSINESS_DEVELOPER
+  COMMERCIAL
 }
 
 enum Channel {
@@ -44,17 +46,35 @@ enum CompletenessStatus {
 enum ActionResult {
   NO_RESPONSE
   BAD_CONTACT
+  BARRAGE_STANDARD   // Gatekeeper / standard barrier
+  NUMERO_KO          // Wrong number / number not valid
   INTERESTED
   CALLBACK_REQUESTED
   MEETING_BOOKED
   MEETING_CANCELLED
+  INVALIDE             // Invalid lead (distinct from meeting cancelled)
   DISQUALIFIED
-  ENVOIE_MAIL
+  ENVOIE_MAIL   // Mail à envoyer (planned; note only)
+  MAIL_ENVOYE   // Mail envoyé (email actually sent)
   // LinkedIn hub
   CONNECTION_SENT
   MESSAGE_SENT
   REPLIED
   NOT_INTERESTED
+  // Extended statuses
+  REFUS
+  REFUS_ARGU
+  REFUS_CATEGORIQUE
+  RELANCE
+  RAPPEL
+  GERE_PAR_SIEGE
+  FAUX_NUMERO
+  PROJET_A_SUIVRE
+  MAUVAIS_INTERLOCUTEUR
+  MAIL_UNIQUEMENT
+  BARRAGE_SECRETAIRE
+  MAIL_DOC
+  HORS_CIBLE
 }
 
 // Config-driven action status and workflow
@@ -102,6 +122,12 @@ enum RecontactPreference {
   YES
   NO
   MAYBE
+}
+
+enum MeetingConfirmationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
 }
 
 enum ProjectStatus {
@@ -294,8 +320,11 @@ model User {
   isActive      Boolean   @default(true)  // For banning/disabling users
   clientId      String?
   client        Client?   @relation(fields: [clientId], references: [id])
+  interlocuteurId String?  @unique  // For COMMERCIAL role: links to their ClientInterlocuteur record
+  interlocuteur   ClientInterlocuteur? @relation("CommercialUser", fields: [interlocuteurId], references: [id])
   clientOnboardingDismissedPermanently Boolean @default(false)  // Client portal: hide onboarding forever
   actions       Action[]  @relation("SDRActions")
+  confirmedMeetings Action[] @relation("MeetingConfirmedBy")
   assignedMissions SDRAssignment[]
   missionsAsTeamLead Mission[]  @relation("MissionTeamLead")
   uploadedFiles File[]
@@ -475,6 +504,11 @@ model Client {
   industry      String?
   logo          String?
   bookingUrl    String?   // URL for booking tools (Calendly, etc.)
+  
+  // Default mailbox for this client (optional)
+  defaultMailboxId String?
+  defaultMailbox   Mailbox? @relation("ClientDefaultMailbox", fields: [defaultMailboxId], references: [id], onDelete: SetNull)
+
   salesPlaybook Json?     @map("sales_playbook")
   users         User[]
   missions      Mission[]
@@ -485,6 +519,9 @@ model Client {
   // Client Portal visibility settings
   portalShowCallHistory  Boolean @default(false)
   portalShowDatabase     Boolean @default(false)
+
+  // RDV email notifications
+  rdvEmailNotificationsEnabled Boolean @default(true)
  
   // Business Developer relations
   bdAssignments BusinessDeveloperClient[]
@@ -507,12 +544,52 @@ model Client {
   
   // Leexi integration
   leexiImports  LeexiCallImport[]
+  sessions      ClientSession[]
 
   // Client Portal: shareable report links
   sharedReportLinks SharedReportLink[]
 
+  // Interlocuteurs (client's own sales team / commercials)
+  interlocuteurs ClientInterlocuteur[]
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+
+  @@index([defaultMailboxId])
+}
+
+model ClientInterlocuteur {
+  id           String   @id @default(cuid())
+  clientId     String
+  client       Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  firstName    String
+  lastName     String
+  title        String?
+  department   String?
+  territory    String?
+
+  emails       Json     @default("[]")
+  phones       Json     @default("[]")
+  bookingLinks Json     @default("[]")
+
+  notes        String?  @db.Text
+  isActive     Boolean  @default(true)
+
+  // Portal access: COMMERCIAL user linked to this interlocuteur
+  portalUser   User?    @relation("CommercialUser")
+
+  // Meetings booked for this interlocuteur
+  meetings     Action[] @relation("InterlocuteurMeetings")
+
+  // Commercial ownership
+  defaultForMissions Mission[]
+  lists              List[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([clientId])
 }
 
 model Mission {
@@ -523,6 +600,15 @@ model Mission {
   objective     String
   channel       Channel   // Primary (first channel); kept for backward compatibility
   channels      Channel[] @default([CALL]) // Multi-channel: mission can run on CALL + EMAIL + LINKEDIN
+  
+  // Default mailbox for this mission (optional)
+  defaultMailboxId String?
+  defaultMailbox   Mailbox? @relation("MissionDefaultMailbox", fields: [defaultMailboxId], references: [id], onDelete: SetNull)
+
+  // Default commercial (client interlocuteur) for this mission
+  defaultInterlocuteurId String?
+  defaultInterlocuteur   ClientInterlocuteur? @relation(fields: [defaultInterlocuteurId], references: [id], onDelete: SetNull)
+
   startDate     DateTime
   endDate       DateTime
   isActive      Boolean   @default(true)
@@ -569,6 +655,8 @@ model Mission {
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+
+  @@index([defaultMailboxId])
 }
 
 model SDRAssignment {
@@ -615,6 +703,13 @@ model List {
   source        String?   // Origin: Apollo, Clay, CSV, etc.
   importConfig  Json?     // Store import configuration (type, mappings, custom fields)
   companies     Company[]
+  isActive      Boolean   @default(true) // When false, list is disabled for this mission (e.g. excluded from assignment)
+  isArchived    Boolean   @default(false)
+  archivedAt    DateTime?
+
+  // Optional commercial (client interlocuteur) owning this list
+  commercialInterlocuteurId String?
+  commercialInterlocuteur   ClientInterlocuteur? @relation(fields: [commercialInterlocuteurId], references: [id], onDelete: SetNull)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -687,7 +782,23 @@ model Action {
   duration      Int?         // Duration in seconds
   cancellationReason String? // When result = MEETING_CANCELLED: by_mistake, wrong_contact, client_cancelled, double_booking, other
   meetingType     String?    // 'VISIO' | 'PHYSIQUE' | 'TELEPHONIQUE' — type of meeting for MEETING_BOOKED
+  meetingCategory String?    // 'EXPLORATOIRE' | 'BESOIN' — auto-detected from note or manually set
   meetingAddress  String?    // Physical address (for PHYSIQUE meetings only)
+  meetingJoinUrl String?    // Video join link (for VISIO meetings only)
+  meetingPhone   String?    // Dial number for call (for TELEPHONIQUE; fallback to contact.phone)
+
+  // Commercial portal: which interlocuteur this meeting was booked for
+  interlocuteurId String?
+  interlocuteur   ClientInterlocuteur? @relation("InterlocuteurMeetings", fields: [interlocuteurId], references: [id], onDelete: SetNull)
+
+  // SAS RDV (manager confirmation workflow)
+  confirmationStatus MeetingConfirmationStatus @default(PENDING)
+  confirmationUpdatedAt DateTime?
+  confirmedAt    DateTime?
+  confirmedById  String?
+  confirmedBy    User?      @relation("MeetingConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
+  rdvFiche       Json?
+  rdvFicheUpdatedAt DateTime?
   createdAt     DateTime     @default(now())
 
   // Call workflow: IN_PROGRESS when call started, PENDING_VALIDATION when webhook received
@@ -723,6 +834,7 @@ model CallRecord {
   company        Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
   externalCallId String    // WithAllo call id (idempotency)
   source         String    @default("withallo")
+  provider       String?   // Kept in sync with existing DB column to avoid data loss
   fromNumber     String?
   toNumber       String?
   duration       Int?      // seconds
@@ -783,12 +895,25 @@ model ActionStatusDefinition {
   priorityOrder      Int?               // Optional numeric override; derived from priorityLabel if null
   triggersOpportunity Boolean           @default(false)
   triggersCallback   Boolean            @default(false)
+  resultCategoryCode String?            // Links to ResultCategory.code for reporting/Activité grouping
   isActive           Boolean            @default(true)
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
   @@unique([scopeType, scopeId, code])
   @@index([scopeType, scopeId])
+}
+
+// Result categories for grouping statuses in reports and client portal (Activité)
+model ResultCategory {
+  id          String   @id @default(cuid())
+  code        String   @unique  // e.g. MEETING_BOOKED, CALLBACK_REQUESTED, INTERESTED, NO_RESPONSE, DISQUALIFIED, OTHER
+  label       String   // Display label e.g. "RDV pris", "Rappel demandé"
+  color       String?  // Hex color for badges/charts
+  sortOrder   Int      @default(0)
+  description String? @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 // Config-driven next steps: "after this result, suggest this action"
@@ -809,9 +934,9 @@ model ActionNextStep {
 model Opportunity {
   id            String    @id @default(cuid())
   contactId     String
-  contact       Contact   @relation(fields: [contactId], references: [id])
+  contact       Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
   companyId     String
-  company       Company   @relation(fields: [companyId], references: [id])
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   needSummary   String    @db.Text
   urgency       Urgency
   estimatedMin  Float?
@@ -1058,6 +1183,7 @@ model Task {
   files       File[]
   activities  ProjectActivity[]
   timeEntries TaskTimeEntry[]
+  sessionTask SessionTask?    @relation("SessionTaskMirror")
   
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
@@ -1692,6 +1818,10 @@ model Mailbox {
   sequences       EmailSequence[]
   analyticsDaily  EmailAnalyticsDaily[]
   
+  // Default mappings (optional)
+  defaultForClients  Client[]  @relation("ClientDefaultMailbox")
+  defaultForMissions Mission[] @relation("MissionDefaultMailbox")
+  
   isActive        Boolean           @default(true)
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
@@ -1751,7 +1881,7 @@ model EmailThread {
   campaignId    String?
   campaign      Campaign? @relation(fields: [campaignId], references: [id])
   opportunityId String?
-  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
   contactId     String?
   contact       Contact?  @relation(fields: [contactId], references: [id])
   
@@ -2978,4 +3108,85 @@ model SharedReportLink {
 
   @@index([token])
   @@index([clientId])
+}
+
+// ============================================
+// SYSTEM CONFIGURATION (manager-editable settings)
+// ============================================
+
+model SystemConfig {
+  key       String   @id        // e.g. "masterPasswordHash"
+  value     String   @db.Text   // hashed value
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================
+// SYSTEM EMAIL TEMPLATES (manager-editable)
+// ============================================
+
+model SystemEmailTemplate {
+  key      String   @id       // e.g. "rdv_notification"
+  name     String             // Display name for the manager UI
+  subject  String             // Email subject (supports {{variables}})
+  bodyHtml String   @db.Text  // Full HTML body (supports {{variables}})
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================
+// CLIENT SESSIONS & COMPTE RENDUS (Leexi → AI)
+// ============================================
+
+model ClientSession {
+  id           String        @id @default(cuid())
+  clientId     String
+  client       Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  type         String        // "Kick-Off" | "Onboarding" | "Validation" | "Reporting" | "Suivi" | "Autre"
+  date         DateTime
+  leexiId      String?       // Leexi call/meeting ID
+  recordingUrl String?
+  crMarkdown   String?       @db.Text
+  summaryEmail String?       @db.Text
+  emailSentAt  DateTime?
+  tasks        SessionTask[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([clientId])
+}
+
+model SessionTask {
+  id           String             @id @default(cuid())
+  sessionId    String
+  session      ClientSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  label        String
+  assignee     String?
+  assigneeRole SessionTaskRole    @default(ALWAYS)
+  priority     SessionTaskPriority @default(MEDIUM)
+  dueDate      DateTime?
+  doneAt       DateTime?
+
+  // Bidirectional link to mirrored project Task
+  taskId       String?            @unique
+  mirroredTask Task?              @relation("SessionTaskMirror", fields: [taskId], references: [id], onDelete: SetNull)
+
+  createdAt    DateTime           @default(now())
+
+  @@index([sessionId])
+  @@index([assigneeRole])
+  @@index([doneAt])
+  @@index([taskId])
+}
+
+enum SessionTaskRole {
+  SDR
+  MANAGER
+  DEV
+  ALWAYS
+}
+
+enum SessionTaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
 }

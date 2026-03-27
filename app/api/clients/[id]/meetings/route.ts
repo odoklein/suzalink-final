@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { Prisma } from '@prisma/client';
 import {
     successResponse,
     requireRole,
@@ -7,6 +8,7 @@ import {
     NotFoundError,
     AuthError,
 } from '@/lib/api-utils';
+import { filterRdvList } from '@/lib/utils/meetingFilters';
 
 // ============================================
 // GET /api/clients/[id]/meetings
@@ -30,6 +32,7 @@ export const GET = withErrorHandler(async (
     // Verify client exists
     const client = await prisma.client.findUnique({
         where: { id: clientId },
+        select: { id: true },
     });
 
     if (!client) {
@@ -88,16 +91,34 @@ export const GET = withErrorHandler(async (
         };
     }
 
-    // Get all meetings (actions with MEETING_BOOKED result) for this client's missions
-    const meetings = await prisma.action.findMany({
+    // Get all meetings (actions with MEETING_BOOKED / MEETING_CANCELLED) for this client's missions
+    const rawMeetings = await prisma.action.findMany({
         where: meetingWhere,
-        include: {
+        select: {
+            id: true,
+            createdAt: true,
+            result: true,
+            callbackDate: true,
+            note: true,
+            meetingType: true,
+            meetingCategory: true,
+            meetingAddress: true,
+            meetingJoinUrl: true,
+            meetingPhone: true,
+            confirmationStatus: true,
+            campaignId: true,
             contact: {
-                include: {
+                select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    email: true,
+                    phone: true,
                     company: {
                         select: {
                             id: true,
                             name: true,
+                            phone: true,
                             industry: true,
                             country: true,
                             website: true,
@@ -105,6 +126,18 @@ export const GET = withErrorHandler(async (
                             customData: true,
                         },
                     },
+                },
+            },
+            company: {
+                select: {
+                    id: true,
+                    name: true,
+                    phone: true,
+                    industry: true,
+                    country: true,
+                    website: true,
+                    size: true,
+                    customData: true,
                 },
             },
             campaign: {
@@ -130,7 +163,97 @@ export const GET = withErrorHandler(async (
             meetingFeedback: true,
         },
         orderBy: { createdAt: 'desc' },
+    }).catch((error: unknown) => {
+        const isMissingMeetingTransportColumn =
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            error.code === 'P2022' &&
+            typeof (error.meta as { column?: unknown } | undefined)?.column === 'string' &&
+            /Action\.(meetingAddress|meetingJoinUrl|meetingPhone)/.test(
+                String((error.meta as { column?: unknown }).column)
+            );
+
+        if (!isMissingMeetingTransportColumn) {
+            throw error;
+        }
+
+        // Fallback for environments where these Action columns are not migrated yet.
+        return prisma.action.findMany({
+            where: meetingWhere,
+            select: {
+                id: true,
+                createdAt: true,
+                result: true,
+                callbackDate: true,
+                note: true,
+                meetingType: true,
+                meetingCategory: true,
+                confirmationStatus: true,
+                campaignId: true,
+                contact: {
+                    select: {
+                        id: true,
+                        firstName: true,
+                        lastName: true,
+                        email: true,
+                        phone: true,
+                        company: {
+                            select: {
+                                id: true,
+                                name: true,
+                                phone: true,
+                                industry: true,
+                                country: true,
+                                website: true,
+                                size: true,
+                                customData: true,
+                            },
+                        },
+                    },
+                },
+                company: {
+                    select: {
+                        id: true,
+                        name: true,
+                        phone: true,
+                        industry: true,
+                        country: true,
+                        website: true,
+                        size: true,
+                        customData: true,
+                    },
+                },
+                campaign: {
+                    select: {
+                        id: true,
+                        name: true,
+                        missionId: true,
+                        mission: {
+                            select: {
+                                id: true,
+                                name: true,
+                            },
+                        },
+                    },
+                },
+                sdr: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                    },
+                },
+                meetingFeedback: true,
+            },
+            orderBy: { createdAt: 'desc' },
+        });
     });
+
+    const confirmedMeetings = rawMeetings.filter((meeting) => {
+        const confirmationStatus = (meeting as { confirmationStatus?: string }).confirmationStatus;
+        return !confirmationStatus || confirmationStatus === 'CONFIRMED';
+    });
+
+    const meetings = filterRdvList(confirmedMeetings);
 
     // Group by mission
     const byMission = new Map<string, {

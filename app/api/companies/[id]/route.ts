@@ -30,15 +30,33 @@ export const GET = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER', 'SDR', 'BUSINESS_DEVELOPER'], request);
+    await requireRole(['MANAGER', 'SDR', 'BUSINESS_DEVELOPER', 'BOOKER'], request);
     const { id } = await params;
+    const { searchParams } = new URL(request.url);
+    const light = searchParams.get('light') === 'true';
 
     const company = await prisma.company.findUnique({
         where: { id },
         include: {
-            contacts: {
-                orderBy: { createdAt: 'desc' },
-            },
+            contacts: light
+                ? {
+                      take: 25,
+                      orderBy: { createdAt: 'desc' as const },
+                      select: {
+                          id: true,
+                          firstName: true,
+                          lastName: true,
+                          email: true,
+                          phone: true,
+                          title: true,
+                          linkedin: true,
+                          status: true,
+                          companyId: true,
+                      },
+                  }
+                : {
+                      orderBy: { createdAt: 'desc' },
+                  },
             list: {
                 select: {
                     id: true,
@@ -75,7 +93,7 @@ export const PUT = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER', 'SDR', 'BUSINESS_DEVELOPER'], request);
+    await requireRole(['MANAGER', 'SDR', 'BUSINESS_DEVELOPER', 'BOOKER'], request);
     const { id } = await params;
     const data = await validateRequest(request, updateCompanySchema);
 

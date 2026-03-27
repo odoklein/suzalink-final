@@ -129,6 +129,17 @@ const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
         "actions.make_calls", "actions.send_emails", "actions.send_linkedin", 
         "actions.book_meetings", "actions.create_opportunity", "actions.edit_contacts",
     ],
+    BOOKER: [
+        // Same as SDR: lists, action, callbacks, meetings
+        "pages.dashboard", "pages.action", "pages.lists", "pages.opportunities", "pages.settings",
+        "features.export_data",
+        "actions.make_calls", "actions.send_emails", "actions.send_linkedin",
+        "actions.book_meetings", "actions.create_opportunity", "actions.edit_contacts",
+    ],
+    COMMERCIAL: [
+        // Client portal: meetings, contacts, settings (access enforced by route/session)
+        "pages.dashboard",
+    ],
     BUSINESS_DEVELOPER: [
         // BD pages (superset of SDR)
         "pages.dashboard", "pages.action", "pages.lists", "pages.opportunities", "pages.settings", "pages.email", "pages.comms",
@@ -202,19 +213,86 @@ async function seedPermissions() {
 }
 
 // GLOBAL action status definitions (mirrors current ActionResult enum + workflow behavior)
+const RESULT_CATEGORY_MAP: Record<string, string> = {
+    NO_RESPONSE: "NO_RESPONSE",
+    BAD_CONTACT: "OTHER",
+    BARRAGE_STANDARD: "OTHER",
+    NUMERO_KO: "OTHER",
+    INTERESTED: "INTERESTED",
+    CALLBACK_REQUESTED: "CALLBACK_REQUESTED",
+    MEETING_BOOKED: "MEETING_BOOKED",
+    MEETING_CANCELLED: "OTHER",
+    INVALIDE: "OTHER",
+    DISQUALIFIED: "DISQUALIFIED",
+    ENVOIE_MAIL: "OTHER",
+    CONNECTION_SENT: "OTHER",
+    MESSAGE_SENT: "OTHER",
+    REPLIED: "OTHER",
+    NOT_INTERESTED: "OTHER",
+    REFUS: "DISQUALIFIED",
+    REFUS_ARGU: "DISQUALIFIED",
+    REFUS_CATEGORIQUE: "DISQUALIFIED",
+    RELANCE: "CALLBACK_REQUESTED",
+    RAPPEL: "CALLBACK_REQUESTED",
+    GERE_PAR_SIEGE: "OTHER",
+    FAUX_NUMERO: "OTHER",
+    PROJET_A_SUIVRE: "INTERESTED",
+    MAUVAIS_INTERLOCUTEUR: "OTHER",
+    MAIL_UNIQUEMENT: "OTHER",
+    BARRAGE_SECRETAIRE: "OTHER",
+    MAIL_DOC: "OTHER",
+    HORS_CIBLE: "DISQUALIFIED",
+};
+
 const GLOBAL_STATUS_DEFINITIONS = [
     { code: "NO_RESPONSE", label: "Pas de réponse", sortOrder: 1, requiresNote: false, priorityLabel: "RETRY" as const, priorityOrder: 4, triggersOpportunity: false, triggersCallback: false },
     { code: "BAD_CONTACT", label: "Standard / Mauvais contact", sortOrder: 2, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
-    { code: "INTERESTED", label: "Intéressé", sortOrder: 3, requiresNote: true, priorityLabel: "FOLLOW_UP" as const, priorityOrder: 2, triggersOpportunity: true, triggersCallback: false },
-    { code: "CALLBACK_REQUESTED", label: "Rappel demandé", sortOrder: 4, requiresNote: true, priorityLabel: "CALLBACK" as const, priorityOrder: 1, triggersOpportunity: false, triggersCallback: true },
-    { code: "MEETING_BOOKED", label: "Meeting booké", sortOrder: 5, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: true, triggersCallback: false },
-    { code: "MEETING_CANCELLED", label: "Meeting annulé", sortOrder: 6, requiresNote: false, priorityLabel: "RETRY" as const, priorityOrder: 4, triggersOpportunity: false, triggersCallback: false },
-    { code: "DISQUALIFIED", label: "Disqualifié", sortOrder: 7, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
-    { code: "ENVOIE_MAIL", label: "Envoie mail", sortOrder: 8, requiresNote: true, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "BARRAGE_STANDARD", label: "Barrage standard", sortOrder: 3, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "NUMERO_KO", label: "NUMERO KO", sortOrder: 4, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "INTERESTED", label: "Intéressé", sortOrder: 5, requiresNote: true, priorityLabel: "FOLLOW_UP" as const, priorityOrder: 2, triggersOpportunity: true, triggersCallback: false },
+    { code: "CALLBACK_REQUESTED", label: "Rappel demandé", sortOrder: 6, requiresNote: true, priorityLabel: "CALLBACK" as const, priorityOrder: 1, triggersOpportunity: false, triggersCallback: true },
+    { code: "MEETING_BOOKED", label: "Meeting booké", sortOrder: 7, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: true, triggersCallback: false },
+    { code: "MEETING_CANCELLED", label: "Meeting annulé", sortOrder: 8, requiresNote: false, priorityLabel: "RETRY" as const, priorityOrder: 4, triggersOpportunity: false, triggersCallback: false },
+    { code: "INVALIDE", label: "Invalide", sortOrder: 9, requiresNote: false, priorityLabel: "RETRY" as const, priorityOrder: 4, triggersOpportunity: false, triggersCallback: false },
+    { code: "DISQUALIFIED", label: "Disqualifié", sortOrder: 10, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "ENVOIE_MAIL", label: "Envoie mail", sortOrder: 11, requiresNote: true, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "REFUS", label: "Refus", sortOrder: 12, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "REFUS_ARGU", label: "Refus argu", sortOrder: 13, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "REFUS_CATEGORIQUE", label: "Refus catégorique", sortOrder: 14, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "RELANCE", label: "Relance", sortOrder: 15, requiresNote: true, priorityLabel: "CALLBACK" as const, priorityOrder: 1, triggersOpportunity: false, triggersCallback: true },
+    { code: "RAPPEL", label: "Rappel", sortOrder: 16, requiresNote: true, priorityLabel: "CALLBACK" as const, priorityOrder: 1, triggersOpportunity: false, triggersCallback: true },
+    { code: "GERE_PAR_SIEGE", label: "Géré par le siège", sortOrder: 17, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "FAUX_NUMERO", label: "Faux numéro", sortOrder: 18, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "PROJET_A_SUIVRE", label: "Projet à suivre", sortOrder: 19, requiresNote: true, priorityLabel: "FOLLOW_UP" as const, priorityOrder: 2, triggersOpportunity: true, triggersCallback: false },
+    { code: "MAUVAIS_INTERLOCUTEUR", label: "Mauvais interlocuteur", sortOrder: 20, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "MAIL_UNIQUEMENT", label: "Mail uniquement", sortOrder: 21, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "BARRAGE_SECRETAIRE", label: "Barrage secrétaire", sortOrder: 22, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "MAIL_DOC", label: "Mail doc", sortOrder: 23, requiresNote: true, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
+    { code: "HORS_CIBLE", label: "Hors cible", sortOrder: 24, requiresNote: false, priorityLabel: "SKIP" as const, priorityOrder: 999, triggersOpportunity: false, triggersCallback: false },
 ];
+
+async function seedResultCategories() {
+    const defaults = [
+        { code: "MEETING_BOOKED", label: "RDV pris", color: "#059669", sortOrder: 1, description: "Rendez-vous obtenu" },
+        { code: "CALLBACK_REQUESTED", label: "Rappel demandé", color: "#d97706", sortOrder: 2, description: "Le contact a demandé un rappel" },
+        { code: "INTERESTED", label: "Intéressé", color: "#4f46e5", sortOrder: 3, description: "Contact intéressé, à suivre" },
+        { code: "NO_RESPONSE", label: "Pas de réponse", color: "#64748b", sortOrder: 4, description: "Aucune réponse obtenue" },
+        { code: "DISQUALIFIED", label: "Disqualifié", color: "#dc2626", sortOrder: 5, description: "Contact ou lead disqualifié" },
+        { code: "OTHER", label: "Autre", color: "#94a3b8", sortOrder: 99, description: "Autres résultats" },
+    ];
+    for (const cat of defaults) {
+        await prisma.resultCategory.upsert({
+            where: { code: cat.code },
+            update: { label: cat.label, color: cat.color, sortOrder: cat.sortOrder, description: cat.description ?? null },
+            create: { code: cat.code, label: cat.label, color: cat.color, sortOrder: cat.sortOrder, description: cat.description ?? null },
+        });
+    }
+    console.log("✅ Seeded result categories");
+}
 
 async function seedActionStatusDefinitions() {
     for (const def of GLOBAL_STATUS_DEFINITIONS) {
+        const resultCategoryCode = RESULT_CATEGORY_MAP[def.code] ?? "OTHER";
         await prisma.actionStatusDefinition.upsert({
             where: {
                 scopeType_scopeId_code: {
@@ -231,6 +309,7 @@ async function seedActionStatusDefinitions() {
                 priorityOrder: def.priorityOrder,
                 triggersOpportunity: def.triggersOpportunity,
                 triggersCallback: def.triggersCallback,
+                resultCategoryCode,
                 isActive: true,
             },
             create: {
@@ -244,6 +323,7 @@ async function seedActionStatusDefinitions() {
                 priorityOrder: def.priorityOrder,
                 triggersOpportunity: def.triggersOpportunity,
                 triggersCallback: def.triggersCallback,
+                resultCategoryCode,
                 isActive: true,
             },
         });
@@ -406,6 +486,7 @@ async function main() {
     console.log("✅ Created 3 companies with contacts");
 
     // Seed GLOBAL action status definitions (config-driven workflow defaults)
+    await seedResultCategories();
     await seedActionStatusDefinitions();
 
     // Seed permissions

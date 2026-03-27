@@ -14,9 +14,14 @@ import {
     X, Minus, Radio, Zap, Users, Filter, ArrowUpDown,
     Eye, EyeOff, MoreHorizontal, ExternalLink, Maximize2,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import { Card, Button, useToast } from "@/components/ui";
-import { UnifiedActionDrawer } from "@/components/drawers/UnifiedActionDrawer";
 import { ACTION_RESULT_LABELS } from "@/lib/types";
+
+const UnifiedActionDrawer = dynamic(
+    () => import("@/components/drawers/UnifiedActionDrawer").then((m) => ({ default: m.UnifiedActionDrawer })),
+    { ssr: false }
+);
 import { cn } from "@/lib/utils";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -82,7 +87,8 @@ const RESULT_CFG: Record<string, {
     MEETING_BOOKED: { label: "RDV planifié", icon: CalendarPlus, text: "text-indigo-700", bg: "bg-indigo-50", border: "border-indigo-200", dot: "bg-indigo-500" },
     MEETING_CANCELLED: { label: "RDV annulé", icon: CalendarX, text: "text-red-600", bg: "bg-red-50", border: "border-red-200", dot: "bg-red-400" },
     DISQUALIFIED: { label: "Disqualifié", icon: Ban, text: "text-slate-500", bg: "bg-slate-100", border: "border-slate-200", dot: "bg-slate-300" },
-    ENVOIE_MAIL: { label: "Email envoyé", icon: Send, text: "text-blue-700", bg: "bg-blue-50", border: "border-blue-200", dot: "bg-blue-400" },
+    ENVOIE_MAIL: { label: "Mail à envoyer", icon: Send, text: "text-blue-700", bg: "bg-blue-50", border: "border-blue-200", dot: "bg-blue-400" },
+    MAIL_ENVOYE: { label: "Mail envoyé", icon: Send, text: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200", dot: "bg-emerald-500" },
     CONNECTION_SENT: { label: "Connexion envoyée", icon: Linkedin, text: "text-sky-700", bg: "bg-sky-50", border: "border-sky-200", dot: "bg-sky-400" },
     MESSAGE_SENT: { label: "Message envoyé", icon: Linkedin, text: "text-sky-700", bg: "bg-sky-50", border: "border-sky-200", dot: "bg-sky-400" },
     REPLIED: { label: "A répondu", icon: CheckCircle2, text: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200", dot: "bg-emerald-500" },
@@ -463,6 +469,7 @@ export default function ManagerProspectionPage() {
     const { error: showError, success: showSuccess } = useToast();
     const [sdrOptions, setSdrOptions] = useState<{ id: string; name: string }[]>([]);
     const [drawerAction, setDrawerAction] = useState<ActionRecord | null>(null);
+    const [drawerClientBookingUrl, setDrawerClientBookingUrl] = useState<string>("");
     const liveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // ── table state ─────────────────────────────────────────────────────────
@@ -511,6 +518,23 @@ export default function ManagerProspectionPage() {
         window.addEventListener("keydown", handler);
         return () => window.removeEventListener("keydown", handler);
     }, []);
+
+    // ── fetch client booking URL when drawer opens (for MEETING_BOOKED flow) ──
+    useEffect(() => {
+        if (!drawerAction || !selectedMission?.client?.id) {
+            setDrawerClientBookingUrl("");
+            return;
+        }
+        let cancelled = false;
+        fetch(`/api/clients/${selectedMission.client.id}`)
+            .then(r => r.json())
+            .then(j => {
+                if (!cancelled && j.success && j.data?.bookingUrl) setDrawerClientBookingUrl(j.data.bookingUrl);
+                else if (!cancelled) setDrawerClientBookingUrl("");
+            })
+            .catch(() => { if (!cancelled) setDrawerClientBookingUrl(""); });
+        return () => { cancelled = true; };
+    }, [drawerAction, selectedMission?.client?.id]);
 
     // ── fetch mission data ───────────────────────────────────────────────────
     const fetchMissionData = useCallback(async (missionId: string, silent = false) => {
@@ -1465,6 +1489,7 @@ export default function ManagerProspectionPage() {
                     companyId={drawerAction.companyId || drawerAction.contact?.company?.id || ""}
                     missionId={selectedMission.id}
                     missionName={selectedMission.name}
+                    clientBookingUrl={drawerClientBookingUrl || undefined}
                     onActionRecorded={() => fetchMissionData(selectedMission.id, true)}
                     onContactSelect={(newContactId) => {
                         // Switch drawer context to the new contact

@@ -19,6 +19,7 @@ export interface EffectiveStatusDefinition {
     priorityOrder: number;
     triggersOpportunity: boolean;
     triggersCallback: boolean;
+    resultCategoryCode: string | null;
 }
 
 export interface EffectiveNextStep {
@@ -48,14 +49,30 @@ const LEGACY_PRIORITY: Record<string, { order: number; label: ActionPriorityLabe
     INTERESTED: { order: 2, label: "FOLLOW_UP" },
     NO_RESPONSE: { order: 4, label: "RETRY" },
     MEETING_CANCELLED: { order: 4, label: "RETRY" },
+    INVALIDE: { order: 4, label: "RETRY" },
     MEETING_BOOKED: { order: 999, label: "SKIP" },
     BAD_CONTACT: { order: 999, label: "SKIP" },
+    BARRAGE_STANDARD: { order: 999, label: "SKIP" },
+    NUMERO_KO: { order: 999, label: "SKIP" },
     DISQUALIFIED: { order: 999, label: "SKIP" },
     ENVOIE_MAIL: { order: 999, label: "SKIP" },
     CONNECTION_SENT: { order: 999, label: "SKIP" },
     MESSAGE_SENT: { order: 999, label: "SKIP" },
     REPLIED: { order: 2, label: "FOLLOW_UP" },
     NOT_INTERESTED: { order: 999, label: "SKIP" },
+    REFUS: { order: 999, label: "SKIP" },
+    REFUS_ARGU: { order: 999, label: "SKIP" },
+    REFUS_CATEGORIQUE: { order: 999, label: "SKIP" },
+    RELANCE: { order: 1, label: "CALLBACK" },
+    RAPPEL: { order: 1, label: "CALLBACK" },
+    GERE_PAR_SIEGE: { order: 999, label: "SKIP" },
+    FAUX_NUMERO: { order: 999, label: "SKIP" },
+    PROJET_A_SUIVRE: { order: 2, label: "FOLLOW_UP" },
+    MAUVAIS_INTERLOCUTEUR: { order: 999, label: "SKIP" },
+    MAIL_UNIQUEMENT: { order: 999, label: "SKIP" },
+    BARRAGE_SECRETAIRE: { order: 999, label: "SKIP" },
+    MAIL_DOC: { order: 999, label: "SKIP" },
+    HORS_CIBLE: { order: 999, label: "SKIP" },
 };
 
 export interface ScopeContext {
@@ -140,6 +157,7 @@ export async function getEffectiveStatusConfig(
             priorityOrder: r.priorityOrder ?? DEFAULT_PRIORITY_ORDER[r.priorityLabel],
             triggersOpportunity: r.triggersOpportunity,
             triggersCallback: r.triggersCallback,
+            resultCategoryCode: r.resultCategoryCode ?? null,
         }));
 
     // Channel fallback: for LINKEDIN missions, ensure LinkedIn result codes are allowed
@@ -164,6 +182,7 @@ export async function getEffectiveStatusConfig(
                         priorityOrder: p.priorityOrder ?? DEFAULT_PRIORITY_ORDER[p.priorityLabel],
                         triggersOpportunity: p.triggersOpportunity,
                         triggersCallback: p.triggersCallback,
+                        resultCategoryCode: null,
                     });
                 }
             }

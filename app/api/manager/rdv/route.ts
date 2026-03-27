@@ -1,0 +1,346 @@
+import { NextRequest } from "next/server";
+import { prisma } from "@/lib/prisma";
+import {
+  successResponse,
+  requireRole,
+  withErrorHandler,
+  getPaginationParams,
+} from "@/lib/api-utils";
+import { Prisma } from "@prisma/client";
+import { createClientPortalNotification, sendNewRdvEmailNotification } from "@/lib/notifications";
+import { filterRdvList } from "@/lib/utils/meetingFilters";
+
+export const GET = withErrorHandler(async (request: NextRequest) => {
+  await requireRole(["MANAGER"], request);
+  const sp = new URL(request.url).searchParams;
+
+  const search = sp.get("search")?.trim() ?? "";
+  const clientIds = sp.getAll("clientIds[]");
+  const missionIds = sp.getAll("missionIds[]");
+  const sdrIds = sp.getAll("sdrIds[]");
+  const dateFrom = sp.get("dateFrom");
+  const dateTo = sp.get("dateTo");
+  const statuses = sp.getAll("status[]");
+  const meetingTypes = sp.getAll("meetingType[]");
+  const meetingCategories = sp.getAll("meetingCategory[]");
+  const outcomes = sp.getAll("outcome[]");
+  const confirmationStatuses = sp.getAll("confirmationStatus[]");
+
+  const { page, limit, skip } = getPaginationParams(sp);
+
+  const now = new Date();
+  const actionModel = (Prisma as any).dmmf?.datamodel?.models?.find((m: any) => m.name === "Action");
+  const hasConfirmationStatusField = !!actionModel?.fields?.some((f: any) => f.name === "confirmationStatus");
+
+  // SAS RDV: auto-confirm booked meetings after 24h without confirmation
+  if (hasConfirmationStatusField) {
+    const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const toAutoConfirm = await prisma.action.findMany({
+      where: {
+        result: "MEETING_BOOKED",
+        confirmationStatus: "PENDING",
+        createdAt: { lt: cutoff },
+      },
+      select: {
+        id: true,
+        callbackDate: true,
+        meetingType: true,
+        meetingJoinUrl: true,
+        meetingAddress: true,
+        meetingPhone: true,
+        contact: { select: { firstName: true, lastName: true, company: { select: { name: true } } } },
+        company: { select: { name: true } },
+        campaign: { select: { mission: { select: { id: true, name: true, clientId: true } } } },
+      },
+      take: 500,
+    });
+
+    if (toAutoConfirm.length > 0) {
+      await prisma.action.updateMany({
+        where: { id: { in: toAutoConfirm.map((m) => m.id) } },
+        data: {
+          confirmationStatus: "CONFIRMED",
+          confirmationUpdatedAt: now,
+          confirmedAt: now,
+        },
+      });
+
+      await Promise.allSettled(
+        toAutoConfirm
+          .filter((m) => !!m.campaign?.mission?.clientId)
+          .map(async (m) => {
+            const clientId = m.campaign!.mission!.clientId!;
+            await createClientPortalNotification(clientId, {
+              title: "Nouveau RDV confirmé",
+              message: "Un rendez-vous a été confirmé pour une de vos missions.",
+              type: "success",
+              link: "/client/portal/meetings",
+            });
+
+            void sendNewRdvEmailNotification(clientId, {
+              contactFirstName: m.contact?.firstName ?? null,
+              contactLastName: m.contact?.lastName ?? null,
+              companyName: m.company?.name ?? m.contact?.company?.name ?? null,
+              missionName: m.campaign?.mission?.name ?? null,
+              scheduledAt: m.callbackDate ?? null,
+              meetingType: (m.meetingType as any) ?? null,
+              meetingJoinUrl: m.meetingJoinUrl ?? null,
+              meetingAddress: m.meetingAddress ?? null,
+              meetingPhone: m.meetingPhone ?? null,
+            });
+          })
+      );
+    }
+  }
+
+  const where: Prisma.ActionWhereInput = {
+    result: { in: ["MEETING_BOOKED", "MEETING_CANCELLED"] },
+  };
+
+  const andClauses: Prisma.ActionWhereInput[] = [];
+
+  if (search) {
+    andClauses.push({
+      OR: [
+        { contact: { firstName: { contains: search, mode: "insensitive" } } },
+        { contact: { lastName: { contains: search, mode: "insensitive" } } },
+        { contact: { email: { contains: search, mode: "insensitive" } } },
+        { contact: { company: { name: { contains: search, mode: "insensitive" } } } },
+        { company: { name: { contains: search, mode: "insensitive" } } },
+        { campaign: { mission: { client: { name: { contains: search, mode: "insensitive" } } } } },
+        { campaign: { mission: { name: { contains: search, mode: "insensitive" } } } },
+        { campaign: { name: { contains: search, mode: "insensitive" } } },
+        { sdr: { name: { contains: search, mode: "insensitive" } } },
+      ],
+    });
+  }
+
+  if (clientIds.length > 0) {
+    andClauses.push({ campaign: { mission: { clientId: { in: clientIds } } } });
+  }
+  if (missionIds.length > 0) {
+    andClauses.push({ campaign: { missionId: { in: missionIds } } });
+  }
+  if (sdrIds.length > 0) {
+    andClauses.push({ sdrId: { in: sdrIds } });
+  }
+  if (dateFrom) {
+    andClauses.push({ createdAt: { gte: new Date(dateFrom) } });
+  }
+  if (dateTo) {
+    const end = new Date(dateTo);
+    end.setHours(23, 59, 59, 999);
+    andClauses.push({ createdAt: { lte: end } });
+  }
+
+  if (statuses.length > 0) {
+    const statusOr: Prisma.ActionWhereInput[] = [];
+    for (const s of statuses) {
+      if (s === "upcoming") statusOr.push({ result: "MEETING_BOOKED", callbackDate: { gte: now } });
+      if (s === "past") statusOr.push({ result: "MEETING_BOOKED", callbackDate: { lt: now } });
+      if (s === "cancelled") statusOr.push({ result: "MEETING_CANCELLED" });
+    }
+    if (statusOr.length > 0) andClauses.push({ OR: statusOr });
+  }
+
+  if (meetingTypes.length > 0) {
+    andClauses.push({ meetingType: { in: meetingTypes } });
+  }
+
+  if (meetingCategories.length > 0) {
+    andClauses.push({ meetingCategory: { in: meetingCategories } });
+  }
+
+  if (outcomes.length > 0) {
+    andClauses.push({ meetingFeedback: { outcome: { in: outcomes as any[] } } });
+  }
+
+  if (hasConfirmationStatusField && confirmationStatuses.length > 0) {
+    andClauses.push({ confirmationStatus: { in: confirmationStatuses as any[] } });
+  }
+
+  if (andClauses.length > 0) where.AND = andClauses;
+
+  const include = {
+    // Contact + its company (classic flow)
+    contact: {
+      include: {
+        company: {
+          include: { list: { include: { mission: true } } },
+        },
+      },
+    },
+    // Company directly linked to the meeting (company-only meetings)
+    company: {
+      include: { list: { include: { mission: true } } },
+    },
+    sdr: { select: { id: true, name: true, email: true } },
+    campaign: {
+      include: {
+        mission: {
+          include: { client: { select: { id: true, name: true, industry: true } } },
+        },
+      },
+    },
+    meetingFeedback: true,
+  } satisfies Prisma.ActionInclude;
+
+  // Fetch enough rows so that after excluding RDV cancelled with <10 min notice we can fill this page
+  const fetchTake = Math.min(skip + limit + 200, 1000);
+  const [rawMeetings, totalCount] = await Promise.all([
+    prisma.action.findMany({
+      where,
+      include,
+      orderBy: { createdAt: "desc" },
+      skip: 0,
+      take: fetchTake,
+    }),
+    prisma.action.count({ where }),
+  ]);
+
+  const meetingsFiltered = filterRdvList(rawMeetings);
+  const meetings = meetingsFiltered.slice(skip, skip + limit);
+
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - now.getDay() + 1);
+  weekStart.setHours(0, 0, 0, 0);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  // Aggregates MUST match the current filters (same `where` as the list).
+  // We combine with extra constraints via AND to avoid losing existing callbackDate ranges.
+  const aggBase = where;
+
+  const [
+    upcomingCount,
+    pastCount,
+    cancelledCount,
+    weekCount,
+    monthCount,
+    sdrCounts,
+    totalBookedCount,
+  ] = await Promise.all([
+    prisma.action.count({
+      where: { AND: [aggBase, { result: "MEETING_BOOKED" }, { callbackDate: { gte: now } }] },
+    }),
+    prisma.action.count({
+      where: { AND: [aggBase, { result: "MEETING_BOOKED" }, { callbackDate: { lt: now } }] },
+    }),
+    prisma.action.count({
+      where: { AND: [aggBase, { result: "MEETING_CANCELLED" }] },
+    }),
+    prisma.action.count({
+      where: { AND: [aggBase, { result: "MEETING_BOOKED" }, { callbackDate: { gte: weekStart } }] },
+    }),
+    prisma.action.count({
+      where: { AND: [aggBase, { result: "MEETING_BOOKED" }, { callbackDate: { gte: monthStart } }] },
+    }),
+    prisma.action.groupBy({
+      by: ["sdrId"],
+      where: { AND: [aggBase, { result: "MEETING_BOOKED" }] },
+      _count: true,
+    }),
+    prisma.action.count({
+      where: { AND: [aggBase, { result: "MEETING_BOOKED" }] },
+    }),
+  ]);
+
+  const confirmedBookedCount = hasConfirmationStatusField
+    ? await prisma.action.count({
+        where: { AND: [aggBase, { result: "MEETING_BOOKED" }, { confirmationStatus: "CONFIRMED" as any }] },
+      })
+    : totalBookedCount;
+
+  const avgPerSdr = sdrCounts.length > 0 ? Math.round(totalBookedCount / sdrCounts.length) : 0;
+  // SAS RDV conversion = % of booked meetings that are confirmed
+  const conversionRate =
+    totalBookedCount > 0 ? Math.round((confirmedBookedCount / totalBookedCount) * 100) : 0;
+
+  const data = meetings.map((m) => ({
+    id: m.id,
+    result: m.result,
+    confirmationStatus: hasConfirmationStatusField ? (m as any).confirmationStatus : "CONFIRMED",
+    confirmationUpdatedAt: hasConfirmationStatusField ? (m as any).confirmationUpdatedAt : null,
+    confirmedAt: hasConfirmationStatusField ? (m as any).confirmedAt : null,
+    confirmedById: hasConfirmationStatusField ? (m as any).confirmedById : null,
+    rdvFiche: hasConfirmationStatusField ? (m as any).rdvFiche : null,
+    rdvFicheUpdatedAt: hasConfirmationStatusField ? (m as any).rdvFicheUpdatedAt : null,
+    callbackDate: m.callbackDate,
+    meetingType: m.meetingType,
+    meetingCategory: m.meetingCategory,
+    meetingAddress: m.meetingAddress,
+    meetingJoinUrl: m.meetingJoinUrl,
+    meetingPhone: m.meetingPhone,
+    note: m.note,
+    voipSummary: m.voipSummary,
+    voipTranscript: m.voipTranscript,
+    cancellationReason: m.cancellationReason,
+    createdAt: m.createdAt,
+    duration: m.duration,
+    contact: m.contact
+      ? {
+          id: m.contact.id,
+          firstName: m.contact.firstName,
+          lastName: m.contact.lastName,
+          title: m.contact.title,
+          email: m.contact.email,
+          phone: m.contact.phone,
+          linkedin: m.contact.linkedin,
+          customData: m.contact.customData,
+        }
+      : null,
+    // Prefer direct company link (companyId) but fall back to contact.company
+    company: m.company
+      ? {
+          id: m.company.id,
+          name: m.company.name,
+          industry: m.company.industry,
+          country: m.company.country,
+          size: m.company.size,
+          website: m.company.website,
+          phone: m.company.phone ?? null,
+        }
+      : m.contact?.company
+      ? {
+          id: m.contact.company.id,
+          name: m.contact.company.name,
+          industry: m.contact.company.industry,
+          country: m.contact.company.country,
+          size: m.contact.company.size,
+          website: m.contact.company.website,
+          phone: m.contact.company.phone ?? null,
+        }
+      : null,
+    campaign: { id: m.campaign.id, name: m.campaign.name },
+    mission: { id: m.campaign.mission.id, name: m.campaign.mission.name },
+    client: m.campaign.mission.client,
+    sdr: m.sdr,
+    feedback: m.meetingFeedback
+      ? {
+          outcome: m.meetingFeedback.outcome,
+          recontact: m.meetingFeedback.recontactRequested,
+          note: m.meetingFeedback.clientNote,
+        }
+      : null,
+  }));
+
+  return successResponse({
+    meetings: data,
+    pagination: {
+      total: totalCount,
+      page,
+      limit,
+      totalPages: Math.ceil(totalCount / limit),
+      hasMore: page * limit < totalCount,
+    },
+    aggregates: {
+      totalCount,
+      upcomingCount,
+      pastCount,
+      cancelledCount,
+      avgPerSdr,
+      conversionRate,
+      meetingsThisWeek: weekCount,
+      meetingsThisMonth: monthCount,
+    },
+  });
+});

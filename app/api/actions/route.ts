@@ -17,20 +17,33 @@ import { z } from 'zod';
 // ============================================
 
 const createActionSchema = z.object({
- contactId: z.string().min(1, 'Contact requis').optional(),
- companyId: z.string().min(1, 'Company requis').optional(),
- campaignId: z.string().min(1, 'Campagne requise'),
- channel: z.enum(['CALL', 'EMAIL', 'LINKEDIN']),
- result: z.string().min(1, 'Résultat requis'),
- note: z.string().max(500, 'Note trop longue (max 500 caractères)').optional(),
- callbackDate: z.union([z.string(), z.date()]).optional().transform((s) => (s ? (typeof s === 'string' ? new Date(s) : s) : undefined)),
- duration: z.number().positive().max(7200, 'Durée invalide').optional(),
- meetingType: z.enum(['VISIO', 'PHYSIQUE', 'TELEPHONIQUE']).optional(),
- meetingAddress: z.string().optional(),
+    contactId: z.string().min(1, 'Contact requis').optional(),
+    companyId: z.string().min(1, 'Company requis').optional(),
+    campaignId: z.string().min(1, 'Campagne requise'),
+    channel: z.enum(['CALL', 'EMAIL', 'LINKEDIN']),
+    result: z.string().min(1, 'Résultat requis'),
+    note: z.string().max(500, 'Note trop longue (max 500 caractères)').optional(),
+    callbackDate: z.union([z.string(), z.date()]).optional().transform((s) => (s ? (typeof s === 'string' ? new Date(s) : s) : undefined)),
+    duration: z.number().positive().max(7200, 'Durée invalide').optional(),
+    meetingType: z.enum(['VISIO', 'PHYSIQUE', 'TELEPHONIQUE']).optional(),
+    meetingCategory: z.enum(['EXPLORATOIRE', 'BESOIN']).optional(),
+    meetingAddress: z.string().max(500).optional(),
+    meetingJoinUrl: z.string().url('Lien de rejoindre invalide').max(2000).optional(),
+    meetingPhone: z.string().max(50).optional(),
 }).refine(data => data.contactId || data.companyId, {
- message: 'Contact ou Company requis',
- path: ['contactId'],
-});
+    message: 'Contact ou Company requis',
+    path: ['contactId'],
+}).refine(
+    (data) => {
+        if (data.result !== 'MEETING_BOOKED' || !data.meetingType) return true;
+        // VISIO/PHYSIQUE: link and address are optional (e.g. manager-created RDV)
+        return true;
+    },
+    {
+        message: 'VISIO requiert un lien de rejoindre ; PHYSIQUE requiert une adresse.',
+        path: ['meetingType'],
+    }
+);
 
 // ============================================
 // MISTRAL NOTE IMPROVEMENT (SERVER-SIDE AUTO-ENHANCE)
@@ -114,7 +127,7 @@ Contraintes :
 // ============================================
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
- const session = await requireRole(['MANAGER', 'SDR', 'BUSINESS_DEVELOPER'], request);
+ const session = await requireRole(['MANAGER', 'SDR', 'BUSINESS_DEVELOPER', 'BOOKER'], request);
  const { searchParams } = new URL(request.url);
  const { page, limit } = getPaginationParams(searchParams);
 
@@ -168,7 +181,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
- const session = await requireRole(['SDR', 'MANAGER', 'BUSINESS_DEVELOPER'], request);
+ const session = await requireRole(['SDR', 'MANAGER', 'BUSINESS_DEVELOPER', 'BOOKER'], request);
  const data = await validateRequest(request, createActionSchema);
 
  // Validate result against effective config
@@ -192,26 +205,29 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
  resultLabel: statusDef?.label,
  });
 
- // Use service layer with transaction
- try {
- const action = await actionService.createAction({
- contactId: data.contactId,
- companyId: data.companyId,
- sdrId: session.user.id,
- campaignId: data.campaignId,
- channel: data.channel,
- result: data.result,
- note: improvedNote ?? data.note,
- callbackDate: data.callbackDate,
- duration: data.duration,
- meetingType: data.meetingType,
- meetingAddress: data.meetingAddress,
- }, statusDef);
- return successResponse(action, 201);
- } catch (err) {
- if (err instanceof Error && err.message === 'DUPLICATE_CALLBACK') {
- return errorResponse('Un rappel est déjà en attente pour ce contact/campagne. Traitez-le ou reprogrammez-le avant d\'en créer un nouveau.', 409);
- }
- throw err;
- }
+    // Use service layer with transaction
+    try {
+        const action = await actionService.createAction({
+            contactId: data.contactId,
+            companyId: data.companyId,
+            sdrId: session.user.id,
+            campaignId: data.campaignId,
+            channel: data.channel,
+            result: data.result,
+            note: improvedNote ?? data.note,
+            callbackDate: data.callbackDate,
+            duration: data.duration,
+            meetingType: data.meetingType,
+            meetingCategory: data.meetingCategory,
+            meetingAddress: data.meetingAddress,
+            meetingJoinUrl: data.meetingJoinUrl,
+            meetingPhone: data.meetingPhone,
+        }, statusDef);
+        return successResponse(action, 201);
+    } catch (err) {
+        if (err instanceof Error && err.message === 'DUPLICATE_CALLBACK') {
+            return errorResponse('Un rappel est déjà en attente pour ce contact/campagne. Traitez-le ou reprogrammez-le avant d\'en créer un nouveau.', 409);
+        }
+        throw err;
+    }
 });

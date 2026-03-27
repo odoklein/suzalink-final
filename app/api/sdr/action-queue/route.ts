@@ -6,8 +6,8 @@ import { statusConfigService } from "@/lib/services/StatusConfigService";
 // ============================================
 // GET /api/sdr/action-queue
 // Returns a list of queue items (same pool as /api/actions/next) for table view.
-// Query: missionId?, listId?, limit? (0 or omitted = all), search? (filter by name/company)
-// Returns all queue items by default so the SDR table shows the complete listing.
+// Query: missionId?, listId?, limit?, search? (filter by name/company)
+// Returns a bounded list by default to keep response times stable.
 // ============================================
 
 function escapeIlikePattern(raw: string): string {
@@ -18,7 +18,7 @@ function escapeIlikePattern(raw: string): string {
 }
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
-    const session = await requireRole(["SDR", "BUSINESS_DEVELOPER"], request);
+    const session = await requireRole(["SDR", "BUSINESS_DEVELOPER", "BOOKER"], request);
     const { searchParams } = new URL(request.url);
     const missionId = searchParams.get("missionId");
     const listId = searchParams.get("listId");
@@ -29,16 +29,30 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         : "";
     const search = searchParams.get("search")?.trim() ?? "";
     const hasSearch = search.length > 0;
-    // No hard limit – return all queue items so the SDR can see the full listing
     const limitParam = searchParams.get("limit");
-    const limit = limitParam ? parseInt(limitParam, 10) || 0 : 0; // 0 = no limit
+    const requestedLimit = limitParam
+        ? Math.min(Math.max(parseInt(limitParam, 10) || 100, 1), 500)
+        : 100;
+    // Query a larger candidate pool than requested so priority filtering/sorting still has headroom
+    const sqlLimit = Math.min(Math.max(requestedLimit * 3, 200), 2000);
 
     const COOLDOWN_HOURS = 24;
     const cooldownDate = new Date(Date.now() - COOLDOWN_HOURS * 60 * 60 * 1000);
     const sdrId = session.user.id;
+    const isBooker = session.user.role === "BOOKER";
 
     const missionFilter = missionId ? `AND m.id = '${missionId.replace(/'/g, "''")}'` : "";
     const listFilter = listId ? `AND l.id = '${listId.replace(/'/g, "''")}'` : "";
+
+    const shouldBypassAssignmentGate = Boolean(missionId);
+
+    // Booker and mission-filtered requests: no SDRAssignment join
+    const sdrAssignmentJoin = isBooker || shouldBypassAssignmentGate
+        ? ""
+        : `INNER JOIN "SDRAssignment" sa ON sa."missionId" = m.id`;
+    const sdrAssignmentWhere = isBooker || shouldBypassAssignmentGate
+        ? ""
+        : `AND sa."sdrId" = $1`;
 
     const rawResult = await prisma.$queryRawUnsafe<
         Array<{
@@ -68,7 +82,8 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     >(
         `
         WITH sdr_contacts AS (
-            SELECT DISTINCT
+            -- One row per contact/company pair (even if multiple active campaigns exist)
+            SELECT DISTINCT ON (c.id, co.id)
                 c.id as contact_id,
                 co.id as company_id,
                 co.name as company_name,
@@ -92,10 +107,12 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
             INNER JOIN "Mission" m ON l."missionId" = m.id
             INNER JOIN "Client" cl ON m."clientId" = cl.id
             INNER JOIN "Campaign" camp ON camp."missionId" = m.id
-            INNER JOIN "SDRAssignment" sa ON sa."missionId" = m.id
-            WHERE sa."sdrId" = $1
-              AND m."isActive" = true
+            ${sdrAssignmentJoin}
+            WHERE m."isActive" = true
+              AND (l."isActive" IS NULL OR l."isActive" = true)
+              AND (l."isArchived" IS NULL OR l."isArchived" = false)
               AND camp."isActive" = true
+              ${sdrAssignmentWhere}
               AND (
                   ('CALL' = ANY(m.channels) AND (c.phone IS NOT NULL AND c.phone != '' OR co.phone IS NOT NULL AND co.phone != '')) OR
                   ('EMAIL' = ANY(m.channels) AND c.email IS NOT NULL AND c.email != '') OR
@@ -104,9 +121,11 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
               ${missionFilter}
               ${listFilter}
               ${channelFilter}
+            ORDER BY c.id, co.id
         ),
         sdr_companies AS (
-            SELECT DISTINCT
+            -- One row per company (when no eligible contacts exist), regardless of campaign count
+            SELECT DISTINCT ON (co.id)
                 NULL::text as contact_id,
                 co.id as company_id,
                 co.name as company_name,
@@ -129,10 +148,12 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
             INNER JOIN "Mission" m ON l."missionId" = m.id
             INNER JOIN "Client" cl ON m."clientId" = cl.id
             INNER JOIN "Campaign" camp ON camp."missionId" = m.id
-            INNER JOIN "SDRAssignment" sa ON sa."missionId" = m.id
-            WHERE sa."sdrId" = $1
-              AND m."isActive" = true
+            ${sdrAssignmentJoin}
+            WHERE m."isActive" = true
+              AND (l."isActive" IS NULL OR l."isActive" = true)
+              AND (l."isArchived" IS NULL OR l."isArchived" = false)
               AND camp."isActive" = true
+              ${sdrAssignmentWhere}
               AND 'CALL' = ANY(m.channels)
               AND co.phone IS NOT NULL
               AND co.phone != ''
@@ -148,6 +169,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
               ${missionFilter}
               ${listFilter}
               ${channelFilter}
+            ORDER BY co.id
         ),
         all_targets AS (
             SELECT * FROM sdr_contacts
@@ -194,54 +216,59 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
             LEFT JOIN last_actions_companies lac2 ON at.contact_id IS NULL AND at.company_id = lac2."companyId"
         )
         SELECT * FROM targets_with_last_action
+        WHERE (last_action_created IS NULL OR last_action_created < $${isBooker || shouldBypassAssignmentGate ? 1 : 2})
         ${hasSearch ? `
-        WHERE (
-            (contact_first_name IS NOT NULL AND contact_first_name ILIKE $2)
-            OR (contact_last_name IS NOT NULL AND contact_last_name ILIKE $2)
-            OR (company_name IS NOT NULL AND company_name ILIKE $2)
+        AND (
+            (contact_first_name IS NOT NULL AND contact_first_name ILIKE $${isBooker || shouldBypassAssignmentGate ? 2 : 3})
+            OR (contact_last_name IS NOT NULL AND contact_last_name ILIKE $${isBooker || shouldBypassAssignmentGate ? 2 : 3})
+            OR (company_name IS NOT NULL AND company_name ILIKE $${isBooker || shouldBypassAssignmentGate ? 2 : 3})
         )` : ""}
+        LIMIT ${sqlLimit}
     `,
-        ...(hasSearch ? [sdrId, `%${escapeIlikePattern(search)}%`] : [sdrId])
+        ...(isBooker || shouldBypassAssignmentGate
+            ? (hasSearch ? [cooldownDate, `%${escapeIlikePattern(search)}%`] : [cooldownDate])
+            : (hasSearch ? [sdrId, cooldownDate, `%${escapeIlikePattern(search)}%`] : [sdrId, cooldownDate])
+        )
     );
 
-    // Resolve missionId for config
-    let configMissionId = missionId ?? null;
-    if (!configMissionId && listId) {
-        const list = await prisma.list.findUnique({
-            where: { id: listId },
-            select: { missionId: true },
-        });
-        configMissionId = list?.missionId ?? null;
-    }
-    if (!configMissionId && rawResult.length > 0) {
-        const camp = await prisma.campaign.findUnique({
-            where: { id: rawResult[0].campaign_id },
-            select: { missionId: true },
-        });
-        configMissionId = camp?.missionId ?? null;
-    }
+    // Resolve config in parallel with result processing
+    const configPromise = (async () => {
+        let configMissionId = missionId ?? null;
+        if (!configMissionId && listId) {
+            const list = await prisma.list.findUnique({
+                where: { id: listId },
+                select: { missionId: true },
+            });
+            configMissionId = list?.missionId ?? null;
+        }
+        if (!configMissionId && rawResult.length > 0) {
+            const camp = await prisma.campaign.findUnique({
+                where: { id: rawResult[0].campaign_id },
+                select: { missionId: true },
+            });
+            configMissionId = camp?.missionId ?? null;
+        }
+        return statusConfigService.getEffectiveStatusConfig(
+            configMissionId ? { missionId: configMissionId } : {}
+        );
+    })();
 
-    const config = await statusConfigService.getEffectiveStatusConfig(
-        configMissionId ? { missionId: configMissionId } : {}
-    );
+    const config = await configPromise;
 
-    // Add config-driven priority, apply cooldown (999 for recent), sort, limit
+    // Cooldown already filtered in SQL; apply config-driven priority and sort
     const withPriority = rawResult.map((row) => {
-        const inCooldown =
-            row.last_action_created && new Date(row.last_action_created) >= cooldownDate;
-        const { priorityOrder, priorityLabel } = inCooldown
-            ? { priorityOrder: 999, priorityLabel: "SKIP" as const }
-            : statusConfigService.getPriorityForResult(row.last_action_result, config);
+        const { priorityOrder, priorityLabel } = statusConfigService.getPriorityForResult(row.last_action_result, config);
         return { ...row, _priorityOrder: priorityOrder, _priorityLabel: priorityLabel };
     });
-    const sorted = withPriority.sort(
+    const filtered = withPriority.filter((r) => r._priorityOrder < 999);
+    const sorted = filtered.sort(
         (a, b) =>
             a._priorityOrder - b._priorityOrder ||
             (a.contact_status === "ACTIONABLE" ? 0 : a.contact_status === "PARTIAL" ? 1 : 2) -
                 (b.contact_status === "ACTIONABLE" ? 0 : b.contact_status === "PARTIAL" ? 1 : 2) ||
             new Date(a.last_action_created ?? 0).getTime() - new Date(b.last_action_created ?? 0).getTime()
     );
-    const result = limit > 0 ? sorted.slice(0, limit) : sorted;
+    const result = sorted.slice(0, requestedLimit);
 
     const items = result.map((row) => ({
         contactId: row.contact_id,

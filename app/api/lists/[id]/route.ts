@@ -28,9 +28,18 @@ export const GET = withErrorHandler(async (
                     name: true,
                     client: {
                         select: {
+                            id: true,
                             name: true,
                         },
                     },
+                },
+            },
+            commercialInterlocuteur: {
+                select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    title: true,
                 },
             },
             _count: {
@@ -79,25 +88,142 @@ export const PATCH = withErrorHandler(async (
     const { id } = await params;
     const body = await request.json();
 
-    const { name, type, source, missionId } = body;
+    const { name, type, source, missionId, commercialInterlocuteurId, isActive, isArchived } = body;
 
-    const updatedList = await prisma.list.update({
+    // Load current list with mission + client for validation
+    const existing = await prisma.list.findUnique({
         where: { id },
-        data: {
-            ...(name && { name }),
-            ...(type && { type }),
-            ...(source !== undefined && { source }),
-            ...(missionId && { missionId }),
-        },
         include: {
             mission: {
                 select: {
                     id: true,
-                    name: true,
+                    clientId: true,
                 },
             },
         },
     });
 
-    return successResponse(updatedList);
+    if (!existing) {
+        return errorResponse('Liste introuvable', 404);
+    }
+
+    // If missionId is changing, we will treat the list as moved to another mission.
+    // In that case, we clear any explicit commercialInterlocuteurId to avoid mismatched clients.
+    let nextMissionId: string | undefined;
+    if (missionId && missionId !== existing.missionId) {
+        nextMissionId = missionId;
+    }
+
+    // Validate commercialInterlocuteurId, if provided (non-null)
+    let commercialInterlocuteurConnect:
+        | { connect: { id: string } }
+        | { disconnect: true }
+        | undefined;
+
+    if (commercialInterlocuteurId !== undefined) {
+        if (commercialInterlocuteurId === null) {
+            commercialInterlocuteurConnect = { disconnect: true };
+        } else {
+            // Ensure interlocuteur belongs to the same client as the (current) mission
+            const interlocuteur = await prisma.clientInterlocuteur.findFirst({
+                where: {
+                    id: commercialInterlocuteurId,
+                    clientId: existing.mission.clientId,
+                },
+                select: { id: true },
+            });
+
+            if (!interlocuteur) {
+                return errorResponse(
+                    'Ce commercial n’appartient pas au même client que la mission de cette liste',
+                    400
+                );
+            }
+
+            commercialInterlocuteurConnect = { connect: { id: commercialInterlocuteurId } };
+        }
+    }
+
+    // isActive: use raw SQL so this works even if Prisma client was generated before the column existed
+    if (typeof isActive === 'boolean') {
+        await prisma.$executeRaw`UPDATE "List" SET "isActive" = ${isActive} WHERE id = ${id}`;
+    }
+
+    // isArchived: use raw SQL so this works even if Prisma client was generated before the column existed
+    if (typeof isArchived === 'boolean') {
+        const archivedAt = isArchived ? new Date() : null;
+        await prisma.$executeRaw`UPDATE "List" SET "isArchived" = ${isArchived}, "archivedAt" = ${archivedAt} WHERE id = ${id}`;
+    }
+
+    const hasOtherUpdates =
+        (name && name !== existing.name) ||
+        (type && type !== existing.type) ||
+        source !== undefined ||
+        nextMissionId ||
+        commercialInterlocuteurConnect !== undefined;
+
+    let updatedList;
+    if (hasOtherUpdates) {
+        updatedList = await prisma.list.update({
+            where: { id },
+            data: {
+                ...(name && { name }),
+                ...(type && { type }),
+                ...(source !== undefined && { source }),
+                ...(nextMissionId && { missionId: nextMissionId }),
+                ...(commercialInterlocuteurConnect && {
+                    commercialInterlocuteur: commercialInterlocuteurConnect,
+                }),
+            },
+            include: {
+                mission: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+                commercialInterlocuteur: {
+                    select: {
+                        id: true,
+                        firstName: true,
+                        lastName: true,
+                        title: true,
+                    },
+                },
+            },
+        });
+    } else {
+        updatedList = await prisma.list.findUnique({
+            where: { id },
+            include: {
+                mission: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+                commercialInterlocuteur: {
+                    select: {
+                        id: true,
+                        firstName: true,
+                        lastName: true,
+                        title: true,
+                    },
+                },
+            },
+        });
+    }
+
+    // Attach isActive from DB when we updated it (client may not have the field in its type yet)
+    if (typeof isActive === 'boolean' && updatedList) {
+        (updatedList as { isActive?: boolean }).isActive = isActive;
+    }
+
+    // Attach isArchived from DB when we updated it
+    if (typeof isArchived === 'boolean' && updatedList) {
+        (updatedList as { isArchived?: boolean; archivedAt?: Date | null }).isArchived = isArchived;
+        (updatedList as { isArchived?: boolean; archivedAt?: Date | null }).archivedAt = isArchived ? new Date() : null;
+    }
+
+    return successResponse(updatedList!);
 });

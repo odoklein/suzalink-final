@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { filterRdvList } from "@/lib/utils/meetingFilters";
 
 // ============================================
 // GET /api/sdr/meetings
@@ -71,7 +72,7 @@ export async function GET(request: NextRequest) {
             where.contact = contactConditions.length === 1 ? contactConditions[0] : { AND: contactConditions };
         }
 
-        const meetings = await prisma.action.findMany({
+        const rawMeetings = await prisma.action.findMany({
             where,
             include: {
                 contact: {
@@ -125,7 +126,10 @@ export async function GET(request: NextRequest) {
             },
         });
 
-        // Transform response to match frontend expectations
+        // Exclude RDV cancelled with less than 10 min before scheduled time
+        const meetings = filterRdvList(rawMeetings);
+
+        // Transform response to match frontend expectations (include meeting format metadata)
         const transformedMeetings = meetings.map((meeting) => ({
             id: meeting.id,
             createdAt: meeting.createdAt,
@@ -133,6 +137,10 @@ export async function GET(request: NextRequest) {
             note: meeting.note || undefined,
             callbackDate: meeting.callbackDate?.toISOString() ?? null,
             cancellationReason: meeting.cancellationReason ?? undefined,
+            meetingType: meeting.meetingType ?? undefined,
+            meetingAddress: meeting.meetingAddress ?? undefined,
+            meetingJoinUrl: meeting.meetingJoinUrl ?? undefined,
+            meetingPhone: meeting.meetingPhone ?? undefined,
             contact: meeting.contact,
             mission: meeting.campaign?.mission
                 ? {

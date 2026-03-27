@@ -1,9 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Card, Badge, Button, Modal, ModalFooter, Select, DataTable, useToast, TableSkeleton, CardSkeleton, EmptyState } from "@/components/ui";
+import dynamic from "next/dynamic";
+import { Card, Badge, Button, Modal, ModalFooter, Select, DataTable, useToast, TableSkeleton, CardSkeleton, EmptyState, DateTimePicker } from "@/components/ui";
 import type { Column } from "@/components/ui/DataTable";
-import { UnifiedActionDrawer } from "@/components/drawers/UnifiedActionDrawer";
+
+const UnifiedActionDrawer = dynamic(
+    () => import("@/components/drawers/UnifiedActionDrawer").then((m) => ({ default: m.UnifiedActionDrawer })),
+    { ssr: false }
+);
 import {
     Clock,
     Phone,
@@ -331,7 +336,10 @@ export default function SDRCallbacksPage() {
 
     const submitOutcome = async () => {
         if (!outcomeCallback || !outcomeResult) return;
-        const noteRequired = outcomeResult === "INTERESTED" || outcomeResult === "CALLBACK_REQUESTED";
+        const noteRequired =
+            outcomeResult === "INTERESTED" ||
+            outcomeResult === "CALLBACK_REQUESTED" ||
+            outcomeResult === "ENVOIE_MAIL";
         if (noteRequired && !outcomeNote.trim()) return;
         setOutcomeSubmitting(true);
         try {
@@ -342,7 +350,14 @@ export default function SDRCallbacksPage() {
                     contactId: outcomeCallback.contact?.id ?? undefined,
                     companyId: outcomeCallback.contact ? undefined : outcomeCallback.company?.id,
                     campaignId: outcomeCallback.campaignId,
-                    channel: outcomeCallback.channel === "EMAIL" ? "EMAIL" : outcomeCallback.channel === "LINKEDIN" ? "LINKEDIN" : "CALL",
+                    channel:
+                        outcomeResult === "ENVOIE_MAIL"
+                            ? "EMAIL"
+                            : outcomeCallback.channel === "EMAIL"
+                                ? "EMAIL"
+                                : outcomeCallback.channel === "LINKEDIN"
+                                    ? "LINKEDIN"
+                                    : "CALL",
                     result: outcomeResult,
                     note: outcomeNote.trim() || (outcomeResult === "MEETING_BOOKED" ? "RDV pris suite au rappel" : undefined),
                     callbackDate: outcomeResult === "CALLBACK_REQUESTED" ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : undefined,
@@ -778,7 +793,7 @@ export default function SDRCallbacksPage() {
             </div>
 
             {/* Filters & Sort - no overflow-hidden so Select dropdowns can extend outside */}
-            <div className="bg-white/80 backdrop-blur-xl rounded-2xl border border-slate-200/60 shadow-sm">
+            <div className="relative z-20 bg-white/80 backdrop-blur-xl rounded-2xl border border-slate-200/60 shadow-sm">
                 <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50/80 to-white">
                     <div className="flex flex-wrap items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
@@ -926,7 +941,7 @@ export default function SDRCallbacksPage() {
                 </Card>
             ) : viewMode === "table" ? (
                 /* ========== TABLE VIEW ========== */
-                <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
+                <div className="relative z-0 bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
                     <DataTable
                         data={sortedCallbacks}
                         columns={tableColumns}
@@ -1140,8 +1155,8 @@ export default function SDRCallbacksPage() {
                 </div>
             )}
 
-            {/* Unified Action Drawer */}
-            {unifiedDrawerCompanyId && (
+            {/* Unified Action Drawer — mount only when open */}
+            {unifiedDrawerOpen && unifiedDrawerCompanyId && (
                 <UnifiedActionDrawer
                     isOpen={unifiedDrawerOpen}
                     onClose={closeUnifiedDrawer}
@@ -1182,13 +1197,15 @@ export default function SDRCallbacksPage() {
             >
                 {outcomeCallback && outcomeResult && (
                     <div className="space-y-4">
-                        {outcomeResult === "INTERESTED" && (
+                        {(outcomeResult === "INTERESTED" || outcomeResult === "CALLBACK_REQUESTED" || outcomeResult === "ENVOIE_MAIL") && (
                             <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                                Une note est requise pour &quot;Intéressé&quot;.
+                                Une note est requise pour ce résultat.
                             </p>
                         )}
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">{outcomeResult === "INTERESTED" ? "Note *" : "Note (optionnel)"}</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                                {(outcomeResult === "INTERESTED" || outcomeResult === "CALLBACK_REQUESTED" || outcomeResult === "ENVOIE_MAIL") ? "Note *" : "Note (optionnel)"}
+                            </label>
                             <textarea
                                 value={outcomeNote}
                                 onChange={(e) => setOutcomeNote(e.target.value)}
@@ -1206,7 +1223,7 @@ export default function SDRCallbacksPage() {
                             <Button
                                 variant="primary"
                                 onClick={submitOutcome}
-                                disabled={outcomeSubmitting || (outcomeResult === "INTERESTED" && !outcomeNote.trim())}
+                                disabled={outcomeSubmitting || ((outcomeResult === "INTERESTED" || outcomeResult === "CALLBACK_REQUESTED" || outcomeResult === "ENVOIE_MAIL") && !outcomeNote.trim())}
                                 isLoading={outcomeSubmitting}
                             >
                                 Enregistrer
@@ -1262,13 +1279,13 @@ export default function SDRCallbacksPage() {
                             </div>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">Nouvelle date et heure</label>
-                            <input
-                                type="datetime-local"
+                            <DateTimePicker
+                                label="Nouvelle date et heure"
                                 value={rescheduleDateValue}
-                                onChange={(e) => setRescheduleDateValue(e.target.value)}
+                                onChange={setRescheduleDateValue}
+                                placeholder="Choisir date et heure…"
                                 min={new Date().toISOString().slice(0, 16)}
-                                className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                triggerClassName="border-amber-200 focus:ring-amber-400/40 focus:border-amber-400"
                             />
                         </div>
                         <ModalFooter>

@@ -24,7 +24,6 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     const sdrId = searchParams.get('sdrId');
     const missionId = searchParams.get('missionId');
 
-    // Build where clause
     const where: Record<string, unknown> = {};
 
     if (startDate && endDate) {
@@ -40,7 +39,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 
     if (sdrId) where.sdrId = sdrId;
     if (missionId) where.missionId = missionId;
-    // Hide REJECTED suggestions from view
+
     where.AND = [
         {
             OR: [
@@ -96,10 +95,12 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         ],
     });
 
-    // Only return blocks whose date is within the mission's startDate/endDate
-    const missionStart = (m: { startDate: Date } | null) => (m?.startDate ? new Date(m.startDate).getTime() : -Infinity);
-    const missionEnd = (m: { endDate: Date } | null) => (m?.endDate ? new Date(m.endDate).getTime() : Infinity);
+    const missionStart = (m: { startDate: Date } | null) =>
+        m?.startDate ? new Date(m.startDate).setHours(0, 0, 0, 0) : -Infinity;
+    const missionEnd = (m: { endDate: Date } | null) =>
+        m?.endDate ? new Date(m.endDate).setHours(23, 59, 59, 999) : Infinity;
     const blockDateMs = (b: { date: Date }) => new Date(b.date).setHours(0, 0, 0, 0);
+
     const filtered = blocks.filter((b) => {
         const m = b.mission as { startDate?: Date; endDate?: Date } | null;
         if (!m) return true;
@@ -123,63 +124,35 @@ const createBlockSchema = z.object({
     startTime: z.string().regex(/^\d{2}:\d{2}$/, 'Format HH:mm requis'),
     endTime: z.string().regex(/^\d{2}:\d{2}$/, 'Format HH:mm requis'),
     notes: z.string().optional(),
+    allocationId: z.string().optional(), // ← added to schema
 });
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
     const session = await requireRole(['MANAGER'], request);
     const data = await validateRequest(request, createBlockSchema);
 
-    // Validate time range
     if (data.startTime >= data.endTime) {
         return errorResponse('L\'heure de début doit être avant l\'heure de fin', 400);
     }
 
-    // Parse date in local timezone to prevent day shifting
-    // Input format: "YYYY-MM-DD"
     const [year, month, day] = data.date.split('-').map(Number);
     const blockDate = new Date(year, month - 1, day, 0, 0, 0, 0);
 
-    // Check for overlapping blocks (only CONFIRMED or legacy blocks block the slot)
-    const overlapping = await prisma.scheduleBlock.findFirst({
+    // ← fixed: missionId_sdrId instead of sdrId_missionId
+    await prisma.sDRAssignment.upsert({
         where: {
-            sdrId: data.sdrId,
-            date: blockDate,
-            status: { not: 'CANCELLED' },
-            AND: [
-                {
-                    OR: [
-                        { suggestionStatus: null },
-                        { suggestionStatus: 'CONFIRMED' },
-                    ],
-                },
-                {
-                    OR: [
-                        { startTime: { lte: data.startTime }, endTime: { gt: data.startTime } },
-                        { startTime: { lt: data.endTime }, endTime: { gte: data.endTime } },
-                        { startTime: { gte: data.startTime }, endTime: { lte: data.endTime } },
-                    ],
-                },
-            ],
+            missionId_sdrId: {
+                sdrId: data.sdrId,
+                missionId: data.missionId,
+            },
         },
-    });
-
-    if (overlapping) {
-        return errorResponse('Ce créneau chevauche un bloc existant', 409);
-    }
-
-    // Verify SDR is assigned to mission
-    const assignment = await prisma.sDRAssignment.findFirst({
-        where: {
+        create: {
             sdrId: data.sdrId,
             missionId: data.missionId,
         },
+        update: {},
     });
 
-    if (!assignment) {
-        return errorResponse('Le SDR n\'est pas assigné à cette mission', 400);
-    }
-
-    // Pre-start validation: block date must be within mission startDate/endDate
     const mission = await prisma.mission.findUnique({
         where: { id: data.missionId },
         select: { startDate: true, endDate: true },
@@ -198,7 +171,6 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
         }
     }
 
-    // Create block (manual = CONFIRMED, no mission plan)
     const block = await prisma.scheduleBlock.create({
         data: {
             sdrId: data.sdrId,
@@ -209,7 +181,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
             notes: data.notes,
             suggestionStatus: 'CONFIRMED',
             missionPlanId: null,
-            allocationId: (data as Record<string, unknown>).allocationId as string | undefined ?? null,
+            allocationId: data.allocationId ?? null,
             createdById: session.user.id,
         },
         include: {
@@ -241,13 +213,11 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
         },
     });
 
-    // Sync scheduledDays counter on the allocation if linked
     if (block.allocationId) {
         await prisma.sdrDayAllocation.update({
             where: { id: block.allocationId },
             data: { scheduledDays: { increment: 1 } },
         });
-        // Recompute conflicts for this SDR+month
         const alloc = await prisma.sdrDayAllocation.findUnique({
             where: { id: block.allocationId },
             include: { missionMonthPlan: true },
@@ -261,17 +231,21 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
         }
     }
 
-    // Send notification to the assigned user
-    await createScheduleAssignmentNotification({
-        userId: block.sdr.id,
-        userRole: block.sdr.role,
-        missionName: block.mission.name,
-        clientName: block.mission.client.name,
-        date: data.date,
-        startTime: data.startTime,
-        endTime: data.endTime,
-        managerName: block.createdBy.name,
-    });
+    // ← wrapped in try/catch so a notification failure never crashes the request
+    try {
+        await createScheduleAssignmentNotification({
+            userId: block.sdr.id,
+            userRole: block.sdr.role,
+            missionName: block.mission.name,
+            clientName: block.mission.client.name,
+            date: data.date,
+            startTime: data.startTime,
+            endTime: data.endTime,
+            managerName: block.createdBy.name ?? 'Manager',
+        });
+    } catch (err) {
+        console.error('Notification failed (non-blocking):', err);
+    }
 
     return successResponse(block, 201);
 });

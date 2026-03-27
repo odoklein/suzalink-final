@@ -22,6 +22,11 @@ const updateClientSchema = z.object({
     bookingUrl: z.string().url().optional().or(z.literal('')),
     portalShowCallHistory: z.boolean().optional(),
     portalShowDatabase: z.boolean().optional(),
+    rdvEmailNotificationsEnabled: z.boolean().optional(),
+    /** Persona / ICP (Ideal Customer Profile) — stored in onboardingData.icp */
+    icp: z.string().optional(),
+    /** Default outbound mailbox for this client (stored in onboardingData.defaultMailboxId) */
+    defaultMailboxId: z.string().optional().or(z.literal('')),
 });
 
 // ============================================
@@ -68,11 +73,22 @@ export const GET = withErrorHandler(async (
                 },
                 orderBy: { createdAt: 'desc' },
             },
+            interlocuteurs: {
+                include: {
+                    portalUser: {
+                        select: { id: true, email: true, name: true, isActive: true },
+                    },
+                },
+                orderBy: { createdAt: 'asc' },
+            },
             _count: {
                 select: {
                     missions: true,
                     users: true,
                 },
+            },
+            onboarding: {
+                select: { onboardingData: true },
             },
         },
     });
@@ -92,28 +108,66 @@ export const PUT = withErrorHandler(async (
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) => {
-    await requireRole(['MANAGER'], request);
+    const session = await requireRole(['MANAGER'], request);
     const { id } = await params;
     const data = await validateRequest(request, updateClientSchema);
 
-    // Clean up empty strings
+    // Clean up empty strings for client fields
+    const { icp, defaultMailboxId, ...rest } = data;
     const cleanData = {
-        ...data,
+        ...rest,
         email: data.email || undefined,
         phone: data.phone || undefined,
         industry: data.industry || undefined,
         bookingUrl: data.bookingUrl || undefined,
     };
 
-    const client = await prisma.client.update({
+    await prisma.$transaction(async (tx) => {
+        await tx.client.update({
+            where: { id },
+            data: cleanData,
+        });
+
+        if (icp !== undefined || defaultMailboxId !== undefined) {
+            const existing = await tx.clientOnboarding.findUnique({
+                where: { clientId: id },
+                select: { onboardingData: true },
+            });
+            const prevData = (existing?.onboardingData as Record<string, unknown>) || {};
+            const merged: Record<string, unknown> = { ...prevData };
+
+            if (icp !== undefined) {
+                merged.icp = icp.trim() === '' ? undefined : icp;
+            }
+            if (defaultMailboxId !== undefined) {
+                merged.defaultMailboxId = defaultMailboxId === '' ? undefined : defaultMailboxId;
+            }
+
+            await tx.clientOnboarding.upsert({
+                where: { clientId: id },
+                create: {
+                    clientId: id,
+                    onboardingData: merged as object,
+                    createdById: session.user.id,
+                },
+                update: {
+                    onboardingData: merged as object,
+                },
+            });
+        }
+    });
+
+    const client = await prisma.client.findUnique({
         where: { id },
-        data: cleanData,
         include: {
             _count: {
                 select: {
                     missions: true,
                     users: true,
                 },
+            },
+            onboarding: {
+                select: { onboardingData: true },
             },
         },
     });
