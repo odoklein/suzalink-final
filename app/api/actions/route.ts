@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { after } from 'next/server';
 import {
  successResponse,
  errorResponse,
@@ -10,6 +11,7 @@ import {
 } from '@/lib/api-utils';
 import { actionService } from '@/lib/services/ActionService';
 import { statusConfigService } from '@/lib/services/StatusConfigService';
+import { enrichActionFromCallProvider } from '@/lib/call-enrichment/enrich-action';
 import { z } from 'zod';
 
 // ============================================
@@ -140,10 +142,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
  const to = searchParams.get('to');
  const contactId = searchParams.get('contactId');
  const companyId = searchParams.get('companyId');
- const voipProvider = searchParams.get('voipProvider');
-
  if (missionId) filters.missionId = missionId;
- if (voipProvider && ['allo', 'aircall', 'ringover'].includes(voipProvider)) filters.voipProvider = voipProvider;
 
  // When viewing actions for a specific contact or company (drawer history),
  // show ALL actions from all team members so every role can see notes & history.
@@ -206,28 +205,30 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
  });
 
     // Use service layer with transaction
-    try {
-        const action = await actionService.createAction({
-            contactId: data.contactId,
-            companyId: data.companyId,
-            sdrId: session.user.id,
-            campaignId: data.campaignId,
-            channel: data.channel,
-            result: data.result,
-            note: improvedNote ?? data.note,
-            callbackDate: data.callbackDate,
-            duration: data.duration,
-            meetingType: data.meetingType,
-            meetingCategory: data.meetingCategory,
-            meetingAddress: data.meetingAddress,
-            meetingJoinUrl: data.meetingJoinUrl,
-            meetingPhone: data.meetingPhone,
-        }, statusDef);
-        return successResponse(action, 201);
-    } catch (err) {
-        if (err instanceof Error && err.message === 'DUPLICATE_CALLBACK') {
-            return errorResponse('Un rappel est déjà en attente pour ce contact/campagne. Traitez-le ou reprogrammez-le avant d\'en créer un nouveau.', 409);
-        }
-        throw err;
+    const action = await actionService.createAction({
+        contactId: data.contactId,
+        companyId: data.companyId,
+        sdrId: session.user.id,
+        campaignId: data.campaignId,
+        channel: data.channel,
+        result: data.result,
+        note: improvedNote ?? data.note,
+        callbackDate: data.callbackDate,
+        duration: data.duration,
+        meetingType: data.meetingType,
+        meetingCategory: data.meetingCategory,
+        meetingAddress: data.meetingAddress,
+        meetingJoinUrl: data.meetingJoinUrl,
+        meetingPhone: data.meetingPhone,
+    }, statusDef);
+
+    if (data.channel === 'CALL') {
+        after(() =>
+            enrichActionFromCallProvider(action.id).catch((err) => {
+                console.error('[call-enrichment]', action.id, err);
+            })
+        );
     }
+
+    return successResponse(action, 201);
 });

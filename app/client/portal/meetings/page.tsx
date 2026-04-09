@@ -7,7 +7,7 @@ import {
   Calendar, Search, X, ThumbsUp, Minus, ThumbsDown, XCircle,
   Mail, Phone, Linkedin, Download, Check, Loader2, Eye,
   MessageSquare, Edit3, Clock, FileSpreadsheet, AlertTriangle,
-  CalendarClock, Send, Building2, MapPin, Sparkles, Trash2, Video,
+  CalendarClock, Send, Building2, MapPin, Trash2, Video,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getMeetingCancellationLabel, MEETING_CANCELLATION_REASONS } from "@/lib/constants/meetingCancellationReasons";
@@ -451,7 +451,6 @@ interface Meeting {
   callbackDate?: string | null;
   result?: string;
   note?: string | null;
-  voipSummary?: string | null;
   rdvFiche?: {
     contexte?: string;
     besoinsProblemes?: string;
@@ -494,6 +493,12 @@ interface Meeting {
   } | null;
   campaign: { id: string; name: string; mission: { id: string; name: string } };
   sdr?: { id: string; name: string | null } | null;
+  interlocuteur?: {
+    id: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    title?: string | null;
+  } | null;
   meetingFeedback?: {
     id: string;
     outcome: string;
@@ -754,7 +759,6 @@ export default function ClientPortalMeetingsPage() {
   const [sel, setSel]             = useState<Meeting|null>(null);
 
   const [fbOut, setFbOut]         = useState("");
-  const [fbRec, setFbRec]         = useState("");
   const [fbNote, setFbNote]       = useState("");
   const [fbSub, setFbSub]         = useState(false);
   const [fbDone, setFbDone]       = useState(false);
@@ -852,7 +856,7 @@ export default function ClientPortalMeetingsPage() {
 
   const openModal = (m:Meeting, t:ModalType) => {
     setSel(m);
-    if (t==="feedback"){ setFbOut(m.meetingFeedback?.outcome??""); setFbRec(m.meetingFeedback?.recontactRequested??""); setFbNote(m.meetingFeedback?.clientNote??""); setFbDone(false); }
+    if (t==="feedback"){ setFbOut(m.meetingFeedback?.outcome??""); setFbNote(m.meetingFeedback?.clientNote??""); setFbDone(false); }
     if (t==="reschedule"){ setRsDate(""); setRsTime("10:00"); }
     if (t==="cancel"){ setCancelReason(""); setCancelNote(""); }
     setModal(t);
@@ -860,12 +864,12 @@ export default function ClientPortalMeetingsPage() {
   const closeModal = useCallback(()=>setModal(null),[]);
 
   const submitFeedback = async ()=>{
-    if (!sel||!fbOut||!fbRec) return;
+    if (!sel||!fbOut) return;
     setFbSub(true);
     try {
       const r = await fetch(`/api/client/meetings/${sel.id}/feedback`,{
         method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({outcome:fbOut,recontactRequested:fbRec,clientNote:fbNote||null}),
+        body:JSON.stringify({outcome:fbOut,clientNote:fbNote||null}),
       });
       const j=await r.json();
       if (j.success){ setFbDone(true); setMeetings(p=>p.map(m=>m.id===sel.id?{...m,meetingFeedback:j.data}:m)); toast.success("Retour enregistré","Votre avis a été transmis à l'équipe."); setTimeout(closeModal,1400); }
@@ -1079,8 +1083,8 @@ export default function ClientPortalMeetingsPage() {
       )}
       {modal==="feedback" && sel && (
         <FbModal m={sel} onClose={closeModal}
-          out={fbOut} rec={fbRec} note={fbNote} done={fbDone} sub={fbSub}
-          onOut={setFbOut} onRec={setFbRec} onNote={setFbNote} onSubmit={submitFeedback}
+          out={fbOut} note={fbNote} done={fbDone} sub={fbSub}
+          onOut={setFbOut} onNote={setFbNote} onSubmit={submitFeedback}
         />
       )}
       {modal==="reschedule" && sel && (
@@ -1178,6 +1182,14 @@ function Card({
               <Pill label={`${MTY[m.meetingType].emoji} ${MTY[m.meetingType].label}`} color={tk.ink3} bg="#F3F4F6" border="rgba(0,0,0,0.07)" />
             )}
             <Pill label={m.campaign.mission.name} color={tk.accentText} bg={tk.accentLight} border="rgba(91,79,232,0.18)" />
+            {m.interlocuteur && (
+              <Pill
+                label={`Commercial: ${[m.interlocuteur.firstName, m.interlocuteur.lastName].filter(Boolean).join(" ") || "Assigné"}`}
+                color="#065F46"
+                bg="#ECFDF5"
+                border="#A7F3D0"
+              />
+            )}
             {m.rdvFiche && (
               <Pill label="Fiche RDV" color={tk.ink3} bg="#F3F4F6" border="rgba(0,0,0,0.07)" />
             )}
@@ -1483,18 +1495,6 @@ function DetailModal({ m, onClose, onFeedback, onCancel, onDelete }: {
         </Sec>
       )}
 
-      {/* AI summary */}
-      {m.voipSummary && (
-        <Sec label="Résumé de l'appel (IA)">
-          <div className="cp-ai-summary">
-            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,fontSize:10.5,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em",color:tk.accentText}}>
-              <Sparkles style={{width:11,height:11}} />IA · Résumé automatique
-            </div>
-            {m.voipSummary}
-          </div>
-        </Sec>
-      )}
-
       {/* Fiche RDV (contexte, besoins, solutions, objections, notes) */}
       {m.rdvFiche && (
         <Sec label="Fiche RDV">
@@ -1530,7 +1530,6 @@ function DetailModal({ m, onClose, onFeedback, onCancel, onDelete }: {
           <div style={{padding:16,borderRadius:12,background:tk.greenLight,border:"1px solid rgba(18,160,92,0.2)"}}>
             <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:fb.clientNote?10:0}}>
               <Pill label={OM[fb.outcome]?.label??fb.outcome} color={OM[fb.outcome]?.color??tk.ink3} bg={OM[fb.outcome]?.bg??"#F3F4F6"} />
-              <Pill label={`Recontact : ${fb.recontactRequested==="YES"?"Oui":fb.recontactRequested==="NO"?"Non":"À rediscuter"}`} color={tk.ink3} bg="#F3F4F6" />
             </div>
             {fb.clientNote && <p style={{fontSize:13,fontStyle:"italic",color:tk.greenText,margin:0,lineHeight:1.6}}>&ldquo;{fb.clientNote}&rdquo;</p>}
           </div>
@@ -1543,10 +1542,10 @@ function DetailModal({ m, onClose, onFeedback, onCancel, onDelete }: {
 /* ═══════════════════════════════════════════════════════════════
    FEEDBACK MODAL
 ═══════════════════════════════════════════════════════════════ */
-function FbModal({ m, onClose, out, rec, note, done, sub, onOut, onRec, onNote, onSubmit }: {
+function FbModal({ m, onClose, out, note, done, sub, onOut, onNote, onSubmit }: {
   m:Meeting; onClose:()=>void;
-  out:string; rec:string; note:string; done:boolean; sub:boolean;
-  onOut:(v:string)=>void; onRec:(v:string)=>void; onNote:(v:string)=>void; onSubmit:()=>void;
+  out:string; note:string; done:boolean; sub:boolean;
+  onOut:(v:string)=>void; onNote:(v:string)=>void; onSubmit:()=>void;
 }) {
   const name = m.contact ? [m.contact.firstName,m.contact.lastName].filter(Boolean).join(" ") || "Contact" : m.company?.name ?? "Contact entreprise";
   const companyName = m.contact?.company?.name ?? m.company?.name ?? "Entreprise inconnue";
@@ -1572,7 +1571,7 @@ function FbModal({ m, onClose, out, rec, note, done, sub, onOut, onRec, onNote, 
       footer={<>
         <span style={{fontSize:11,color:tk.ink4,marginRight:"auto"}}>* champs requis</span>
         <Btn onClick={onClose}>Annuler</Btn>
-        <Btn variant="primary" onClick={onSubmit} disabled={!out||!rec} loading={sub}>
+        <Btn variant="primary" onClick={onSubmit} disabled={!out} loading={sub}>
           <Send style={{width:13,height:13}} />Envoyer mon avis
         </Btn>
       </>}>
@@ -1592,17 +1591,6 @@ function FbModal({ m, onClose, out, rec, note, done, sub, onOut, onRec, onNote, 
               </button>
             );
           })}
-        </div>
-      </Sec>
-
-      <Sec label="Souhaitez-vous que l'on recontacte ce prospect ? *">
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          {[{v:"YES",l:"Oui, à recontacter"},{v:"NO",l:"Non, clôturer"}].map(({v,l})=>(
-            <button key={v} type="button" aria-pressed={rec===v} onClick={()=>onRec(v)}
-              className={cn("cp-toggle",rec===v&&"sel")} style={{flex:1,minWidth:120}}>
-              {l}
-            </button>
-          ))}
         </div>
       </Sec>
 

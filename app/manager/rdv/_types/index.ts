@@ -22,8 +22,6 @@ export interface Meeting {
   meetingPhone: string | null;
   note: string | null;
   managerNote?: string | null;
-  voipSummary?: string | null;
-  voipTranscript?: unknown;
   cancellationReason: string | null;
   createdAt: string;
   duration: number | null;
@@ -50,6 +48,12 @@ export interface Meeting {
   mission: { id: string; name: string };
   client: { id: string; name: string; industry: string | null } | null;
   sdr: { id: string; name: string; email: string };
+  interlocuteur: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    title: string | null;
+  } | null;
   feedback: {
     outcome: string;
     recontact: string;

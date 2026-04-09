@@ -345,7 +345,7 @@ export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
                     >
                         <div className="flex items-center">
                             <Image
-                                src="/logocaptainblue-rose.png"
+                                src="/suzalink_logo.png"
                                 alt="Suzalink"
                                 width={170}
                                 height={52}
@@ -527,3 +527,4 @@ export function MobileMenuButton() {
 }
 
 export default GlobalSidebar;
+

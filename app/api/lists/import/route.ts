@@ -58,6 +58,40 @@ function detectDelimiter(firstLine: string): string {
     return detected;
 }
 
+function splitMultiActionCell(raw: string | undefined): string[] {
+    if (!raw) return [];
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+
+    return trimmed
+        .split(/(?:\r?\n|;|\||=>|->|→|»)+/)
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0);
+}
+
+function normalizeCompanyName(value: string): string {
+    return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizePersonName(value: string | null | undefined): string {
+    return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizeEmail(value: string | null | undefined): string | null {
+    const normalized = (value ?? "").trim().toLowerCase();
+    return normalized || null;
+}
+
+type ActionColumnMode = "single" | "multi-column";
+type ActionColumnGroup = {
+    id?: string;
+    statusColumn?: string;
+    dateColumn?: string;
+    noteColumn?: string;
+    channelColumn?: string;
+    callbackDateColumn?: string;
+};
+
 /** Consume a Web ReadableStream and yield lines (split by \n or \r\n). */
 async function* streamToLines(
     stream: ReadableStream<Uint8Array>
@@ -214,6 +248,8 @@ export async function POST(req: NextRequest) {
         const totalRows = totalRowsStr ? parseInt(totalRowsStr, 10) : null;
         const importActionsStr = formData.get("importActions") as string | null;
         const actionColumnMappingStr = formData.get("actionColumnMapping") as string | null;
+        const actionColumnModeStr = formData.get("actionColumnMode") as string | null;
+        const actionColumnGroupsStr = formData.get("actionColumnGroups") as string | null;
         const statusMappingsStr = formData.get("statusMappings") as string | null;
         const channelMappingsStr = formData.get("channelMappings") as string | null;
         const whenAlreadyWorkedOn = (formData.get("whenAlreadyWorkedOn") as string) || "add_anyway";
@@ -259,6 +295,8 @@ export async function POST(req: NextRequest) {
             noteColumn?: string;
             channelColumn?: string;
         } | null = null;
+        let actionColumnMode: ActionColumnMode = "single";
+        let actionColumnGroups: ActionColumnGroup[] = [];
         let statusMappings: { csvValue: string; actionResult: ActionResult; count: number }[] = [];
         let channelMappings: { csvValue: string; channel: "CALL" | "EMAIL" | "LINKEDIN"; count: number }[] = [];
 
@@ -281,6 +319,17 @@ export async function POST(req: NextRequest) {
                 channelMappings = JSON.parse(channelMappingsStr) as typeof channelMappings;
             } catch {
                 channelMappings = [];
+            }
+        }
+        if (actionColumnModeStr === "multi-column") {
+            actionColumnMode = "multi-column";
+        }
+        if (actionColumnGroupsStr) {
+            try {
+                const parsed = JSON.parse(actionColumnGroupsStr) as ActionColumnGroup[];
+                actionColumnGroups = Array.isArray(parsed) ? parsed : [];
+            } catch {
+                actionColumnGroups = [];
             }
         }
 
@@ -324,6 +373,8 @@ export async function POST(req: NextRequest) {
                         actionHistory: {
                             importActions,
                             actionColumnMapping,
+                                actionColumnMode,
+                                actionColumnGroups,
                             statusMappings,
                             channelMappings,
                         },
@@ -377,6 +428,8 @@ export async function POST(req: NextRequest) {
                                     {
                                         importActions,
                                         actionColumnMapping,
+                                        actionColumnMode,
+                                        actionColumnGroups,
                                         statusMappings,
                                         channelMappings,
                                         missionId,
@@ -409,6 +462,8 @@ export async function POST(req: NextRequest) {
                                 {
                                     importActions,
                                     actionColumnMapping,
+                                    actionColumnMode,
+                                    actionColumnGroups,
                                     statusMappings,
                                     channelMappings,
                                     missionId,
@@ -465,6 +520,8 @@ async function processBatch(
     importType: string,
     options?: {
         importActions: boolean;
+        actionColumnMode?: ActionColumnMode;
+        actionColumnGroups?: ActionColumnGroup[];
         actionColumnMapping: {
             statusColumn?: string;
             dateColumn?: string;
@@ -534,25 +591,29 @@ async function processBatch(
     }
 
     const uniqueNames = [...new Set(validRows.map((r) => r.companyName))];
+    const uniqueNormalizedNames = [...new Set(uniqueNames.map((n) => normalizeCompanyName(n)))];
     const skipAlreadyWorked = options?.whenAlreadyWorkedOn === "skip";
 
     // 2) Preload existing companies for this list and batch names (and action count when skipping "already worked")
     const existingCompanies = await prisma.company.findMany({
-        where: { listId, name: { in: uniqueNames } },
+        where: { listId },
         select: { id: true, name: true, _count: { select: { actions: true } } },
     });
     const companyMap = new Map<string, { id: string; hasActions: boolean }>();
     for (const c of existingCompanies) {
-        companyMap.set(c.name, { id: c.id, hasActions: (c._count?.actions ?? 0) > 0 });
+        companyMap.set(normalizeCompanyName(c.name), {
+            id: c.id,
+            hasActions: (c._count?.actions ?? 0) > 0,
+        });
     }
 
     // When "skip": exclude company names that already have actions from this batch (no new company, no new contacts)
     const namesToConsider = skipAlreadyWorked
-        ? uniqueNames.filter((n) => {
+        ? uniqueNormalizedNames.filter((n) => {
             const existing = companyMap.get(n);
             return !existing || !existing.hasActions;
         })
-        : uniqueNames;
+        : uniqueNormalizedNames;
 
     // 3) Create missing companies: one payload per unique name (first row wins for custom data); skip names excluded by whenAlreadyWorkedOn
     const namesToCreate = namesToConsider.filter((n) => !companyMap.has(n));
@@ -565,8 +626,9 @@ async function processBatch(
         }
     >();
     for (const r of validRows) {
-        if (!companyMap.has(r.companyName) && !companyPayloadByName.has(r.companyName)) {
-            companyPayloadByName.set(r.companyName, {
+        const companyKey = normalizeCompanyName(r.companyName);
+        if (!companyMap.has(companyKey) && !companyPayloadByName.has(companyKey)) {
+            companyPayloadByName.set(companyKey, {
                 companyData: r.companyData,
                 companyCustomData: r.companyCustomData,
                 companyAdditionalPhones: r.companyAdditionalPhones ?? [],
@@ -625,13 +687,13 @@ async function processBatch(
             const createdCompanies = await prisma.company.findMany({
                 where: {
                     listId,
-                    name: { in: namesToCreate },
+                    name: { in: uniqueNames },
                 },
                 select: { id: true, name: true },
             });
             for (const c of createdCompanies) {
                 // hasActions=false for newly created records in this batch
-                companyMap.set(c.name, { id: c.id, hasActions: false });
+                companyMap.set(normalizeCompanyName(c.name), { id: c.id, hasActions: false });
             }
         }
     }
@@ -645,15 +707,22 @@ async function processBatch(
     });
     const existingContactKeys = new Set<string>();
     for (const c of existingContacts) {
-        if (c.email) existingContactKeys.add(`${c.companyId}:email:${c.email}`);
+        const normalizedExistingEmail = normalizeEmail(c.email);
+        if (normalizedExistingEmail) {
+            existingContactKeys.add(`${c.companyId}:email:${normalizedExistingEmail}`);
+        }
         if (c.firstName != null || c.lastName != null) {
-            existingContactKeys.add(`${c.companyId}:name:${c.firstName ?? ""}:${c.lastName ?? ""}`);
+            existingContactKeys.add(
+                `${c.companyId}:name:${normalizePersonName(c.firstName)}:${normalizePersonName(c.lastName)}`
+            );
         }
     }
 
     const contactExists = (companyId: string, email: string | null, firstName: string | null, lastName: string | null) =>
-        (email && existingContactKeys.has(`${companyId}:email:${email}`)) ||
-        existingContactKeys.has(`${companyId}:name:${firstName ?? ""}:${lastName ?? ""}`);
+        (!!normalizeEmail(email) && existingContactKeys.has(`${companyId}:email:${normalizeEmail(email)}`)) ||
+        existingContactKeys.has(
+            `${companyId}:name:${normalizePersonName(firstName)}:${normalizePersonName(lastName)}`
+        );
 
     const contactsToCreate: {
         companyId: string;
@@ -668,7 +737,7 @@ async function processBatch(
     }[] = [];
 
     for (const r of validRows) {
-        const company = companyMap.get(r.companyName);
+        const company = companyMap.get(normalizeCompanyName(r.companyName));
         if (!company || !r.contactData) continue;
         if (skipAlreadyWorked && company.hasActions) continue;
         const cd = r.contactData;
@@ -677,8 +746,11 @@ async function processBatch(
         const lastName = cd.lastName || null;
         if (contactExists(company.id, email, firstName, lastName)) continue;
         // Mark as seen for this batch (avoid duplicate contacts within batch)
-        if (email) existingContactKeys.add(`${company.id}:email:${email}`);
-        existingContactKeys.add(`${company.id}:name:${firstName ?? ""}:${lastName ?? ""}`);
+        const normalizedEmail = normalizeEmail(email);
+        if (normalizedEmail) existingContactKeys.add(`${company.id}:email:${normalizedEmail}`);
+        existingContactKeys.add(
+            `${company.id}:name:${normalizePersonName(firstName)}:${normalizePersonName(lastName)}`
+        );
         // Normalize contact phone: allow multiple numbers in one cell, separated by ; or ,
         let phone: string | null = null;
         let additionalPhones: string[] = [];
@@ -749,13 +821,20 @@ async function processBatch(
     const shouldCreateActions =
         options &&
         options.importActions &&
-        options.actionColumnMapping &&
-        !!options.actionColumnMapping.statusColumn &&
+        (
+            (options.actionColumnMode === "multi-column" &&
+                !!options.actionColumnGroups?.some((g) => !!g.statusColumn)) ||
+            (options.actionColumnMode !== "multi-column" &&
+                options.actionColumnMapping &&
+                !!options.actionColumnMapping.statusColumn)
+        ) &&
         options.statusMappings &&
         options.statusMappings.length > 0;
 
-    if (shouldCreateActions && options && options.actionColumnMapping) {
+    if (shouldCreateActions && options) {
         const actionColumnMapping = options.actionColumnMapping;
+        const actionColumnMode: ActionColumnMode = options.actionColumnMode === "multi-column" ? "multi-column" : "single";
+        const actionColumnGroups: ActionColumnGroup[] = options.actionColumnGroups ?? [];
         const { statusMappings, channelMappings, sdrId } = options;
 
         // Reload contacts with IDs so we can link actions
@@ -765,8 +844,9 @@ async function processBatch(
         });
         const contactIdByKey = new Map<string, string>();
         for (const c of allContacts) {
-            const emailKey = c.email ? `${c.companyId}:email:${c.email}` : null;
-            const nameKey = `${c.companyId}:name:${c.firstName ?? ""}:${c.lastName ?? ""}`;
+            const normalizedEmail = normalizeEmail(c.email);
+            const emailKey = normalizedEmail ? `${c.companyId}:email:${normalizedEmail}` : null;
+            const nameKey = `${c.companyId}:name:${normalizePersonName(c.firstName)}:${normalizePersonName(c.lastName)}`;
             if (emailKey && !contactIdByKey.has(emailKey)) contactIdByKey.set(emailKey, c.id);
             if (!contactIdByKey.has(nameKey)) contactIdByKey.set(nameKey, c.id);
         }
@@ -774,9 +854,9 @@ async function processBatch(
         const findContactIdForRow = (companyId: string, rowInfo: RowInfo): string | undefined => {
             const cd = rowInfo.contactData;
             if (!cd) return undefined;
-            const email = cd.email?.trim();
-            const firstName = cd.firstName?.trim() ?? "";
-            const lastName = cd.lastName?.trim() ?? "";
+            const email = normalizeEmail(cd.email);
+            const firstName = normalizePersonName(cd.firstName);
+            const lastName = normalizePersonName(cd.lastName);
             if (email) {
                 const key = `${companyId}:email:${email}`;
                 const id = contactIdByKey.get(key);
@@ -798,22 +878,24 @@ async function processBatch(
             callbackDate?: Date;
         }[] = [];
 
+        const normalizeMappingValue = (value: string): string => value.trim().toLowerCase();
+
         const statusMap = new Map<string, ActionResult>();
         for (const m of statusMappings) {
             if (m.actionResult) {
-                statusMap.set(m.csvValue, m.actionResult);
+                statusMap.set(normalizeMappingValue(m.csvValue), m.actionResult);
             }
         }
         const channelMap = new Map<string, "CALL" | "EMAIL" | "LINKEDIN">();
         for (const m of channelMappings) {
-            channelMap.set(m.csvValue, m.channel);
+            channelMap.set(normalizeMappingValue(m.csvValue), m.channel);
         }
 
-        const statusColumn = actionColumnMapping.statusColumn!;
-        const dateColumn = actionColumnMapping.dateColumn;
-        const callbackDateColumn = actionColumnMapping.callbackDateColumn;
-        const noteColumn = actionColumnMapping.noteColumn;
-        const channelColumn = actionColumnMapping.channelColumn;
+        const statusColumn = actionColumnMapping?.statusColumn;
+        const dateColumn = actionColumnMapping?.dateColumn;
+        const callbackDateColumn = actionColumnMapping?.callbackDateColumn;
+        const noteColumn = actionColumnMapping?.noteColumn;
+        const channelColumn = actionColumnMapping?.channelColumn;
 
         const defaultChannel: "CALL" | "EMAIL" | "LINKEDIN" = "CALL";
 
@@ -853,36 +935,45 @@ async function processBatch(
 
         if (campaignId) {
             for (const info of validRows) {
-                const company = companyMap.get(info.companyName);
+                const company = companyMap.get(normalizeCompanyName(info.companyName));
                 if (!company) continue;
 
-                const splitCellValues = (raw: string | undefined): string[] => {
-                    if (!raw) return [];
-                    const trimmed = raw.trim();
-                    if (!trimmed) return [];
-                    // Allow importing multiple actions in one row: "status1; status2; status3"
-                    return trimmed
-                        .split(/[;|]/)
-                        .map((part) => part.trim())
-                        .filter((part) => part.length > 0);
-                };
-
-                const statuses = splitCellValues(info.row[statusColumn]);
+                const statuses = actionColumnMode === "multi-column"
+                    ? actionColumnGroups
+                        .map((g) => (g.statusColumn ? (info.row[g.statusColumn] ?? "").trim() : ""))
+                        .filter((v) => v.length > 0)
+                    : (statusColumn ? splitMultiActionCell(info.row[statusColumn]) : []);
                 if (statuses.length === 0) continue;
-                const dateValues = dateColumn ? splitCellValues(info.row[dateColumn]) : [];
-                const callbackDateValues = callbackDateColumn ? splitCellValues(info.row[callbackDateColumn]) : [];
-                const noteValues = noteColumn ? splitCellValues(info.row[noteColumn]) : [];
-                const channelValues = channelColumn ? splitCellValues(info.row[channelColumn]) : [];
+                const dateValues = actionColumnMode === "multi-column"
+                    ? actionColumnGroups
+                        .map((g) => (g.dateColumn ? (info.row[g.dateColumn] ?? "").trim() : ""))
+                        .filter((v) => v.length > 0)
+                    : (dateColumn ? splitMultiActionCell(info.row[dateColumn]) : []);
+                const callbackDateValues = actionColumnMode === "multi-column"
+                    ? actionColumnGroups
+                        .map((g) => (g.callbackDateColumn ? (info.row[g.callbackDateColumn] ?? "").trim() : ""))
+                        .filter((v) => v.length > 0)
+                    : (callbackDateColumn ? splitMultiActionCell(info.row[callbackDateColumn]) : []);
+                const noteValues = actionColumnMode === "multi-column"
+                    ? actionColumnGroups
+                        .map((g) => (g.noteColumn ? (info.row[g.noteColumn] ?? "").trim() : ""))
+                        .filter((v) => v.length > 0)
+                    : (noteColumn ? splitMultiActionCell(info.row[noteColumn]) : []);
+                const channelValues = actionColumnMode === "multi-column"
+                    ? actionColumnGroups
+                        .map((g) => (g.channelColumn ? (info.row[g.channelColumn] ?? "").trim() : ""))
+                        .filter((v) => v.length > 0)
+                    : (channelColumn ? splitMultiActionCell(info.row[channelColumn]) : []);
                 const contactId = findContactIdForRow(company.id, info);
 
                 for (let i = 0; i < statuses.length; i++) {
-                    const result = statusMap.get(statuses[i]);
+                    const result = statusMap.get(normalizeMappingValue(statuses[i]));
                     if (!result) continue;
 
                     let channel: "CALL" | "EMAIL" | "LINKEDIN" = defaultChannel;
                     const rawChannel = channelValues[i] ?? channelValues[0];
                     if (rawChannel) {
-                        const mapped = channelMap.get(rawChannel);
+                        const mapped = channelMap.get(normalizeMappingValue(rawChannel));
                         if (mapped) channel = mapped;
                     }
 

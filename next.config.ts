@@ -1,6 +1,19 @@
 import type { NextConfig } from "next";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** Directory containing this config file (real app root). */
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
+const tailwindCssEntry = path.join(projectRoot, "node_modules", "tailwindcss", "index.css");
 
 const nextConfig: NextConfig = {
+  turbopack: {
+    root: projectRoot,
+    // Bare `@import "tailwindcss"` must resolve inside this repo (not a parent folder with package-lock.json).
+    resolveAlias: {
+      tailwindcss: tailwindCssEntry,
+    },
+  },
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -27,7 +40,7 @@ const nextConfig: NextConfig = {
           { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
           {
             key: "Content-Security-Policy",
-            value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';",
+            value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src 'self' https:; frame-src 'self' https://cal.com https://*.cal.com; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';",
           },
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), interest-cohort=()" },
         ],

@@ -171,17 +171,11 @@ export const DELETE = withErrorHandler(async (
         return errorResponse('Impossible de supprimer un compte manager', 400);
     }
 
-    // Instead of hard-deleting (which breaks many foreign key constraints),
-    // perform a soft delete by deactivating the account.
-    // This keeps historical data (actions, comms threads, billing, etc.) intact.
-    await prisma.user.update({
+    await prisma.user.delete({
         where: { id },
-        data: {
-            isActive: false,
-        },
     });
 
     return successResponse({
-        message: `Utilisateur "${user.name}" désactivé`,
+        message: `Utilisateur "${user.name}" supprimé`,
     });
 });

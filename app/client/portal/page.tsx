@@ -33,17 +33,18 @@ interface ClientMeeting {
         name: string;
         mission: { name: string };
     };
+    interlocuteur?: {
+        id: string;
+        firstName?: string | null;
+        lastName?: string | null;
+        title?: string | null;
+    } | null;
 }
 
 interface Mission {
     id: string;
     name: string;
     isActive: boolean;
-}
-
-interface CallDayStat {
-    date: string;
-    count: number;
 }
 
 interface PortalSettings {
@@ -57,6 +58,9 @@ const MONTH_NAMES = [
 ];
 
 function getGreeting(): string {
+    const h = new Date().getHours();
+    if (h >= 18) return "Bonsoir";
+    if (h >= 12) return "Bon après-midi";
     return "Bonjour";
 }
 
@@ -90,7 +94,6 @@ export default function ClientPortal() {
     const [portalSettings, setPortalSettings] = useState<PortalSettings | null>(null);
     const [totalMeetingsCount, setTotalMeetingsCount] = useState<number>(0);
     const [callsCountForMonth, setCallsCountForMonth] = useState<number>(0);
-    const [dailyCallStats, setDailyCallStats] = useState<CallDayStat[]>([]);
     // Month selector for calls stats: 0 = current month, -1 = previous, etc.
     const [callsMonthOffset, setCallsMonthOffset] = useState(0);
 
@@ -110,18 +113,27 @@ export default function ClientPortal() {
             const startDate = monthStart.toISOString().split("T")[0];
             const endDate = monthEnd.toISOString().split("T")[0];
 
-            const [statsRes, missionsRes, meetingsRes, settingsRes] = await Promise.all([
+            // For calls stats: selected month from offset
+            const callsMonthDate = new Date(now.getFullYear(), now.getMonth() + callsMonthOffset, 1);
+            const callsStart = new Date(callsMonthDate.getFullYear(), callsMonthDate.getMonth(), 1);
+            const callsEnd = new Date(callsMonthDate.getFullYear(), callsMonthDate.getMonth() + 1, 0, 23, 59, 59, 999);
+            const callsStartStr = callsStart.toISOString().split("T")[0];
+            const callsEndStr = callsEnd.toISOString().split("T")[0];
+
+            const [statsRes, missionsRes, meetingsRes, settingsRes, callsRes] = await Promise.all([
                 fetch(`/api/stats?startDate=${startDate}&endDate=${endDate}`),
                 fetch("/api/missions?isActive=true"),
                 clientId ? fetch(`/api/clients/${clientId}/meetings`) : Promise.resolve(null),
                 fetch("/api/client/portal/settings"),
+                fetch(`/api/client/calls?startDate=${callsStartStr}&endDate=${callsEndStr}`),
             ]);
 
-            const [statsJson, missionsJson, meetingsJson, settingsJson] = await Promise.all([
+            const [statsJson, missionsJson, meetingsJson, settingsJson, callsJson] = await Promise.all([
                 statsRes.json(),
                 missionsRes.json(),
                 meetingsRes?.ok ? meetingsRes.json() : Promise.resolve(null),
                 settingsRes.json(),
+                callsRes.ok ? callsRes.json() : Promise.resolve({ success: false }),
             ]);
 
             if (statsJson.success) setStats(statsJson.data);
@@ -151,6 +163,9 @@ export default function ClientPortal() {
             if (settingsJson?.success) {
                 setPortalSettings(settingsJson.data);
             }
+            if (callsJson?.success) {
+                setCallsCountForMonth(callsJson.data?.total ?? 0);
+            }
         } catch (error) {
             console.error("Failed to fetch data:", error);
             toast.error("Erreur de chargement", "Impossible de charger les données");
@@ -159,50 +174,11 @@ export default function ClientPortal() {
             setIsRefreshing(false);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [clientId]);
+    }, [clientId, callsMonthOffset]);
 
     useEffect(() => {
         fetchData();
     }, [fetchData]);
-
-    // Fetch call history for the selected month
-    useEffect(() => {
-        const callsMonthDate = new Date(now.getFullYear(), now.getMonth() + callsMonthOffset, 1);
-        const callsStart = new Date(callsMonthDate.getFullYear(), callsMonthDate.getMonth(), 1);
-        const callsEnd = new Date(callsMonthDate.getFullYear(), callsMonthDate.getMonth() + 1, 0, 23, 59, 59, 999);
-        const callsStartStr = callsStart.toISOString().split("T")[0];
-        const callsEndStr = callsEnd.toISOString().split("T")[0];
-
-        let cancelled = false;
-        (async () => {
-            const res = await fetch(`/api/client/calls?startDate=${callsStartStr}&endDate=${callsEndStr}`);
-            const json = await res.json();
-            if (cancelled || !json?.success) return;
-            const callsData = json.data;
-            const items = Array.isArray(callsData)
-                ? callsData
-                : Array.isArray(callsData?.items)
-                    ? callsData.items
-                    : [];
-            const total =
-                typeof callsData?.total === "number"
-                    ? callsData.total
-                    : items.length;
-            setCallsCountForMonth(total);
-            const countsByDate = new Map<string, number>();
-            for (const call of items as { createdAt?: string; callbackDate?: string | null }[]) {
-                const rawDate = call.callbackDate || call.createdAt;
-                if (!rawDate) continue;
-                const key = new Date(rawDate).toISOString().split("T")[0];
-                countsByDate.set(key, (countsByDate.get(key) ?? 0) + 1);
-            }
-            const stats: CallDayStat[] = Array.from(countsByDate.entries())
-                .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-                .map(([date, count]) => ({ date, count }));
-            setDailyCallStats(stats);
-        })();
-        return () => { cancelled = true; };
-    }, [callsMonthOffset]);
 
     if (isLoading && !stats) {
         return <DashboardSkeleton />;
@@ -267,103 +243,82 @@ export default function ClientPortal() {
                         </div>
                     </div>
 
-                </div>
-            </div>
-
-            {/* ── Historique des appels ── */}
-                <div
-                    className="premium-card overflow-hidden"
-                    style={{ animation: "dashFadeUp 0.4s ease both", animationDelay: "100ms" }}
-                >
-                    <div className="flex flex-wrap items-center justify-between gap-4 px-6 pt-5 pb-3 border-b border-[#E8EBF0]">
-                        <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#7C5CFC] to-[#A78BFA] flex items-center justify-center shadow-sm shadow-[#7C5CFC]/20">
-                                <PhoneCall className="w-4 h-4 text-white" />
-                            </div>
-                            <h2 className="text-sm font-semibold text-[#12122A] uppercase tracking-wider">
-                                Historique des appels
-                            </h2>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <div className="flex items-center rounded-lg border border-[#E8EBF0] bg-[#F8F9FC] p-0.5">
+                    {/* Appels passés (month selector + single KPI) */}
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-semibold text-indigo-200/80 uppercase tracking-wider">Appels passés</span>
+                            <div className="flex items-center rounded-lg bg-white/[0.08] border border-white/[0.06] p-0.5">
                                 <button
                                     type="button"
                                     onClick={() => setCallsMonthOffset((o) => o - 1)}
-                                    className="w-8 h-8 rounded-md flex items-center justify-center text-[#6B7194] hover:bg-white hover:text-[#12122A] transition-all"
+                                    className="w-8 h-8 rounded-md flex items-center justify-center text-indigo-200/80 hover:bg-white/[0.12] hover:text-white transition-all"
                                     aria-label="Mois précédent"
                                 >
                                     <ChevronLeft className="w-4 h-4" />
                                 </button>
-                                <span className="min-w-[100px] text-center text-sm font-semibold text-[#12122A] px-2">
+                                <span className="min-w-[100px] text-center text-sm font-semibold text-white px-2">
                                     {MONTH_NAMES[new Date(now.getFullYear(), now.getMonth() + callsMonthOffset, 1).getMonth()]} {new Date(now.getFullYear(), now.getMonth() + callsMonthOffset, 1).getFullYear()}
                                 </span>
                                 <button
                                     type="button"
                                     onClick={() => setCallsMonthOffset((o) => Math.min(o + 1, 0))}
                                     disabled={callsMonthOffset >= 0}
-                                    className="w-8 h-8 rounded-md flex items-center justify-center text-[#6B7194] hover:bg-white hover:text-[#12122A] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                    className="w-8 h-8 rounded-md flex items-center justify-center text-indigo-200/80 hover:bg-white/[0.12] hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                                     aria-label="Mois suivant"
                                 >
                                     <ChevronRight className="w-4 h-4" />
                                 </button>
                             </div>
-                            <span className="text-sm font-semibold text-[#12122A]">
-                                <AnimatedNumber value={callsCountForMonth} /> appels
-                            </span>
-                            <Link
-                                href="/client/portal/calls"
-                                className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#7C5CFC] hover:text-[#6C3AFF] transition-colors duration-200 group"
-                            >
-                                Voir tout l&apos;historique <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-                            </Link>
                         </div>
-                    </div>
-                    <div className="max-h-72 overflow-auto">
-                        <div className="grid grid-cols-[1fr,80px] px-6 py-2 text-[11px] font-semibold text-[#6B7194] border-b border-[#F0F1F5] bg-[#F8F9FC]">
-                            <span>Jour</span>
-                            <span className="text-right">Appels</span>
+                        <div className="flex items-center gap-3 rounded-xl bg-white/[0.08] backdrop-blur-sm border border-white/[0.06] px-4 py-3.5 hover:bg-white/[0.12] transition-all duration-200 group">
+                            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-400/30 to-indigo-400/30 flex items-center justify-center shrink-0 group-hover:from-violet-400/40 group-hover:to-indigo-400/40 transition-all duration-200">
+                                <PhoneCall className="w-[18px] h-[18px] text-indigo-200" />
+                            </div>
+                            <div>
+                                <AnimatedNumber
+                                    value={callsCountForMonth}
+                                    className="text-xl font-extrabold text-white leading-none"
+                                />
+                                <p className="text-[11px] text-indigo-200/60 mt-0.5 font-medium">ce mois</p>
+                            </div>
                         </div>
-                        {dailyCallStats.length === 0 ? (
-                            <div className="px-6 py-8 text-center text-sm text-[#6B7194]">
-                                Aucun appel sur cette période.
-                            </div>
-                        ) : (
-                            <div className="divide-y divide-[#F0F1F5]">
-                                {dailyCallStats.map((day) => {
-                                    const d = new Date(day.date);
-                                    const label = d.toLocaleDateString("fr-FR", {
-                                        weekday: "short",
-                                        day: "2-digit",
-                                        month: "short",
-                                    });
-                                    return (
-                                        <div key={day.date} className="grid grid-cols-[1fr,80px] px-6 py-2.5 text-[13px] text-[#12122A]">
-                                            <span>{label}</span>
-                                            <span className="text-right font-semibold">{day.count}</span>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
                     </div>
                 </div>
+            </div>
 
-            {/* ── Database shortcut (only when portalShowDatabase is enabled) ── */}
-            {portalSettings?.portalShowDatabase && (
-                <div className="grid grid-cols-1 gap-4" style={{ animation: "dashFadeUp 0.4s ease both", animationDelay: "120ms" }}>
-                    <Link
-                        href="/client/portal/database"
-                        className="flex items-center gap-4 p-4 rounded-xl border border-[#E8EBF0] bg-white/80 backdrop-blur-sm hover:border-[#7C5CFC]/30 hover:shadow-md hover:shadow-[#7C5CFC]/5 transition-all duration-200 group"
-                    >
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 flex items-center justify-center shrink-0 group-hover:from-emerald-500/20 group-hover:to-teal-500/20 transition-colors">
-                            <Users className="w-5 h-5 text-emerald-600" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-[#12122A]">Base de données</p>
-                            <p className="text-xs text-[#6B7194] mt-0.5">Vue des entreprises et contacts suivis par l&apos;équipe.</p>
-                        </div>
-                        <ArrowRight className="w-4 h-4 text-[#A0A3BD] group-hover:text-[#7C5CFC] group-hover:translate-x-0.5 transition-all shrink-0" />
-                    </Link>
+            {/* ── Optional: Call history & Database shortcuts ── */}
+            {(portalSettings?.portalShowCallHistory || portalSettings?.portalShowDatabase) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4" style={{ animation: "dashFadeUp 0.4s ease both", animationDelay: "120ms" }}>
+                    {portalSettings?.portalShowCallHistory && (
+                        <Link
+                            href="/client/portal/calls"
+                            className="flex items-center gap-4 p-4 rounded-xl border border-[#E8EBF0] bg-white/80 backdrop-blur-sm hover:border-[#7C5CFC]/30 hover:shadow-md hover:shadow-[#7C5CFC]/5 transition-all duration-200 group"
+                        >
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/10 to-indigo-500/10 flex items-center justify-center shrink-0 group-hover:from-violet-500/20 group-hover:to-indigo-500/20 transition-colors">
+                                <PhoneCall className="w-5 h-5 text-[#7C5CFC]" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-[#12122A]">Historique des appels</p>
+                                <p className="text-xs text-[#6B7194] mt-0.5">Consultez tous les appels passés par l&apos;équipe.</p>
+                            </div>
+                            <ArrowRight className="w-4 h-4 text-[#A0A3BD] group-hover:text-[#7C5CFC] group-hover:translate-x-0.5 transition-all shrink-0" />
+                        </Link>
+                    )}
+                    {portalSettings?.portalShowDatabase && (
+                        <Link
+                            href="/client/portal/database"
+                            className="flex items-center gap-4 p-4 rounded-xl border border-[#E8EBF0] bg-white/80 backdrop-blur-sm hover:border-[#7C5CFC]/30 hover:shadow-md hover:shadow-[#7C5CFC]/5 transition-all duration-200 group"
+                        >
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 flex items-center justify-center shrink-0 group-hover:from-emerald-500/20 group-hover:to-teal-500/20 transition-colors">
+                                <Users className="w-5 h-5 text-emerald-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-[#12122A]">Base de données</p>
+                                <p className="text-xs text-[#6B7194] mt-0.5">Vue des entreprises et contacts suivis par l&apos;équipe.</p>
+                            </div>
+                            <ArrowRight className="w-4 h-4 text-[#A0A3BD] group-hover:text-[#7C5CFC] group-hover:translate-x-0.5 transition-all shrink-0" />
+                        </Link>
+                    )}
                 </div>
             )}
 
@@ -447,9 +402,16 @@ export default function ClientPortal() {
                                     </div>
 
                                     {/* Mission badge */}
-                                    <span className="hidden sm:inline-flex text-[10.5px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-[2px] rounded-full shrink-0 group-hover:bg-indigo-100/80 transition-colors duration-200">
-                                        {m.campaign?.mission?.name ?? "—"}
-                                    </span>
+                                    <div className="hidden sm:flex items-center gap-1.5 shrink-0">
+                                        <span className="inline-flex text-[10.5px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-[2px] rounded-full group-hover:bg-indigo-100/80 transition-colors duration-200">
+                                            {m.campaign?.mission?.name ?? "—"}
+                                        </span>
+                                        {m.interlocuteur && (
+                                            <span className="inline-flex text-[10.5px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-[2px] rounded-full">
+                                                {[m.interlocuteur.firstName, m.interlocuteur.lastName].filter(Boolean).join(" ") || "Commercial assigné"}
+                                            </span>
+                                        )}
+                                    </div>
 
                                     {/* Arrow */}
                                     <div className="w-7 h-7 rounded-lg bg-[#F4F5FA] flex items-center justify-center shrink-0 group-hover:bg-gradient-to-br group-hover:from-[#7C5CFC] group-hover:to-[#A78BFA] transition-all duration-200">

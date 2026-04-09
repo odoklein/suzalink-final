@@ -94,11 +94,6 @@ enum ActionPriorityLabel {
 }
 
 // VoIP call workflow: in-progress until SDR validates
-enum ActionStatus {
-  IN_PROGRESS
-  PENDING_VALIDATION
-}
-
 enum SyncDirection {
   CRM_TO_DRIVE
   DRIVE_TO_CRM
@@ -393,6 +388,7 @@ model User {
   scheduleBlocks       ScheduleBlock[] @relation("SDRScheduleBlocks")
   createdScheduleBlocks ScheduleBlock[] @relation("CreatedScheduleBlocks")
   missionPlanSdrAssignments MissionPlanSdr[]
+  dailyFeedbacks      SdrDailyFeedback[]
   
   // Advanced Planning: allocations, capacity, absences
   sdrDayAllocations    SdrDayAllocation[] @relation("SdrDayAllocations")
@@ -427,11 +423,11 @@ model User {
   createdProspectRules ProspectRule[] @relation("ProspectRuleCreator")
   updatedProspectRules ProspectRule[] @relation("ProspectRuleUpdater")
   
-  // VoIP (unified layer: one provider per SDR)
-  userVoipConfig      UserVoipConfig?
-  
   // Leexi imports
   leexiImports  LeexiCallImport[] @relation("LeexiImporter")
+  
+  // API Keys created by this user
+  createdApiKeys ApiKey[] @relation("ApiKeyCreator")
   
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -552,6 +548,9 @@ model Client {
   // Interlocuteurs (client's own sales team / commercials)
   interlocuteurs ClientInterlocuteur[]
 
+  // API Keys scoped to this client
+  apiKeys       ApiKey[]
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -649,9 +648,11 @@ model Mission {
 
   // Client Portal: shareable report links
   sharedReportLinks SharedReportLink[]
+  dailyFeedbacks    SdrDailyFeedback[]
+  feedbackLinks     SdrDailyFeedbackMission[]
 
-  // Webhook call records (WithAllo, etc.)
-  callRecords   CallRecord[]
+  // API Keys scoped to this mission
+  apiKeys       ApiKey[]
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -729,7 +730,6 @@ model Company {
   contacts      Contact[]
   opportunities Opportunity[]
   actions       Action[]  // Actions can be on companies too
-  callRecords   CallRecord[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -758,8 +758,6 @@ model Contact {
 
   // Email consent: when true, contact has unsubscribed from emails
   unsubscribed          Boolean   @default(false)
-
-  callRecords   CallRecord[]
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -799,86 +797,20 @@ model Action {
   confirmedBy    User?      @relation("MeetingConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
   rdvFiche       Json?
   rdvFicheUpdatedAt DateTime?
+  // Call enrichment (populated async via after() for CALL channel)
+  callSummary         String?   @db.Text
+  callTranscription   String?   @db.Text
+  callRecordingUrl    String?
+  callEnrichmentAt    DateTime?
+  callEnrichmentError String?
+
   createdAt     DateTime     @default(now())
-
-  // Call workflow: IN_PROGRESS when call started, PENDING_VALIDATION when webhook received
-  actionStatus  ActionStatus?
-
-  // VOIP Unified Layer (provider-agnostic)
-  voipProvider      String?   // 'allo' | 'aircall' | 'ringover'
-  voipCallId        String?   // Provider call id (unique per provider)
-  voipRecordingUrl  String?
-  voipSummary       String?   @db.Text
-  voipTranscript    Json?     // TranscriptSegment[] normalized
-  voipSentiment     String?   // 'positive' | 'neutral' | 'negative'
-  voipTopics        Json?     // String[]
-  voipActionItems   Json?     // String[]
-  voipEnrichedAt    DateTime?
 
   meetingFeedback   MeetingFeedback?
 
   @@index([companyId])
   @@index([contactId])
   @@index([callbackDate])
-  @@unique([voipProvider, voipCallId])
-}
-
-// Webhook call records (WithAllo, etc.) - linked to mission for automated validation
-model CallRecord {
-  id             String    @id @default(cuid())
-  missionId      String
-  mission        Mission   @relation(fields: [missionId], references: [id], onDelete: Cascade)
-  contactId      String?
-  contact        Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  companyId      String?
-  company        Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  externalCallId String    // WithAllo call id (idempotency)
-  source         String    @default("withallo")
-  provider       String?   // Kept in sync with existing DB column to avoid data loss
-  fromNumber     String?
-  toNumber       String?
-  duration       Int?      // seconds
-  direction      String?   // INBOUND | OUTBOUND
-  summary        String?   @db.Text
-  recordingUrl   String?
-  timestamp      DateTime
-  createdAt      DateTime  @default(now())
-
-  @@unique([source, externalCallId])
-  @@index([missionId])
-  @@index([timestamp])
-}
-
-// VoIP: one provider per SDR; provider-specific ids/numbers stored here
-model UserVoipConfig {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider          String   // 'allo' | 'aircall' | 'ringover'
-  alloNumber        String?  // Allo: E.164 for SDR
-  aircallUserId     Int?     // Aircall user id
-  aircallNumberId   Int?     // Aircall preferred number
-  ringoverUserId    String?
-  ringoverNumber    String?  // E.164 for callback
-  active            Boolean  @default(true)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-}
-
-// VoIP: workspace-level API keys and webhook tokens (per provider)
-model VoipWorkspaceConfig {
-  id                    String   @id @default(cuid())
-  provider              String   @unique // 'allo' | 'aircall' | 'ringover'
-  alloApiKey            String?  // Allo API key (webhooks, optional verification)
-  aircallApiId          String?
-  aircallApiToken       String?
-  aircallWebhookId      Int?
-  aircallWebhookToken   String?
-  ringoverApiKey        String?
-  ringoverWebhookSecret String?
-  active                Boolean  @default(true)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
 }
 
 // Config-driven action status definitions (per scope: GLOBAL, CLIENT, MISSION, CAMPAIGN)
@@ -3090,6 +3022,39 @@ model MeetingFeedback {
   updatedAt           DateTime            @updatedAt
 }
 
+model SdrDailyFeedback {
+  id             String    @id @default(cuid())
+  sdrId          String
+  sdr            User      @relation(fields: [sdrId], references: [id], onDelete: Cascade)
+  missionId      String?   // legacy primary mission (first selected mission)
+  mission        Mission?  @relation(fields: [missionId], references: [id], onDelete: SetNull)
+  missions       SdrDailyFeedbackMission[]
+  score          Int
+  review         String    @db.Text
+  objections     String?   @db.Text
+  missionComment String?   @db.Text
+  pagePath       String?
+  submittedAt    DateTime  @default(now())
+  createdAt      DateTime  @default(now())
+
+  @@index([sdrId])
+  @@index([missionId])
+  @@index([submittedAt])
+}
+
+model SdrDailyFeedbackMission {
+  id         String           @id @default(cuid())
+  feedbackId String
+  missionId  String
+  feedback   SdrDailyFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  mission    Mission          @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  createdAt  DateTime         @default(now())
+
+  @@unique([feedbackId, missionId])
+  @@index([missionId])
+  @@index([feedbackId])
+}
+
 // ============================================
 // CLIENT PORTAL: SHAREABLE REPORT LINKS
 // ============================================
@@ -3189,4 +3154,104 @@ enum SessionTaskPriority {
   MEDIUM
   HIGH
   URGENT
+}
+
+// ============================================
+// EXTERNAL API ACCESS - API Keys & Exposed Endpoints
+// ============================================
+
+model ApiKey {
+  id            String    @id @default(cuid())
+  name          String    // e.g., "OpenClaw Integration"
+  keyHash       String    @unique // SHA-256 hash of the key (key itself is shown only once)
+  keyPrefix     String    // First 8 chars for display (e.g., "cp_live_")
+  
+  // Scoping - what this key can access
+  role          UserRole  @default(MANAGER) // Effective role for permissions
+  clientId      String?   // If set, key is scoped to specific client
+  client        Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  missionId     String?   // If set, key is scoped to specific mission
+  mission       Mission?  @relation(fields: [missionId], references: [id], onDelete: SetNull)
+  
+  // Allowed endpoints (JSON array of endpoint patterns)
+  // e.g., ["/api/stats", "/api/stats/missions-summary"]
+  allowedEndpoints Json   @default("[\"/api/stats\",\"/api/stats/missions-summary\"]")
+  
+  // Rate limiting
+  rateLimitPerMinute Int   @default(60)
+  rateLimitPerHour   Int   @default(1000)
+  
+  // Status & metadata
+  isActive      Boolean   @default(true)
+  lastUsedAt    DateTime?
+  expiresAt     DateTime? // Optional expiration
+  
+  // Audit
+  createdById   String
+  createdBy     User      @relation("ApiKeyCreator", fields: [createdById], references: [id])
+  
+  // Usage tracking
+  usageLogs     ApiKeyUsageLog[]
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@index([keyHash])
+  @@index([isActive])
+  @@index([clientId])
+  @@index([createdById])
+}
+
+model ApiKeyUsageLog {
+  id            String    @id @default(cuid())
+  apiKeyId      String
+  apiKey        ApiKey    @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  
+  endpoint      String    // Full path accessed
+  method        String    // GET, POST, etc.
+  statusCode    Int       // HTTP response status
+  responseTimeMs Int       // Response time in milliseconds
+  
+  // Request context
+  ipAddress     String?
+  userAgent     String?
+  
+  createdAt     DateTime  @default(now())
+  
+  @@index([apiKeyId])
+  @@index([createdAt])
+  @@index([endpoint])
+}
+
+// ============================================
+// AVAILABLE EXTERNAL ENDPOINTS CONFIGURATION
+// ============================================
+
+model ExternalEndpoint {
+  id            String    @id @default(cuid())
+  path          String    @unique // e.g., "/api/stats"
+  name          String    // Display name: "Dashboard Statistics"
+  description   String?   @db.Text
+  
+  // HTTP methods allowed
+  methods       String[]  @default(["GET"]) // ["GET", "POST"]
+  
+  // Required role to access
+  minRole       UserRole  @default(MANAGER)
+  
+  // Scoping options
+  supportsClientScope Boolean @default(true)  // Can be scoped to client
+  supportsMissionScope Boolean @default(true) // Can be scoped to mission
+  
+  // Is this endpoint enabled for external access?
+  isEnabled     Boolean   @default(false)
+  
+  // Rate limiting defaults
+  defaultRateLimitPerMinute Int @default(60)
+  defaultRateLimitPerHour   Int @default(1000)
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@index([isEnabled])
 }

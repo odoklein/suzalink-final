@@ -14,14 +14,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Suzalink CRM",
-  description: "Plateforme d'exécution commerciale - Suzalink CRM",
+  title: "CaptainProspect CRM",
+  description: "Plateforme d'exécution commerciale - CaptainProspect CRM",
 icons: {
       icon: [
-        { url: "/logocaptainblue-rose.png", type: "image/png" },
+        { url: "/suzalink_logo.png", type: "image/png" },
         { url: "/favicon.ico", sizes: "any" },
       ],
-    apple: "/logocaptainblue-rose.png",
+    apple: "/suzalink_logo.png",
     },
 };
 
@@ -42,3 +42,4 @@ export default function RootLayout({
     </html>
   );
 }
+

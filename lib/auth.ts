@@ -7,14 +7,6 @@ import type { UserRole } from "@prisma/client";
 import { getClientIp, getCountryFromIp } from "./geo-ip";
 import { checkRateLimit, checkIpRateLimit, resetRateLimit } from "./rate-limit";
 
-function isMissingColumnError(error: unknown, columnName: string): boolean {
-    return (
-        error instanceof Error &&
-        error.message.includes("does not exist in the current database") &&
-        error.message.includes(columnName)
-    );
-}
-
 // Extend NextAuth types
 declare module "next-auth" {
     interface User {
@@ -52,16 +44,8 @@ export const authOptions: NextAuthOptions = {
                 password: { label: "Mot de passe", type: "password" },
             },
             async authorize(credentials, req) {
-                const authDebug = process.env.AUTH_DEBUG === "true";
-                const disableIpRateLimit =
-                    process.env.DISABLE_LOGIN_IP_RATE_LIMIT === "true";
-                const disableAccountRateLimit =
-                    process.env.DISABLE_LOGIN_ACCOUNT_RATE_LIMIT === "true";
                 try {
                     if (!credentials?.email || !credentials?.password) {
-                        if (authDebug) {
-                            console.warn("[auth] Missing credentials payload");
-                        }
                         return null;
                     }
 
@@ -71,94 +55,30 @@ export const authOptions: NextAuthOptions = {
                     const rateLimitKey = ip ? `${ip}:${normalizedEmail}` : normalizedEmail;
 
                     // Check IP-based rate limiting (prevents enumeration attacks)
-                    if (!disableIpRateLimit && ip && !checkIpRateLimit(ip)) {
-                        console.warn("[auth] IP rate limit blocked login attempt", {
-                            email: normalizedEmail,
-                            hasIp: Boolean(ip),
-                        });
+                    if (ip && !checkIpRateLimit(ip)) {
                         throw new Error("Trop de tentatives. Réessayez dans 1 minute.");
                     }
 
                     // Check account-specific rate limiting
-                    const rateLimit = disableAccountRateLimit
-                        ? { allowed: true, remaining: 999 } as const
-                        : checkRateLimit(rateLimitKey, 5, 15 * 60 * 1000);
+                    const rateLimit = checkRateLimit(rateLimitKey, 5, 15 * 60 * 1000);
                     if (!rateLimit.allowed) {
-                        console.warn("[auth] Account rate limit blocked login attempt", {
-                            email: normalizedEmail,
-                            hasIp: Boolean(ip),
-                            lockoutMinutes: rateLimit.lockoutMinutes ?? null,
-                        });
                         if (rateLimit.lockoutMinutes) {
                             throw new Error(`Compte temporairement verrouillé. Réessayez dans ${rateLimit.lockoutMinutes} minutes.`);
                         }
                         throw new Error("Trop de tentatives. Réessayez plus tard.");
                     }
 
-                    let user: {
-                        id: string;
-                        email: string;
-                        name: string | null;
-                        role: UserRole;
-                        isActive: boolean | null;
-                        password: string;
-                        clientId: string | null;
-                        interlocuteurId: string | null;
-                        clientOnboardingDismissedPermanently: boolean | null;
-                    } | null = null;
-
-                    try {
-                        user = await prisma.user.findUnique({
-                            where: { email: normalizedEmail },
-                            select: {
-                                id: true,
-                                email: true,
-                                name: true,
-                                role: true,
-                                isActive: true,
-                                password: true,
-                                clientId: true,
-                                interlocuteurId: true,
-                                clientOnboardingDismissedPermanently: true,
-                            },
-                        });
-                    } catch (error) {
-                        if (!isMissingColumnError(error, "User.interlocuteurId")) {
-                            throw error;
-                        }
-                        // Backward-compat for environments where this migration is not yet applied.
-                        const legacyUser = await prisma.user.findUnique({
-                            where: { email: normalizedEmail },
-                            select: {
-                                id: true,
-                                email: true,
-                                name: true,
-                                role: true,
-                                isActive: true,
-                                password: true,
-                                clientId: true,
-                                clientOnboardingDismissedPermanently: true,
-                            },
-                        });
-                        user = legacyUser
-                            ? { ...legacyUser, interlocuteurId: null }
-                            : null;
-                    }
+                    const user = await prisma.user.findUnique({
+                        where: { email: normalizedEmail },
+                    });
 
                     if (!user) {
-                        if (authDebug) {
-                            console.warn("[auth] Unknown email", { email: normalizedEmail });
-                        }
                         // Don't reveal if email exists or not
                         return null;
                     }
 
                     // Check if user is active (explicitly check for false to allow null/undefined)
                     if (user.isActive === false) {
-                        console.warn("[auth] Inactive account blocked login", {
-                            email: normalizedEmail,
-                            userId: user.id,
-                        });
                         throw new Error("Votre compte a été désactivé. Contactez un administrateur.");
                     }
 
@@ -184,12 +104,6 @@ export const authOptions: NextAuthOptions = {
                     }
 
                     if (!isPasswordValid) {
-                        if (authDebug) {
-                            console.warn("[auth] Invalid password", {
-                                email: normalizedEmail,
-                                userId: user.id,
-                            });
-                        }
                         return null;
                     }
 
@@ -225,7 +139,7 @@ export const authOptions: NextAuthOptions = {
                     return {
                         id: user.id,
                         email: user.email,
-                        name: user.name ?? "",
+                        name: user.name,
                         role: user.role,
                         isActive: user.isActive ?? true, // Default to true for existing users
                         clientId: user.clientId,
@@ -236,10 +150,6 @@ export const authOptions: NextAuthOptions = {
                     if (err instanceof Error && err.message.includes("désactivé")) throw err;
                     if (err instanceof Error && err.message.includes("Trop de tentatives")) throw err;
                     if (err instanceof Error && err.message.includes("verrouillé")) throw err;
-                    console.error("[auth] authorize failed unexpectedly", {
-                        message: err instanceof Error ? err.message : "Unknown error",
-                        email: credentials?.email?.toLowerCase?.().trim?.() ?? null,
-                    });
                     return null;
                 }
             },
@@ -266,16 +176,11 @@ export const authOptions: NextAuthOptions = {
                 session.user.interlocuteurId = token.interlocuteurId;
                 // For CLIENT users, fetch fresh onboarding preference so update() reflects DB changes
                 if (token.role === "CLIENT") {
-                    try {
-                        const u = await prisma.user.findUnique({
-                            where: { id: token.id },
-                            select: { clientOnboardingDismissedPermanently: true },
-                        });
-                        session.user.clientOnboardingDismissedPermanently = u?.clientOnboardingDismissedPermanently ?? false;
-                    } catch {
-                        // Backward-compat if column is missing in older DBs.
-                        session.user.clientOnboardingDismissedPermanently = false;
-                    }
+                    const u = await prisma.user.findUnique({
+                        where: { id: token.id },
+                        select: { clientOnboardingDismissedPermanently: true },
+                    });
+                    session.user.clientOnboardingDismissedPermanently = u?.clientOnboardingDismissedPermanently ?? false;
                 } else {
                     session.user.clientOnboardingDismissedPermanently = token.clientOnboardingDismissedPermanently ?? false;
                 }
@@ -337,22 +242,10 @@ export function isAuthorized(userRole: UserRole, allowedRoles: UserRole[]): bool
  */
 export async function sessionFromToken(token: JWT | null): Promise<Session | null> {
     if (!token?.id || !token?.role) return null;
-    let u: { email: string; name: string | null; clientOnboardingDismissedPermanently: boolean | null } | null = null;
-    try {
-        u = await prisma.user.findUnique({
-            where: { id: token.id },
-            select: { email: true, name: true, clientOnboardingDismissedPermanently: true },
-        });
-    } catch {
-        // Backward-compat if column is missing in older DBs.
-        const legacyUser = await prisma.user.findUnique({
-            where: { id: token.id },
-            select: { email: true, name: true },
-        });
-        u = legacyUser
-            ? { ...legacyUser, clientOnboardingDismissedPermanently: false }
-            : null;
-    }
+    const u = await prisma.user.findUnique({
+        where: { id: token.id },
+        select: { email: true, name: true, clientOnboardingDismissedPermanently: true },
+    });
     if (!u) return null;
     const clientOnboardingDismissedPermanently =
         token.role === "CLIENT" ? (u.clientOnboardingDismissedPermanently ?? false) : (token.clientOnboardingDismissedPermanently ?? false);

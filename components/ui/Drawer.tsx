@@ -25,6 +25,8 @@ interface DrawerProps {
     footerHelperLink?: { href: string; label: string };
     /** Center title in header (reference style) */
     headerCentered?: boolean;
+    /** If false, drawer behaves as non-modal side panel (no full-screen blocking layer). */
+    modal?: boolean;
 }
 
 const SIZES = {
@@ -50,6 +52,7 @@ export function Drawer({
     footer,
     footerHelperLink,
     headerCentered = false,
+    modal = true,
 }: DrawerProps) {
     const drawerRef = useRef<HTMLDivElement>(null);
 
@@ -65,7 +68,7 @@ export function Drawer({
 
     // Lock body scroll when drawer is open
     useEffect(() => {
-        if (isOpen) {
+        if (isOpen && modal) {
             document.body.style.overflow = "hidden";
             document.addEventListener("keydown", handleKeyDown);
         } else {
@@ -92,25 +95,29 @@ export function Drawer({
     };
 
     return (
-        <div className="fixed inset-0 z-40 flex">
+        <div className={cn("fixed inset-0 z-[80] flex", modal ? "pointer-events-auto" : "pointer-events-none")}>
             {/* Overlay */}
-            <div
-                className="absolute inset-0 bg-black/30 backdrop-blur-[2px] animate-fade-in cursor-pointer transition-opacity duration-300"
-                onClick={handleOverlayClickClose}
-                aria-hidden="true"
-            />
+            {modal && (
+                <div
+                    className="absolute inset-0 bg-black/30 backdrop-blur-[2px] animate-fade-in cursor-pointer transition-opacity duration-300"
+                    onClick={handleOverlayClickClose}
+                    aria-hidden="true"
+                />
+            )}
 
             {/* Drawer panel */}
             <div
                 ref={drawerRef}
                 tabIndex={-1}
                 role="dialog"
-                aria-modal="true"
+                aria-modal={modal ? "true" : undefined}
+                aria-label={title || "Panneau latéral"}
                 className={cn(
-                    "fixed top-0 bottom-0 w-full flex flex-col bg-white shadow-2xl shadow-black/10 z-[41]",
+                    "fixed top-0 bottom-0 w-full flex flex-col bg-white shadow-2xl shadow-black/10 z-[81] outline-none",
                     side === "right"
                         ? "right-0 animate-slide-in-right"
                         : "left-0 animate-slide-in-left",
+                    !modal && "pointer-events-auto",
                     SIZES[size],
                     className
                 )}
@@ -127,7 +134,8 @@ export function Drawer({
                         {showCloseButton && headerCentered && (
                             <button
                                 onClick={onClose}
-                                className="absolute right-4 top-1/2 -translate-y-1/2 p-2 -m-1 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all duration-150 flex-shrink-0"
+                                aria-label="Fermer le panneau"
+                                className="absolute right-4 top-1/2 -translate-y-1/2 p-2 -m-1 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all duration-150 flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
                             >
                                 <X className="w-5 h-5" />
                             </button>
@@ -150,7 +158,8 @@ export function Drawer({
                         {showCloseButton && !headerCentered && (
                             <button
                                 onClick={onClose}
-                                className="p-2 -m-1 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all duration-150 flex-shrink-0"
+                                aria-label="Fermer le panneau"
+                                className="p-2 -m-1 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all duration-150 flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
                             >
                                 <X className="w-5 h-5" />
                             </button>

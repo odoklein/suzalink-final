@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-<<<<<<< HEAD
 import { Mail, Lock, Eye, EyeOff, AlertCircle, ArrowRight, Shield, Loader2, Zap } from "lucide-react";
 
 export default function LoginForm() {
@@ -140,14 +139,14 @@ export default function LoginForm() {
 
                 /* Logo */
                 .lp-logo {
-                    margin-bottom: 20px;
-                    height: 36px;
+                    margin-bottom: 24px;
+                    height: 72px;
                     width: auto;
                     object-fit: contain;
                 }
 
                 /* Heading */
-                .lp-head { text-align: center; margin-bottom: 24px; width: 100%; }
+                .lp-head { text-align: center; margin-bottom: 20px; width: 100%; }
                 .lp-head h1 {
                     font-weight: 700; font-size: 20px; line-height: 1.25;
                     letter-spacing: -.3px; color: var(--ink); margin: 0;
@@ -294,6 +293,9 @@ export default function LoginForm() {
                     .lp-card { padding: 24px 20px 22px; max-width: 100%; }
                     .lp-head h1 { font-size: 18px; }
                 }
+                @media (min-width: 1280px) {
+                    .lp-logo { height: 100px; }
+                }
             `}</style>
 
             <div className="lp">
@@ -303,8 +305,8 @@ export default function LoginForm() {
                         {/* Logo */}
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                            src="/logocaptainblue-rose.png"
-                            alt="Suzalink"
+                            src="/suzalink_logo.png"
+                            alt="Captain Prospect"
                             className="lp-logo"
                             draggable={false}
                         />
@@ -416,9 +418,11 @@ export default function LoginForm() {
                 </div>
 
                 <p className="lp-footer">
-                    Suzalink &copy; {new Date().getFullYear()}
+                    Captain Prospect &copy; {new Date().getFullYear()}
                 </p>
             </div>
         </>
     );
 }
+
+

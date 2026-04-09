@@ -7,6 +7,18 @@ import {
 } from '@/lib/api-utils';
 import { statusConfigService } from '@/lib/services/StatusConfigService';
 
+function buildCallbackResultCodes(config: { statuses: Array<{ code: string; label: string; triggersCallback?: boolean }> }) {
+    const defaults = ["CALLBACK_REQUESTED", "RELANCE", "RAPPEL"];
+    const configured = config.statuses
+        .filter((s) => {
+            if (s.triggersCallback === true) return true;
+            const haystack = `${s.code} ${s.label}`.toUpperCase();
+            return haystack.includes("RAPPEL") || haystack.includes("RELANCE");
+        })
+        .map((s) => s.code);
+    return new Set<string>([...defaults, ...configured]);
+}
+
 // ============================================
 // OPTIMIZED QUEUE QUERY - PHASE 2.5
 // ============================================
@@ -77,6 +89,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         last_action_result: string | null;
         last_action_note: string | null;
         last_action_created: Date | null;
+        last_action_callback_date: Date | null;
         last_action_sdr_id?: string | null;
         last_action_sdr_name?: string | null;
         priority: number;
@@ -187,6 +200,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                 a.result,
                 a.note,
                 a."createdAt",
+                a."callbackDate",
                 a."sdrId",
                 u.name as sdr_name
             FROM "Action" a
@@ -201,6 +215,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                 a.result,
                 a.note,
                 a."createdAt",
+                a."callbackDate",
                 a."sdrId",
                 u.name as sdr_name
             FROM "Action" a
@@ -215,6 +230,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                 COALESCE(lac.result, lac2.result)::text as last_action_result,
                 COALESCE(lac.note, lac2.note) as last_action_note,
                 COALESCE(lac."createdAt", lac2."createdAt") as last_action_created,
+                COALESCE(lac."callbackDate", lac2."callbackDate") as last_action_callback_date,
                 COALESCE(lac."sdrId", lac2."sdrId") as last_action_sdr_id,
                 COALESCE(lac.sdr_name, lac2.sdr_name) as last_action_sdr_name
             FROM all_targets at
@@ -223,7 +239,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         )
         SELECT *
         FROM targets_with_last_action
-        WHERE (last_action_created IS NULL OR last_action_created < $${isBooker || shouldBypassAssignmentGate ? 1 : 2})
+        WHERE 1=1
         ORDER BY 
             CASE WHEN contact_status = 'ACTIONABLE' THEN 0 WHEN contact_status = 'PARTIAL' THEN 1 WHEN contact_status = 'INCOMPLETE' THEN 2 ELSE 3 END,
             COALESCE(last_action_created, '1970-01-01'::timestamp) ASC
@@ -256,6 +272,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         configMissionId ? { missionId: configMissionId } : {}
     );
 
+    const callbackResultCodes = buildCallbackResultCodes(config);
     const withPriority = result.map((row) => {
         const { priorityOrder, priorityLabel } = statusConfigService.getPriorityForResult(
             row.last_action_result,
@@ -263,7 +280,14 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         );
         return { ...row, _priorityOrder: priorityOrder, _priorityLabel: priorityLabel };
     });
-    const filtered = withPriority.filter((r) => r._priorityOrder < 999);
+    const filtered = withPriority.filter((r) => {
+        const isInCooldown = !!r.last_action_created && new Date(r.last_action_created).getTime() >= cooldownDate.getTime();
+        const isOwnedCallback = !!r.last_action_result && callbackResultCodes.has(r.last_action_result) && r.last_action_sdr_id === sdrId;
+
+        if (r._priorityOrder >= 999) return false;
+        if (!isInCooldown) return true;
+        return isOwnedCallback;
+    });
     const sorted = filtered.sort(
         (a, b) =>
             a._priorityOrder - b._priorityOrder ||
@@ -297,6 +321,49 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         console.warn('Could not fetch client interlocuteurs:', err);
     }
 
+    const campaignMeta = await prisma.campaign.findUnique({
+        where: { id: next.campaign_id },
+        select: { script: true, rules: true },
+    });
+
+    const onboarding = await prisma.clientOnboarding.findFirst({
+        where: { clientId: next.client_id },
+        orderBy: { createdAt: "desc" },
+        select: { scripts: true },
+    });
+
+    const scriptFromCampaign = campaignMeta?.script ?? next.campaign_script ?? null;
+    const scriptFromOnboarding = onboarding?.scripts;
+    const scriptCompanion = (campaignMeta?.rules as {
+        scriptCompanion?: {
+            shared?: { content?: string };
+            aiShared?: { content?: string };
+            defaultTab?: "base" | "additional" | "ai";
+        };
+    } | null)?.scriptCompanion;
+
+    const normalizedBaseScript = (() => {
+        if (typeof scriptFromCampaign === "string" && scriptFromCampaign.trim()) return scriptFromCampaign;
+        if (scriptFromOnboarding && typeof scriptFromOnboarding === "object") {
+            const onboardingScripts = scriptFromOnboarding as Record<string, unknown>;
+            if (typeof onboardingScripts.base === "string" && onboardingScripts.base.trim()) {
+                return onboardingScripts.base;
+            }
+            const ordered = [
+                ["Introduction", onboardingScripts.intro],
+                ["Decouverte", onboardingScripts.discovery],
+                ["Objections", onboardingScripts.objection],
+                ["Closing", onboardingScripts.closing],
+            ]
+                .map(([label, value]) =>
+                    typeof value === "string" && value.trim() ? `--- ${label} ---\n${value.trim()}` : null
+                )
+                .filter((v): v is string => Boolean(v));
+            return ordered.join("\n\n");
+        }
+        return null;
+    })();
+
     return successResponse({
         hasNext: true,
         priority: next._priorityLabel,
@@ -321,13 +388,17 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         },
         campaignId: next.campaign_id,
         channel: next.mission_channel,
-        script: next.campaign_script,
+        script: normalizedBaseScript,
+        scriptAdditional: scriptCompanion?.shared?.content ?? "",
+        scriptAiEnhanced: scriptCompanion?.aiShared?.content ?? "",
+        scriptDefaultTab: scriptCompanion?.defaultTab ?? "base",
         clientBookingUrl,
         clientInterlocuteurs,
         lastAction: next.last_action_result ? {
             result: next.last_action_result,
             note: next.last_action_note,
             createdAt: next.last_action_created?.toISOString(),
+            callbackDate: next.last_action_callback_date?.toISOString(),
         } : null,
         lastActionBy: next.last_action_sdr_id
             ? { id: next.last_action_sdr_id, name: next.last_action_sdr_name ?? null }

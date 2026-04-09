@@ -33,6 +33,7 @@ export async function GET() {
             lists: {
                 select: {
                     id: true,
+                    name: true,
                     _count: { select: { companies: true } },
                 },
             },
@@ -40,47 +41,15 @@ export async function GET() {
             defaultMailbox: { select: { id: true, email: true, displayName: true } },
         } as const;
 
-        const missionWhere = {
-            isActive: true,
-            startDate: { lte: new Date() },
-            endDate: { gte: new Date() },
-        } as const;
-
-        const missionsRaw = await prisma.mission
-            .findMany({
-                where: missionWhere,
-                include: baseMissionInclude,
-                orderBy: { createdAt: "desc" },
-            })
-            .catch((error: unknown) => {
-                const isMissingDefaultMailboxColumn =
-                    error instanceof Prisma.PrismaClientKnownRequestError &&
-                    error.code === "P2022" &&
-                    typeof (error.meta as { column?: unknown } | undefined)?.column === "string" &&
-                    /Mission\.defaultMailboxId/.test(
-                        String((error.meta as { column?: unknown }).column)
-                    );
-
-                if (!isMissingDefaultMailboxColumn) {
-                    throw error;
-                }
-
-                // Backward-compat: DB schema without Mission.defaultMailboxId.
-                return prisma.mission.findMany({
-                    where: missionWhere,
-                    include: {
-                        client: { select: { id: true, name: true } },
-                        lists: {
-                            select: {
-                                id: true,
-                                _count: { select: { companies: true } },
-                            },
-                        },
-                        _count: { select: { campaigns: true, lists: true } },
-                    },
-                    orderBy: { createdAt: "desc" },
-                });
-            });
+        const missionsRaw = await prisma.mission.findMany({
+            where: {
+                isActive: true,
+                startDate: { lte: new Date() },
+                endDate: { gte: new Date() },
+            },
+            include: baseMissionInclude,
+            orderBy: { createdAt: "desc" },
+        });
 
         if (missionsRaw.length === 0) {
             return NextResponse.json({
@@ -133,10 +102,11 @@ export async function GET() {
                 name: mission.name,
                 channel: mission.channel,
                 client: mission.client,
-                defaultMailboxId: (mission as { defaultMailboxId?: string | null }).defaultMailboxId ?? null,
+                defaultMailboxId: mission.defaultMailboxId ?? null,
                 progress,
                 contactsRemaining: totalContacts - actionedContacts,
                 _count: mission._count,
+                lists: mission.lists.map((l) => ({ id: l.id, name: l.name })), // Include lists for import modal
             };
         });
 

@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { Prisma } from '@prisma/client';
+import type { ActionResult } from '@prisma/client';
 import { parseDateFromNote } from '@/lib/utils/parseDateFromNote';
 import { createClientPortalNotification, sendNewRdvEmailNotification, createNotification } from '@/lib/notifications';
 import type { EffectiveStatusDefinition } from './StatusConfigService';
@@ -27,6 +28,72 @@ export interface CreateActionInput {
     meetingAddress?: string;
     meetingJoinUrl?: string;
     meetingPhone?: string;
+}
+
+const VALID_ACTION_RESULTS: Set<ActionResult> = new Set<ActionResult>([
+    "NO_RESPONSE",
+    "BAD_CONTACT",
+    "BARRAGE_STANDARD",
+    "NUMERO_KO",
+    "INTERESTED",
+    "CALLBACK_REQUESTED",
+    "MEETING_BOOKED",
+    "MEETING_CANCELLED",
+    "INVALIDE",
+    "DISQUALIFIED",
+    "ENVOIE_MAIL",
+    "MAIL_ENVOYE",
+    "CONNECTION_SENT",
+    "MESSAGE_SENT",
+    "REPLIED",
+    "NOT_INTERESTED",
+    "REFUS",
+    "REFUS_ARGU",
+    "REFUS_CATEGORIQUE",
+    "RELANCE",
+    "RAPPEL",
+    "GERE_PAR_SIEGE",
+    "FAUX_NUMERO",
+    "PROJET_A_SUIVRE",
+    "MAUVAIS_INTERLOCUTEUR",
+    "MAIL_UNIQUEMENT",
+    "BARRAGE_SECRETAIRE",
+    "MAIL_DOC",
+    "HORS_CIBLE",
+]);
+
+const ACTION_RESULT_ALIASES: Record<string, ActionResult> = {
+    NE_REPONDS_PAS: "NO_RESPONSE",
+    NRP: "NO_RESPONSE",
+    PAS_DE_REPONSE: "NO_RESPONSE",
+    MAUVAIS_CONTACT: "BAD_CONTACT",
+    RAPEL: "RAPPEL",
+    RAPPEL_DEMANDE: "CALLBACK_REQUESTED",
+    RAPPEL_DEMANDEE: "CALLBACK_REQUESTED",
+    RAPPEL_REQUESTED: "CALLBACK_REQUESTED",
+    RELENCE: "RELANCE",
+    RELANCEE: "RELANCE",
+    CALL_BACK_REQUESTED: "CALLBACK_REQUESTED",
+    CALLBACK: "CALLBACK_REQUESTED",
+};
+
+function normalizeActionResultCode(raw: string): string {
+    return raw
+        .trim()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^A-Za-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .toUpperCase();
+}
+
+function resolveActionResult(inputResult: string): ActionResult {
+    const normalized = normalizeActionResultCode(inputResult);
+    const mapped = ACTION_RESULT_ALIASES[normalized] ?? normalized;
+    if (VALID_ACTION_RESULTS.has(mapped as ActionResult)) {
+        return mapped as ActionResult;
+    }
+    throw new Error(`Invalid action result: ${inputResult}`);
 }
 
 export interface ActionWithRelations {
@@ -80,9 +147,13 @@ export class ActionService {
  input: CreateActionInput,
  statusDef?: EffectiveStatusDefinition | null
  ): Promise<any> {
-        const triggersCallback = statusDef?.triggersCallback ?? (input.result === 'CALLBACK_REQUESTED');
+        // IMPORTANT: Action.result must always be a valid ActionResult enum code.
+        // statusDef.resultCategoryCode is for reporting grouping (ResultCategory),
+        // and may contain values like "OTHER" that are not ActionResult values.
+        const resolvedResult = resolveActionResult(input.result);
+        const triggersCallback = statusDef?.triggersCallback ?? (resolvedResult === 'CALLBACK_REQUESTED');
  const triggersOpportunity = statusDef?.triggersOpportunity ??
- (input.result === 'MEETING_BOOKED' || input.result === 'INTERESTED');
+ (resolvedResult === 'MEETING_BOOKED' || resolvedResult === 'INTERESTED');
 
  // Use transaction to ensure atomicity
  const actionRecord = await prisma.$transaction(async (tx) => {
@@ -128,11 +199,11 @@ export class ActionService {
                     REPLIED: 'Réponse reçue',
                     NOT_INTERESTED: 'Pas intéressé',
                 };
-                noteToStore = resultLabels[input.result] ?? input.result;
+                noteToStore = resultLabels[resolvedResult] ?? input.result;
             }
 
             // 1. Create the action — prefer explicit category, fallback to auto-detection from note
-            const autoCategory = (input.result === 'MEETING_BOOKED')
+            const autoCategory = (resolvedResult === 'MEETING_BOOKED')
                 ? (input.meetingCategory || detectMeetingCategoryFromNote(noteToStore || input.note))
                 : null;
 
@@ -143,7 +214,7 @@ export class ActionService {
                     sdrId: input.sdrId,
                     campaignId: input.campaignId,
                     channel: input.channel,
-                    result: input.result as any,
+                    result: resolvedResult,
                     note: noteToStore,
                     callbackDate: callbackDate,
                     duration: input.duration,
@@ -172,7 +243,7 @@ export class ActionService {
  }
 
  // 3. Update contact completeness if enriched (only for contacts)
- if (input.contactId && input.note && input.result === 'BAD_CONTACT') {
+ if (input.contactId && input.note && resolvedResult === 'BAD_CONTACT') {
  await this.handleBadContact(tx, input.contactId, input.note);
  }
 
@@ -326,7 +397,6 @@ export class ActionService {
  to?: Date;
  contactId?: string;
  companyId?: string;
- voipProvider?: string;
  page?: number;
  limit?: number;
  }) {
@@ -339,7 +409,6 @@ export class ActionService {
  if (where.result) whereClause.result = where.result;
  if (where.contactId) whereClause.contactId = where.contactId;
  if (where.companyId) whereClause.companyId = where.companyId;
- if (where.voipProvider) whereClause.voipProvider = where.voipProvider;
  if (where.missionId) {
  whereClause.campaign = { missionId: where.missionId };
  }
@@ -353,6 +422,7 @@ export class ActionService {
  prisma.action.findMany({
  where: whereClause,
  include: {
+ company: true,
  contact: {
  include: { company: true },
  },

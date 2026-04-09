@@ -25,6 +25,7 @@ import {
   Database,
   FileDown,
   Activity,
+  Key,
 } from "lucide-react";
 import { UserRole } from "@prisma/client";
 
@@ -133,6 +134,12 @@ export const MANAGER_NAV: NavSection[] = [
         permission: "pages.sdrs",
       },
       {
+        href: "/manager/sdr-feedback",
+        icon: MessageSquare,
+        label: "Avis SDR",
+        permission: "pages.sdrs",
+      },
+      {
         href: "/manager/planning",
         icon: Calendar,
         label: "Planning",
@@ -159,7 +166,13 @@ export const MANAGER_NAV: NavSection[] = [
       {
         href: "/manager/settings",
         icon: Mail,
-        label: "Notifications email",
+        label: "Parametres email",
+        permission: "pages.sdrs",
+      },
+      {
+        href: "/manager/api",
+        icon: Key,
+        label: "API & Intégrations",
         permission: "pages.sdrs",
       },
       {
@@ -254,17 +267,6 @@ export const SDR_NAV: NavSection[] = [
         icon: FolderKanban,
         label: "Projets",
         permission: "pages.projects",
-      },
-    ],
-  },
-  {
-    title: "Paramètres",
-    items: [
-      {
-        href: "/sdr/settings/voip",
-        icon: Phone,
-        label: "Configuration VOIP",
-        permission: "pages.action",
       },
     ],
   },
@@ -478,12 +480,6 @@ export const CLIENT_NAV: NavSection[] = [
         permission: "pages.dashboard",
       },
       {
-        href: "/client/portal/calls",
-        icon: Phone,
-        label: "Appels",
-        permission: "pages.dashboard",
-      },
-      {
         href: "/client/portal/reporting",
         icon: FileDown,
         label: "Rapports",
@@ -515,13 +511,19 @@ export const CLIENT_NAV: NavSection[] = [
       {
         href: "/client/portal/database",
         icon: Database,
-        label: "Base de donnees",
+        label: "Base de données",
         permission: "pages.dashboard",
       },
       {
         href: "/client/portal/files",
         icon: FileText,
         label: "Fichiers",
+        permission: "pages.dashboard",
+      },
+      {
+        href: "/client/portal/sales-playbook",
+        icon: Target,
+        label: "Sales Playbook",
         permission: "pages.dashboard",
       },
       {
@@ -538,7 +540,7 @@ export const CLIENT_NAV: NavSection[] = [
       {
         href: "/client/portal/settings",
         icon: Settings,
-        label: "Parametres",
+        label: "Paramètres",
         permission: "pages.dashboard",
       },
     ],

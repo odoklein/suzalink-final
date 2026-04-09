@@ -35,6 +35,8 @@ import type {
     BroadcastAudience,
 } from "./types";
 
+const CLIENT_SUPPORT_DISPLAY_NAME = "Equipe support";
+
 // ============================================
 // CHANNEL MANAGEMENT
 // ============================================
@@ -119,6 +121,37 @@ export async function getOrCreateDirectChannel(
     return channel.id;
 }
 
+/**
+ * Get or create a direct channel for a set of users.
+ * Uses sorted unique user IDs to ensure consistent lookup key.
+ */
+export async function getOrCreateDirectChannelForUsers(
+    userIds: string[]
+): Promise<string> {
+    const sortedIds = [...new Set(userIds)].sort();
+    if (sortedIds.length < 2) {
+        throw new Error("Direct channel requires at least two users");
+    }
+
+    let channel = await prisma.commsChannel.findFirst({
+        where: {
+            type: "DIRECT",
+            directUserIds: { equals: sortedIds },
+        },
+    });
+
+    if (channel) return channel.id;
+
+    channel = await prisma.commsChannel.create({
+        data: {
+            type: "DIRECT",
+            directUserIds: sortedIds,
+        },
+    });
+
+    return channel.id;
+}
+
 // ============================================
 // THREAD MANAGEMENT
 // ============================================
@@ -134,10 +167,10 @@ export async function createThread(
 
     // Get or create the appropriate channel
     if (request.channelType === "DIRECT") {
-        if (!request.participantIds || request.participantIds.length !== 1) {
-            throw new Error("Direct threads require exactly one other participant");
+        if (!request.participantIds || request.participantIds.length < 1) {
+            throw new Error("Direct threads require at least one recipient");
         }
-        channelId = await getOrCreateDirectChannel(creatorId, request.participantIds[0]);
+        channelId = await getOrCreateDirectChannelForUsers([creatorId, ...request.participantIds]);
     } else if (request.channelType === "BROADCAST") {
         // Broadcasts get their own channel or use a shared broadcast channel
         channelId = await getOrCreateChannel("BROADCAST");
@@ -152,7 +185,7 @@ export async function createThread(
     let participantIds: string[] = [creatorId];
 
     if (request.channelType === "DIRECT" && request.participantIds) {
-        participantIds = [...participantIds, ...request.participantIds];
+        participantIds = [...new Set([...participantIds, ...request.participantIds])];
     } else if (request.channelType === "MISSION" && request.anchorId) {
         // Auto-add participants for mission threads:
         // - All SDRs assigned to the mission
@@ -408,6 +441,11 @@ export async function getInboxThreads(
     pageSize = 20
 ): Promise<{ threads: CommsThreadListItem[]; total: number }> {
     const skip = (page - 1) * pageSize;
+    const currentUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+    });
+    const isClientViewer = currentUser?.role === "CLIENT";
 
     // Base where clause - user must be a participant
     const baseWhere: Prisma.CommsThreadWhereInput = {
@@ -460,7 +498,7 @@ export async function getInboxThreads(
                     orderBy: { createdAt: "desc" },
                     take: 1,
                     include: {
-                        author: { select: { name: true } },
+                        author: { select: { id: true, name: true } },
                     },
                 },
                 _count: { select: { participants: true } },
@@ -477,27 +515,42 @@ export async function getInboxThreads(
             const currentParticipant = thread.participants.find((p) => p.userId === userId);
             const otherParticipant = thread.participants.find((p) => p.userId !== userId);
             const isDirect = thread.channel.type === "DIRECT";
+            const maskedDirectForClient = isClientViewer && isDirect;
+            const lastMessage = thread.messages[0];
+            const maskedAuthorName =
+                maskedDirectForClient && lastMessage && lastMessage.author.id !== userId
+                    ? CLIENT_SUPPORT_DISPLAY_NAME
+                    : lastMessage?.author.name;
             return {
                 id: thread.id,
                 channelId: thread.channelId,
                 channelType: thread.channel.type as CommsChannelType,
-                channelName: await getChannelName(thread.channel),
-                subject: thread.subject,
+                channelName: maskedDirectForClient
+                    ? CLIENT_SUPPORT_DISPLAY_NAME
+                    : await getChannelName(thread.channel),
+                subject: maskedDirectForClient
+                    ? `Message avec ${CLIENT_SUPPORT_DISPLAY_NAME}`
+                    : thread.subject,
                 status: thread.status as CommsThreadStatus,
                 isBroadcast: thread.isBroadcast,
                 createdBy: {
                     id: thread.createdBy.id,
                     name: thread.createdBy.name,
                 },
-                ...(isDirect && otherParticipant?.user?.name != null && { otherParticipantName: otherParticipant.user.name }),
+                ...(isDirect &&
+                    (maskedDirectForClient
+                        ? { otherParticipantName: CLIENT_SUPPORT_DISPLAY_NAME }
+                        : otherParticipant?.user?.name != null
+                            ? { otherParticipantName: otherParticipant.user.name }
+                            : {})),
                 participantCount: thread._count.participants,
                 messageCount: thread.messageCount,
                 unreadCount: currentParticipant?.unreadCount ?? 0,
-                lastMessage: thread.messages[0]
+                lastMessage: lastMessage
                     ? {
-                        content: truncateContent(thread.messages[0].content, 100),
-                        authorName: thread.messages[0].author.name,
-                        createdAt: thread.messages[0].createdAt.toISOString(),
+                        content: truncateContent(lastMessage.content, 100),
+                        authorName: maskedAuthorName ?? lastMessage.author.name,
+                        createdAt: lastMessage.createdAt.toISOString(),
                     }
                     : undefined,
                 createdAt: thread.createdAt.toISOString(),
@@ -515,6 +568,12 @@ export async function getThread(
     threadId: string,
     userId: string
 ): Promise<CommsThreadView | null> {
+    const currentUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+    });
+    const isClientViewer = currentUser?.role === "CLIENT";
+
     const thread = await prisma.commsThread.findFirst({
         where: {
             id: threadId,
@@ -558,6 +617,8 @@ export async function getThread(
     });
 
     if (!thread) return null;
+    const isDirect = thread.channel.type === "DIRECT";
+    const maskedDirectForClient = isClientViewer && isDirect;
 
     // Mark as read
     await prisma.commsParticipant.update({
@@ -587,8 +648,12 @@ export async function getThread(
         id: thread.id,
         channelId: thread.channelId,
         channelType: thread.channel.type as CommsChannelType,
-        channelName: await getChannelName(thread.channel),
-        subject: thread.subject,
+        channelName: maskedDirectForClient
+            ? CLIENT_SUPPORT_DISPLAY_NAME
+            : await getChannelName(thread.channel),
+        subject: maskedDirectForClient
+            ? `Message avec ${CLIENT_SUPPORT_DISPLAY_NAME}`
+            : thread.subject,
         status: thread.status as CommsThreadStatus,
         isBroadcast: thread.isBroadcast,
         createdBy: {
@@ -603,7 +668,10 @@ export async function getThread(
         participants: thread.participants.map((p) => ({
             id: p.id,
             userId: p.user.id,
-            userName: p.user.name,
+            userName:
+                maskedDirectForClient && p.user.id !== userId
+                    ? CLIENT_SUPPORT_DISPLAY_NAME
+                    : p.user.name,
             userRole: p.user.role,
             lastReadAt: p.lastReadAt?.toISOString(),
             unreadCount: p.unreadCount,
@@ -617,9 +685,16 @@ export async function getThread(
             content: m.content,
             author: {
                 id: m.author.id,
-                name: m.author.name,
+                name:
+                    maskedDirectForClient && m.author.id !== userId
+                        ? CLIENT_SUPPORT_DISPLAY_NAME
+                        : m.author.name,
                 role: m.author.role,
-                initials: getInitials(m.author.name),
+                initials: getInitials(
+                    maskedDirectForClient && m.author.id !== userId
+                        ? CLIENT_SUPPORT_DISPLAY_NAME
+                        : m.author.name
+                ),
             },
             mentions: m.mentions.map((mention) => ({
                 userId: mention.user.id,

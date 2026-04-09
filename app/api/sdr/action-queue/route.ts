@@ -6,8 +6,8 @@ import { statusConfigService } from "@/lib/services/StatusConfigService";
 // ============================================
 // GET /api/sdr/action-queue
 // Returns a list of queue items (same pool as /api/actions/next) for table view.
-// Query: missionId?, listId?, limit?, search? (filter by name/company)
-// Returns a bounded list by default to keep response times stable.
+// Query: missionId?, listId?, search? (filter by name/company)
+// Returns full eligible queue (no artificial limit).
 // ============================================
 
 function escapeIlikePattern(raw: string): string {
@@ -15,6 +15,18 @@ function escapeIlikePattern(raw: string): string {
         .replace(/\\/g, "\\\\")
         .replace(/%/g, "\\%")
         .replace(/_/g, "\\_");
+}
+
+function buildCallbackResultCodes(config: { statuses: Array<{ code: string; label: string; triggersCallback?: boolean }> }) {
+    const defaults = ["CALLBACK_REQUESTED", "RELANCE", "RAPPEL"];
+    const configured = config.statuses
+        .filter((s) => {
+            if (s.triggersCallback === true) return true;
+            const haystack = `${s.code} ${s.label}`.toUpperCase();
+            return haystack.includes("RAPPEL") || haystack.includes("RELANCE");
+        })
+        .map((s) => s.code);
+    return new Set<string>([...defaults, ...configured]);
 }
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
@@ -29,13 +41,6 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         : "";
     const search = searchParams.get("search")?.trim() ?? "";
     const hasSearch = search.length > 0;
-    const limitParam = searchParams.get("limit");
-    const requestedLimit = limitParam
-        ? Math.min(Math.max(parseInt(limitParam, 10) || 100, 1), 500)
-        : 100;
-    // Query a larger candidate pool than requested so priority filtering/sorting still has headroom
-    const sqlLimit = Math.min(Math.max(requestedLimit * 3, 200), 2000);
-
     const COOLDOWN_HOURS = 24;
     const cooldownDate = new Date(Date.now() - COOLDOWN_HOURS * 60 * 60 * 1000);
     const sdrId = session.user.id;
@@ -76,6 +81,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
             last_action_result: string | null;
             last_action_note: string | null;
             last_action_created: Date | null;
+            last_action_callback_date: Date | null;
             last_action_sdr_id: string | null;
             last_action_sdr_name: string | null;
         }>
@@ -182,6 +188,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                 a.result,
                 a.note,
                 a."createdAt",
+                a."callbackDate",
                 a."sdrId",
                 u.name as sdr_name
             FROM "Action" a
@@ -195,6 +202,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                 a.result,
                 a.note,
                 a."createdAt",
+                a."callbackDate",
                 a."sdrId",
                 u.name as sdr_name
             FROM "Action" a
@@ -209,6 +217,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                 COALESCE(lac.result, lac2.result)::text as last_action_result,
                 COALESCE(lac.note, lac2.note) as last_action_note,
                 COALESCE(lac."createdAt", lac2."createdAt") as last_action_created,
+                COALESCE(lac."callbackDate", lac2."callbackDate") as last_action_callback_date,
                 COALESCE(lac."sdrId", lac2."sdrId") as last_action_sdr_id,
                 COALESCE(lac.sdr_name, lac2.sdr_name) as last_action_sdr_name
             FROM all_targets at
@@ -216,14 +225,13 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
             LEFT JOIN last_actions_companies lac2 ON at.contact_id IS NULL AND at.company_id = lac2."companyId"
         )
         SELECT * FROM targets_with_last_action
-        WHERE (last_action_created IS NULL OR last_action_created < $${isBooker || shouldBypassAssignmentGate ? 1 : 2})
+        WHERE 1=1
         ${hasSearch ? `
         AND (
             (contact_first_name IS NOT NULL AND contact_first_name ILIKE $${isBooker || shouldBypassAssignmentGate ? 2 : 3})
             OR (contact_last_name IS NOT NULL AND contact_last_name ILIKE $${isBooker || shouldBypassAssignmentGate ? 2 : 3})
             OR (company_name IS NOT NULL AND company_name ILIKE $${isBooker || shouldBypassAssignmentGate ? 2 : 3})
         )` : ""}
-        LIMIT ${sqlLimit}
     `,
         ...(isBooker || shouldBypassAssignmentGate
             ? (hasSearch ? [cooldownDate, `%${escapeIlikePattern(search)}%`] : [cooldownDate])
@@ -256,11 +264,19 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     const config = await configPromise;
 
     // Cooldown already filtered in SQL; apply config-driven priority and sort
+    const callbackResultCodes = buildCallbackResultCodes(config);
     const withPriority = rawResult.map((row) => {
         const { priorityOrder, priorityLabel } = statusConfigService.getPriorityForResult(row.last_action_result, config);
         return { ...row, _priorityOrder: priorityOrder, _priorityLabel: priorityLabel };
     });
-    const filtered = withPriority.filter((r) => r._priorityOrder < 999);
+    const filtered = withPriority.filter((r) => {
+        const isInCooldown = !!r.last_action_created && new Date(r.last_action_created).getTime() >= cooldownDate.getTime();
+        const isOwnedCallback = !!r.last_action_result && callbackResultCodes.has(r.last_action_result) && r.last_action_sdr_id === sdrId;
+
+        if (r._priorityOrder >= 999) return false;
+        if (!isInCooldown) return true;
+        return isOwnedCallback;
+    });
     const sorted = filtered.sort(
         (a, b) =>
             a._priorityOrder - b._priorityOrder ||
@@ -268,7 +284,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                 (b.contact_status === "ACTIONABLE" ? 0 : b.contact_status === "PARTIAL" ? 1 : 2) ||
             new Date(a.last_action_created ?? 0).getTime() - new Date(b.last_action_created ?? 0).getTime()
     );
-    const result = sorted.slice(0, requestedLimit);
+    const result = sorted;
 
     const items = result.map((row) => ({
         contactId: row.contact_id,
@@ -301,6 +317,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
                 result: row.last_action_result,
                 note: row.last_action_note,
                 createdAt: row.last_action_created?.toISOString(),
+                callbackDate: row.last_action_callback_date?.toISOString(),
             }
             : null,
         lastActionBy: row.last_action_sdr_id

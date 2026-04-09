@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   successResponse,
@@ -22,7 +21,8 @@ const updateSchema = z.object({
   result: z.enum(["MEETING_BOOKED", "MEETING_CANCELLED"]).optional(),
   confirmationStatus: z.enum(["PENDING", "CONFIRMED", "CANCELLED"]).optional(),
   sdrId: z.string().cuid().optional(),
-  contactId: z.string().cuid().optional().nullable(),
+  // Keep this permissive: some imported legacy contacts may not use CUID format.
+  contactId: z.string().min(1).optional().nullable(),
   meetingAddress: z.string().optional(),
   meetingJoinUrl: z.string().optional(),
   meetingPhone: z.string().optional(),
@@ -79,41 +79,16 @@ export const PUT = withErrorHandler(
       if (detected) actionUpdate.meetingCategory = detected;
     }
 
-    const include = {
-      contact: { include: { company: true } },
-      sdr: { select: { id: true, name: true, email: true } },
-      campaign: { include: { mission: { include: { client: true } } } },
-      meetingFeedback: true,
-    } as const;
-
-    let updated: Awaited<ReturnType<typeof prisma.action.update>>;
-    try {
-      updated = await prisma.action.update({
-        where: { id },
-        data: actionUpdate,
-        include,
-      });
-    } catch (error) {
-      const isUnknownMeetingField =
-        error instanceof Prisma.PrismaClientValidationError &&
-        /Unknown argument `(meetingJoinUrl|meetingAddress|meetingPhone)`/.test(error.message);
-
-      if (!isUnknownMeetingField) throw error;
-
-      // Fallback when Prisma client/schema is behind and meeting transport fields are unavailable.
-      const {
-        meetingJoinUrl: _meetingJoinUrl,
-        meetingAddress: _meetingAddress,
-        meetingPhone: _meetingPhone,
-        ...safeActionUpdate
-      } = actionUpdate;
-
-      updated = await prisma.action.update({
-        where: { id },
-        data: safeActionUpdate,
-        include,
-      });
-    }
+    const updated = await prisma.action.update({
+      where: { id },
+      data: actionUpdate,
+      include: {
+        contact: { include: { company: true } },
+        sdr: { select: { id: true, name: true, email: true } },
+        campaign: { include: { mission: { include: { client: true } } } },
+        meetingFeedback: true,
+      },
+    });
 
     // SAS RDV: notify client ONLY when RDV becomes CONFIRMED
     if (
@@ -137,9 +112,9 @@ export const PUT = withErrorHandler(
           missionName: updated.campaign?.mission?.name ?? null,
           scheduledAt: updated.callbackDate ?? null,
           meetingType: (updated.meetingType as any) ?? null,
-          meetingJoinUrl: (updated as any).meetingJoinUrl ?? (actionUpdate.meetingJoinUrl as string | undefined) ?? null,
-          meetingAddress: (updated as any).meetingAddress ?? (actionUpdate.meetingAddress as string | undefined) ?? null,
-          meetingPhone: (updated as any).meetingPhone ?? (actionUpdate.meetingPhone as string | undefined) ?? null,
+          meetingJoinUrl: updated.meetingJoinUrl ?? null,
+          meetingAddress: updated.meetingAddress ?? null,
+          meetingPhone: updated.meetingPhone ?? null,
         });
       }
     }

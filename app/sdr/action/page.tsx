@@ -42,6 +42,9 @@ import type { Column } from "@/components/ui/DataTable";
 import dynamic from "next/dynamic";
 import { CompanyDrawer, ContactDrawer } from "@/components/drawers";
 import { BookingDrawer } from "@/components/sdr/BookingDrawer";
+import { AlloCallPickerModal } from "@/components/sdr/AlloCallPickerModal";
+import { ScriptCompanionDrawer } from "@/components/sdr/ScriptCompanionDrawer";
+import { useSidebar } from "@/components/layout/SidebarProvider";
 
 const UnifiedActionDrawer = dynamic(
     () => import("@/components/drawers/UnifiedActionDrawer").then((m) => ({ default: m.UnifiedActionDrawer })),
@@ -61,6 +64,20 @@ import {
 // ============================================
 // TYPES
 // ============================================
+
+interface AlloCallItem {
+    id: string;
+    from: string;
+    to: string;
+    duration: number;
+    direction: 'INBOUND' | 'OUTBOUND';
+    outcome?: string;
+    summary?: string;
+    recording_url?: string;
+    transcript?: Array<{ source: string; text: string }>;
+    created_at?: string;
+    start_time?: string | number;
+}
 
 interface NextActionData {
     hasNext: boolean;
@@ -88,6 +105,9 @@ interface NextActionData {
     campaignId?: string;
     channel?: Channel;
     script?: string;
+    scriptAdditional?: string;
+    scriptAiEnhanced?: string;
+    scriptDefaultTab?: "base" | "additional" | "ai";
     clientBookingUrl?: string;
     clientInterlocuteurs?: Array<{
         id: string; firstName: string; lastName: string; title?: string;
@@ -100,6 +120,7 @@ interface NextActionData {
         result: string;
         note?: string;
         createdAt: string;
+        callbackDate?: string;
     };
     lastActionBy?: { id: string; name: string | null } | null;
 }
@@ -170,7 +191,7 @@ interface DrawerCompany {
         phone: string | null;
         title: string | null;
         linkedin: string | null;
-        status: string;
+        status: "INCOMPLETE" | "PARTIAL" | "ACTIONABLE";
         companyId: string;
     }>;
     _count: { contacts: number };
@@ -198,6 +219,26 @@ const RESULT_ICON_MAP: Record<string, React.ReactNode> = {
     DISQUALIFIED: <XCircle className="w-4 h-4" />,
     ENVOIE_MAIL: <Mail className="w-4 h-4" />,
     MAIL_ENVOYE: <Send className="w-4 h-4" />,
+    BARRAGE_STANDARD: <PhoneOff className="w-4 h-4" />,
+    BARRAGE_SECRETAIRE: <PhoneOff className="w-4 h-4" />,
+    NUMERO_KO: <PhoneOff className="w-4 h-4" />,
+    FAUX_NUMERO: <PhoneOff className="w-4 h-4" />,
+    INVALIDE: <Ban className="w-4 h-4" />,
+    REFUS: <XCircle className="w-4 h-4" />,
+    REFUS_ARGU: <XCircle className="w-4 h-4" />,
+    REFUS_CATEGORIQUE: <XCircle className="w-4 h-4" />,
+    RELANCE: <RotateCcw className="w-4 h-4" />,
+    RAPPEL: <Clock className="w-4 h-4" />,
+    PROJET_A_SUIVRE: <Sparkles className="w-4 h-4" />,
+    MAUVAIS_INTERLOCUTEUR: <Ban className="w-4 h-4" />,
+    MAIL_UNIQUEMENT: <Mail className="w-4 h-4" />,
+    MAIL_DOC: <Mail className="w-4 h-4" />,
+    HORS_CIBLE: <Ban className="w-4 h-4" />,
+    GERE_PAR_SIEGE: <Building2 className="w-4 h-4" />,
+    NOT_INTERESTED: <XCircle className="w-4 h-4" />,
+    CONNECTION_SENT: <Linkedin className="w-4 h-4" />,
+    MESSAGE_SENT: <Send className="w-4 h-4" />,
+    REPLIED: <MessageSquare className="w-4 h-4" />,
 };
 const TABLE_QUEUE_LIMIT = 120;
 const STATS_QUEUE_LIMIT = 250;
@@ -209,11 +250,15 @@ const PRIORITY_LABELS: Record<string, { label: string; color: string }> = {
     RETRY: { label: "Relance", color: "bg-slate-50 text-slate-700 border-slate-200" },
 };
 
+const STATUS_HOVER_HINTS: Record<string, string> = {
+    RELANCE: "Rappel demandé\nLe prospect attend ton appel\nIl y a un signal d'intérêt",
+    RAPPEL: "Rappel à faire\nLe prospect n'a pas encore été joint\nC'est un rappel logistique, pas commercial",
+};
+
 const SCRIPT_TABS = [
-    { id: "intro", label: "Intro" },
-    { id: "discovery", label: "Découverte" },
-    { id: "objection", label: "Objections" },
-    { id: "closing", label: "Closing" },
+    { id: "base", label: "Script de base" },
+    { id: "additional", label: "Script additionel" },
+    { id: "ai", label: "Script amélioré par IA" },
 ];
 
 // Stats modal body: summary + list of contacts with status (for Actions page)
@@ -338,6 +383,7 @@ function ActionStatsModalBody({
 }
 
 export default function SDRActionPage() {
+    const { setCollapsed } = useSidebar();
     const { data: session } = useSession();
     const { success, error: showError } = useToast();
     const [currentAction, setCurrentAction] = useState<NextActionData | null>(null);
@@ -353,8 +399,18 @@ export default function SDRActionPage() {
     const [elapsedTime, setElapsedTime] = useState(0);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const nextActionAbortRef = useRef<AbortController | null>(null);
-    const queueAbortRef = useRef<AbortController | null>(null);
     const refreshQueueAbortRef = useRef<AbortController | null>(null);
+    const [isSyncingCalls, setIsSyncingCalls] = useState(false);
+    const [syncResult, setSyncResult] = useState<{ enriched: number; total: number } | null>(null);
+
+    // Allo call picker dialog
+    const [alloDialogOpen, setAlloDialogOpen] = useState(false);
+    const [alloDialogCalls, setAlloDialogCalls] = useState<AlloCallItem[]>([]);
+    const [alloDialogLoading, setAlloDialogLoading] = useState(false);
+    const [alloDialogSelectedId, setAlloDialogSelectedId] = useState<string | null>(null);
+    const [alloDialogFilterPhone, setAlloDialogFilterPhone] = useState("");
+    const [alloDialogAlloLineCount, setAlloDialogAlloLineCount] = useState<number | null>(null);
+    const [linkedAlloCall, setLinkedAlloCall] = useState<AlloCallItem | null>(null);
 
     const [missions, setMissions] = useState<Mission[]>([]);
     const [lists, setLists] = useState<ListItem[]>([]);
@@ -389,11 +445,12 @@ export default function SDRActionPage() {
             return next;
         });
     }, []);
-    const [activeTab, setActiveTab] = useState<string>("intro");
+    const [activeTab, setActiveTab] = useState<string>("base");
     const [showBookingDrawer, setShowBookingDrawer] = useState(false);
+    const [unifiedBookingDialogOpen, setUnifiedBookingDialogOpen] = useState(false);
+    const [unifiedAlloDialogOpen, setUnifiedAlloDialogOpen] = useState(false);
     const [rdvDate, setRdvDate] = useState("");
     const [meetingCat, setMeetingCat] = useState<"EXPLORATOIRE" | "BESOIN" | "">("");
-    const [isImprovingNote, setIsImprovingNote] = useState(false);
 
     // View mode: card vs table — persisted in localStorage
     const [viewMode, setViewModeState] = useState<"card" | "table">(() =>
@@ -510,7 +567,10 @@ export default function SDRActionPage() {
                     phone: ct.phone,
                     title: ct.title,
                     linkedin: ct.linkedin,
-                    status: (ct.status ?? "PARTIAL") as any,
+                    status:
+                        ct.status === "INCOMPLETE" || ct.status === "PARTIAL" || ct.status === "ACTIONABLE"
+                            ? ct.status
+                            : "PARTIAL",
                     companyId: ct.companyId,
                 })),
                 _count: { contacts: co._count?.contacts ?? co.contacts?.length ?? 0 },
@@ -540,7 +600,15 @@ export default function SDRActionPage() {
     const [mailToSendChoiceNote, setMailToSendChoiceNote] = useState("");
 
     // Config-driven status options (from API)
-    const [statusConfig, setStatusConfig] = useState<{ statuses: Array<{ code: string; label: string; requiresNote: boolean }> } | null>(null);
+    const [statusConfig, setStatusConfig] = useState<{
+        statuses: Array<{
+            code: string;
+            label: string;
+            color: string | null;
+            requiresNote: boolean;
+            triggersCallback?: boolean;
+        }>;
+    } | null>(null);
 
     // Load filters + today-blocks
     useEffect(() => {
@@ -599,31 +667,27 @@ export default function SDRActionPage() {
         return () => controller.abort();
     }, [showError]);
 
-    // Fetch status config when mission is selected
+    // Fetch status config: global on mount, mission-specific when mission selected
     useEffect(() => {
-        if (!selectedMissionId) {
-            setStatusConfig(null);
-            return;
-        }
         const controller = new AbortController();
         const signal = controller.signal;
-        fetch(`/api/config/action-statuses?missionId=${selectedMissionId}`, { signal })
+        const url = selectedMissionId
+            ? `/api/config/action-statuses?missionId=${selectedMissionId}`
+            : `/api/config/action-statuses`;
+        fetch(url, { signal })
             .then((res) => res.json())
             .then((json) => {
                 if (signal.aborted) return;
-                if (json.success && json.data?.statuses) {
+                if (json.success && json.data?.statuses?.length) {
                     setStatusConfig({ statuses: json.data.statuses });
-                } else {
-                    setStatusConfig(null);
                 }
             })
             .catch((err) => {
                 if ((err as Error).name === "AbortError") return;
-                setStatusConfig(null);
-                showError("Impossible de charger la configuration des statuts");
+                console.error("Failed to load status config:", err);
             });
         return () => controller.abort();
-    }, [selectedMissionId, showError]);
+    }, [selectedMissionId]);
 
     const resultOptions = statusConfig?.statuses?.length
         ? statusConfig.statuses.map((s, i) => ({
@@ -638,6 +702,26 @@ export default function SDRActionPage() {
     const statusLabels: Record<string, string> = statusConfig?.statuses?.length
         ? Object.fromEntries(statusConfig.statuses.map((s) => [s.code, s.label]))
         : ACTION_RESULT_LABELS;
+
+    const callbackResultCodes = useMemo(() => {
+        const defaults = ["CALLBACK_REQUESTED", "RAPPEL", "RELANCE"];
+        if (!statusConfig?.statuses?.length) {
+            return new Set<string>(defaults);
+        }
+        const configured = statusConfig.statuses
+            .filter((s) => {
+                if (s.triggersCallback === true) return true;
+                const haystack = `${s.code} ${s.label}`.toUpperCase();
+                return haystack.includes("RAPPEL") || haystack.includes("RELANCE");
+            })
+            .map((s) => s.code);
+        return new Set<string>([...defaults, ...configured]);
+    }, [statusConfig]);
+
+    const isCallbackResult = useCallback((code: string | null | undefined) => {
+        if (!code) return false;
+        return callbackResultCodes.has(code);
+    }, [callbackResultCodes]);
 
     const getRequiresNote = useCallback((code: string) =>
         statusConfig?.statuses?.find((s) => s.code === code)?.requiresNote ??
@@ -748,7 +832,11 @@ export default function SDRActionPage() {
         setMeetingCat("");
         setShowSuccess(false);
         setElapsedTime(0);
-        setActiveTab("intro");
+        setActiveTab("base");
+        setLinkedAlloCall(null);
+        setAlloDialogOpen(false);
+        setAlloDialogCalls([]);
+        setAlloDialogSelectedId(null);
 
         try {
             const params = new URLSearchParams();
@@ -764,6 +852,10 @@ export default function SDRActionPage() {
                 setCurrentAction(null);
             } else {
                 setCurrentAction(json.data);
+                const preferredTab = json.data?.scriptDefaultTab;
+                if (preferredTab === "additional" || preferredTab === "ai" || preferredTab === "base") {
+                    setActiveTab(preferredTab);
+                }
                 if (timerRef.current) clearInterval(timerRef.current);
                 timerRef.current = setInterval(() => setElapsedTime((prev) => prev + 1), 1000);
             }
@@ -782,151 +874,32 @@ export default function SDRActionPage() {
         return () => { if (timerRef.current) clearInterval(timerRef.current); };
     }, [selectedMissionId, selectedListId, loadNextAction]);
 
-    // Queue is loaded via useQuery (queueQueryKey) above
-    const _queueEffectRemoved = true;
     useEffect(() => {
-        if (_queueEffectRemoved) return; // queue from useQuery above
-        if (viewMode !== "table" || selectedMissionId === null) {
-            return;
-        }
-        queueAbortRef.current?.abort();
+        if (!currentAction?.campaignId) return;
         const controller = new AbortController();
-        queueAbortRef.current = controller;
-        const signal = controller.signal;
-        setQueueLoading(true);
-        setQueueFetchError(null);
-        const params = new URLSearchParams();
-        params.set("missionId", selectedMissionId);
-        if (selectedListId) params.set("listId", selectedListId);
-        if (tableSearchApi) params.set("search", tableSearchApi);
-        fetch(`/api/sdr/action-queue?${params.toString()}`, { signal })
+        fetch(`/api/campaigns/${currentAction.campaignId}/script-companion`, { signal: controller.signal })
             .then((res) => res.json())
             .then((json) => {
-                if (signal.aborted) return;
-                if (json.success && json.data?.items) {
-                    setQueueFetchError(null);
-                    const items = json.data.items as QueueItem[];
-                    setQueueItems(items.map((i) => ({
-                        ...i,
-                        _displayName: i.contact
-                            ? `${(i.contact.firstName || "").trim()} ${(i.contact.lastName || "").trim()}`.trim() || i.company.name
-                            : i.company.name,
-                        _companyName: i.company.name,
-                        _phone: i.contact?.phone || i.company?.phone || null,
-                        _email: i.contact?.email || null,
-                        _searchNote: i.lastAction?.note ?? null,
-                    })));
-                } else {
-                    setQueueItems([]);
-                    setQueueFetchError(null);
+                if (!json?.success) return;
+                setCurrentAction((prev) => {
+                    if (!prev || prev.campaignId !== currentAction.campaignId) return prev;
+                    return {
+                        ...prev,
+                        scriptAdditional: json.data?.additionalShared ?? prev.scriptAdditional,
+                        scriptAiEnhanced: json.data?.aiShared ?? prev.scriptAiEnhanced,
+                        scriptDefaultTab: json.data?.defaultTab ?? prev.scriptDefaultTab,
+                    };
+                });
+                const preferredTab = json.data?.defaultTab;
+                if (preferredTab === "base" || preferredTab === "additional" || preferredTab === "ai") {
+                    setActiveTab(preferredTab);
                 }
             })
-            .catch((err) => {
-                if ((err as Error).name === "AbortError") return;
-                setQueueItems([]);
-                setQueueFetchError("Impossible de charger la file d'actions");
-                showError("Impossible de charger la file d'actions");
-            })
-            .finally(() => {
-                if (!signal.aborted) setQueueLoading(false);
-                if (queueAbortRef.current === controller) queueAbortRef.current = null;
+            .catch(() => {
+                // best effort only
             });
         return () => controller.abort();
-    }, [viewMode, selectedMissionId, selectedListId, tableSearchApi, showError]);
-
-    // (Drawer contact/company loaded via useQuery above)
-    const _drawerFetchRemoved = true;
-    useEffect(() => {
-        if (_drawerFetchRemoved) return;
-        if (!drawerContactId) {
-            return;
-        }
-        const controller = new AbortController();
-        const signal = controller.signal;
-        fetch(`/api/contacts/${drawerContactId}`, { signal })
-            .then((res) => res.json())
-            .then((json) => {
-                if (signal.aborted) return;
-                if (json.success && json.data) {
-                    const c = json.data;
-                    setDrawerContact({
-                        id: c.id,
-                        firstName: c.firstName,
-                        lastName: c.lastName,
-                        email: c.email,
-                        phone: c.phone,
-                        additionalPhones: c.additionalPhones ?? undefined,
-                        additionalEmails: c.additionalEmails ?? undefined,
-                        title: c.title,
-                        linkedin: c.linkedin,
-                        status: c.status ?? "PARTIAL",
-                        companyId: c.company?.id ?? "",
-                        companyName: c.company?.name ?? undefined,
-                        companyPhone: c.company?.phone ?? undefined,
-                    });
-                } else {
-                    setDrawerContact(null);
-                }
-            })
-            .catch((err) => {
-                if ((err as Error).name === "AbortError") return;
-                setDrawerContact(null);
-                showError("Impossible de charger le contact");
-            })
-            .finally(() => {
-                if (!signal.aborted) setDrawerLoading(false);
-            });
-        return () => controller.abort();
-    }, [drawerContactId, showError]);
-
-    // (Company drawer loaded via useQuery above)
-    useEffect(() => {
-        if (_drawerFetchRemoved) return;
-        if (!drawerCompanyId) return;
-        const controller = new AbortController();
-        const signal = controller.signal;
-        fetch(`/api/companies/${drawerCompanyId}`, { signal })
-            .then((res) => res.json())
-            .then((json) => {
-                if (signal.aborted) return;
-                if (json.success && json.data) {
-                    const co = json.data;
-                    setDrawerCompany({
-                        id: co.id,
-                        name: co.name,
-                        industry: co.industry,
-                        country: co.country,
-                        website: co.website,
-                        size: co.size,
-                        phone: co.phone,
-                        status: co.status ?? "PARTIAL",
-                        contacts: (co.contacts ?? []).map((ct: { id: string; firstName: string | null; lastName: string | null; email: string | null; phone: string | null; title: string | null; linkedin: string | null; status: string; companyId: string }) => ({
-                            id: ct.id,
-                            firstName: ct.firstName,
-                            lastName: ct.lastName,
-                            email: ct.email,
-                            phone: ct.phone,
-                            title: ct.title,
-                            linkedin: ct.linkedin,
-                            status: (ct.status ?? "PARTIAL") as any,
-                            companyId: ct.companyId,
-                        })),
-                        _count: { contacts: co._count?.contacts ?? co.contacts?.length ?? 0 },
-                    });
-                } else {
-                    setDrawerCompany(null);
-                }
-            })
-            .catch((err) => {
-                if ((err as Error).name === "AbortError") return;
-                setDrawerCompany(null);
-                showError("Impossible de charger la société");
-            })
-            .finally(() => {
-                if (!signal.aborted) setDrawerLoading(false);
-            });
-        return () => controller.abort();
-    }, [drawerCompanyId, showError]);
+    }, [currentAction?.campaignId]);
 
     const queueRowKey = (row: QueueItem) => row.contactId ?? row.companyId;
 
@@ -941,6 +914,77 @@ export default function SDRActionPage() {
     const refreshQueue = useCallback(() => {
         queryClient.invalidateQueries({ queryKey: queueQueryKey });
     }, [queryClient, queueQueryKey]);
+
+    const handleSyncCalls = useCallback(async () => {
+        if (isSyncingCalls) return;
+        setIsSyncingCalls(true);
+        setSyncResult(null);
+        try {
+            const res = await fetch('/api/sdr/calls/sync', { method: 'POST' });
+            const json = await res.json();
+            if (json.success) {
+                const { enriched, total } = json.data;
+                setSyncResult({ enriched, total });
+                if (enriched > 0) {
+                    success("Appels synchronisés", `${enriched} appel${enriched > 1 ? 's' : ''} enrichi${enriched > 1 ? 's' : ''} (résumé, transcription, audio).`);
+                } else if (total === 0) {
+                    success("Déjà à jour", "Aucun appel récent à synchroniser.");
+                } else {
+                    success("Synchronisation terminée", `${total} appel${total > 1 ? 's' : ''} analysé${total > 1 ? 's' : ''} — aucune correspondance Allo trouvée.`);
+                }
+                refreshQueue();
+            } else {
+                showError("Erreur de synchronisation", json.error ?? "Impossible de contacter Allo.");
+            }
+        } catch {
+            showError("Erreur réseau", "La synchronisation a échoué.");
+        } finally {
+            setIsSyncingCalls(false);
+        }
+    }, [isSyncingCalls, refreshQueue, success, showError]);
+
+    const openAlloDialog = useCallback(async () => {
+        const phone =
+            currentAction?.contact?.phone ||
+            (currentAction?.channel === "CALL" && currentAction?.company?.phone
+                ? currentAction.company.phone
+                : null);
+        if (!phone) {
+            showError("Numéro manquant", "Aucun numéro de téléphone trouvé pour ce contact.");
+            return;
+        }
+        setAlloDialogFilterPhone(phone);
+        setAlloDialogAlloLineCount(null);
+        setAlloDialogOpen(true);
+        setAlloDialogLoading(true);
+        setAlloDialogCalls([]);
+        setAlloDialogSelectedId(null);
+        try {
+            const res = await fetch(`/api/sdr/calls/for-contact?phone=${encodeURIComponent(phone)}`);
+            const json = await res.json();
+            if (json.success) {
+                setAlloDialogCalls(json.data.calls ?? []);
+                const meta = json.data?.meta as { filterPhone?: string; alloLineCount?: number } | undefined;
+                if (meta?.filterPhone) setAlloDialogFilterPhone(meta.filterPhone);
+                if (typeof meta?.alloLineCount === "number") setAlloDialogAlloLineCount(meta.alloLineCount);
+            } else {
+                showError("Erreur Allo", json.error ?? "Impossible de charger les appels.");
+                setAlloDialogOpen(false);
+            }
+        } catch {
+            showError("Erreur réseau", "Impossible de contacter Allo.");
+            setAlloDialogOpen(false);
+        } finally {
+            setAlloDialogLoading(false);
+        }
+    }, [currentAction, showError]);
+
+    const confirmAlloCall = useCallback(() => {
+        const call = alloDialogCalls.find((c) => c.id === alloDialogSelectedId);
+        if (!call) return;
+        setLinkedAlloCall(call);
+        setAlloDialogOpen(false);
+    }, [alloDialogCalls, alloDialogSelectedId]);
 
     // When opening Stats modal in card view, fetch queue for current mission/list
     useEffect(() => {
@@ -1008,6 +1052,13 @@ export default function SDRActionPage() {
         }
     }, [unifiedDrawerOpen, viewMode, refreshQueue]);
 
+    // Improve workspace when both drawers open in table flow.
+    useEffect(() => {
+        if (viewMode === "table" && unifiedDrawerOpen) {
+            setCollapsed(true);
+        }
+    }, [viewMode, unifiedDrawerOpen, setCollapsed]);
+
     const openDrawerForRow = (row: QueueItem) => {
         setDrawerRow(row);
         setUnifiedDrawerContactId(row.contactId || null);
@@ -1022,6 +1073,8 @@ export default function SDRActionPage() {
 
     const closeUnifiedDrawer = () => {
         setUnifiedDrawerOpen(false);
+        setUnifiedBookingDialogOpen(false);
+        setUnifiedAlloDialogOpen(false);
         setDrawerRow(null);
         setUnifiedDrawerContactId(null);
         setUnifiedDrawerCompanyId(null);
@@ -1117,7 +1170,7 @@ export default function SDRActionPage() {
         setSubmittingRowKey(key);
         const noteRequired = getRequiresNote(result);
         const note = noteRequired
-            ? (result === "CALLBACK_REQUESTED" ? "Rappel demandé" : statusLabels[result] ?? "Note")
+            ? (isCallbackResult(result) ? "Rappel demandé" : statusLabels[result] ?? "Note")
             : undefined;
         try {
             const res = await fetch("/api/actions", {
@@ -1130,7 +1183,7 @@ export default function SDRActionPage() {
                     channel: row.channel,
                     result,
                     note: note ?? undefined,
-                    callbackDate: result === "CALLBACK_REQUESTED" ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : undefined,
+                    callbackDate: isCallbackResult(result) ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : undefined,
                 }),
             });
             const json = await res.json();
@@ -1392,8 +1445,8 @@ export default function SDRActionPage() {
             return;
         }
 
-        // For MEETING_BOOKED with booking URLs, open booking drawer instead of submitting
-        if (selectedResult === "MEETING_BOOKED" && (currentAction.clientBookingUrl || currentAction.clientInterlocuteurs?.some((i: Record<string, unknown>) => (((i.bookingLinks as unknown[]) ?? []).length ?? 0) > 0))) {
+        // For MEETING_BOOKED, always open booking drawer so SDR can pick date/type/category
+        if (selectedResult === "MEETING_BOOKED") {
             setShowBookingDrawer(true);
             return;
         }
@@ -1414,15 +1467,43 @@ export default function SDRActionPage() {
                     channel: currentAction.channel,
                     result: selectedResult,
                     note: note || undefined,
-                    callbackDate: selectedResult === "CALLBACK_REQUESTED" && callbackDateValue ? new Date(callbackDateValue).toISOString() : undefined,
+                    callbackDate: isCallbackResult(selectedResult) && callbackDateValue ? new Date(callbackDateValue).toISOString() : undefined,
                     duration: elapsedTime,
-                    ...(selectedResult === "MEETING_BOOKED" && meetingCat && { meetingCategory: meetingCat }),
                 }),
             });
             const json = await res.json();
             if (!json.success) {
                 setError(json.error || "Erreur");
                 return;
+            }
+            const newActionId = json.data?.id as string | undefined;
+            const callToLink = linkedAlloCall;
+            if (newActionId && currentAction.channel === "CALL" && callToLink) {
+                const transcription =
+                    callToLink.transcript?.length ?
+                        callToLink.transcript.map((t) => `${t.source}: ${t.text}`).join("\n")
+                    :   null;
+                try {
+                    const enrichRes = await fetch(`/api/actions/${newActionId}/enrich-call`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            callId: callToLink.id,
+                            summary: callToLink.summary ?? null,
+                            transcription,
+                            recordingUrl: callToLink.recording_url ?? null,
+                        }),
+                    });
+                    const enrichJson = await enrichRes.json();
+                    if (!enrichJson.success) {
+                        showError(
+                            "Appel non enregistré",
+                            enrichJson.error ?? "Les données Allo n'ont pas pu être attachées à l'action."
+                        );
+                    }
+                } catch {
+                    showError("Appel non enregistré", "Erreur réseau lors de l'enrichissement.");
+                }
             }
             setShowSuccess(true);
             setActionsCompleted((prev) => prev + 1);
@@ -1433,32 +1514,19 @@ export default function SDRActionPage() {
         } finally {
             setIsSubmitting(false);
         }
-    }, [selectedResult, currentAction, note, callbackDateValue, selectedMissionId, elapsedTime, loadNextAction, getRequiresNote]);
-
-    // Improve note with Mistral (orthography + rephrase)
-    const handleImproveNote = async () => {
-        const trimmed = note.trim();
-        if (!trimmed) return;
-        setIsImprovingNote(true);
-        setError(null);
-        try {
-            const res = await fetch("/api/ai/mistral/note-improve", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: trimmed }),
-            });
-            const json = await res.json();
-            if (json.success && json.data?.improvedText) {
-                setNote(json.data.improvedText);
-            } else {
-                setError(json.error || "Impossible d'améliorer la note");
-            }
-        } catch {
-            setError("Erreur de connexion à l'IA");
-        } finally {
-            setIsImprovingNote(false);
-        }
-    };
+    }, [
+        selectedResult,
+        currentAction,
+        note,
+        callbackDateValue,
+        selectedMissionId,
+        elapsedTime,
+        loadNextAction,
+        getRequiresNote,
+        isCallbackResult,
+        linkedAlloCall,
+        showError,
+    ]);
 
     // Handlers
     const handleMissionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -1493,86 +1561,80 @@ export default function SDRActionPage() {
         return () => window.removeEventListener("keydown", handler);
     }, [selectedResult, isSubmitting, resultOptions, handleSubmit]);
 
-    // Parse script
-    let scriptSections: Record<string, string> | null = null;
-    if (currentAction?.script) {
-        try {
-            const parsed = JSON.parse(currentAction.script);
-            if (typeof parsed === "object") scriptSections = parsed;
-        } catch { }
-    }
 
-    // Filter script tabs based on available content
-    const availableScriptTabs = scriptSections
-        ? SCRIPT_TABS.filter(tab => scriptSections && scriptSections[tab.id])
-        : [];
+    const parseBaseScript = (rawScript?: string): string => {
+        if (!rawScript?.trim()) return "";
+        const parseCandidate = (candidate: string): string | null => {
+            try {
+                const parsed = JSON.parse(candidate);
+                if (typeof parsed === "string") return parseCandidate(parsed) ?? parsed;
+                if (!parsed || typeof parsed !== "object") return null;
+                const sections = [
+                    { key: "intro", label: "Intro" },
+                    { key: "discovery", label: "Decouverte" },
+                    { key: "objection", label: "Objections" },
+                    { key: "closing", label: "Closing" },
+                ]
+                    .map(({ key, label }) => {
+                        const value = (parsed as Record<string, unknown>)[key];
+                        return typeof value === "string" && value.trim() ? `--- ${label} ---\n${value.trim()}` : null;
+                    })
+                    .filter((value): value is string => Boolean(value));
+                return sections.length > 0 ? sections.join("\n\n") : null;
+            } catch {
+                return null;
+            }
+        };
+        return parseCandidate(rawScript) ?? rawScript;
+    };
 
-    // ========== NO BLOCKS TODAY - EMPTY STATE ==========
-    if (!todayBlocksLoading && todayBlocksData && !todayBlocksData.hasBlocksToday) {
-        const weekDays = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven'];
-        const weekBlocksByDay: Record<string, typeof todayBlocksData.weekBlocks> = {};
-        for (const wb of todayBlocksData.weekBlocks) {
-            const d = new Date(wb.date).toISOString().slice(0, 10);
-            if (!weekBlocksByDay[d]) weekBlocksByDay[d] = [];
-            weekBlocksByDay[d].push(wb);
+    const scriptPanelContent = {
+        base: parseBaseScript(currentAction?.script),
+        additional: currentAction?.scriptAdditional?.trim() || "",
+        ai: currentAction?.scriptAiEnhanced?.trim() || "",
+    };
+    const availableScriptTabs = SCRIPT_TABS.filter((tab) => {
+        const content = scriptPanelContent[tab.id as keyof typeof scriptPanelContent];
+        return Boolean(content && content.trim());
+    });
+    useEffect(() => {
+        if (availableScriptTabs.length === 0) return;
+        if (!availableScriptTabs.some((tab) => tab.id === activeTab)) {
+            setActiveTab(availableScriptTabs[0].id);
         }
-        const today = new Date();
-        const dow = today.getDay();
-        const monday = new Date(today);
-        monday.setDate(monday.getDate() - (dow === 0 ? 6 : dow - 1));
+    }, [activeTab, availableScriptTabs]);
 
-        return (
-            <div className="flex items-center justify-center min-h-[70vh]">
-                <div className="max-w-md w-full mx-auto text-center px-6">
-                    <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-6">
-                        <svg className="w-10 h-10 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-                        </svg>
-                    </div>
-                    <h2 className="text-xl font-bold text-slate-800 mb-2">Aucune mission planifiée aujourd&apos;hui</h2>
-                    <p className="text-sm text-slate-500 mb-6">
-                        Votre manager n&apos;a pas encore planifié de créneaux pour aujourd&apos;hui.
-                        Contactez-le pour qu&apos;il organise vos journées via le hub de planification.
-                    </p>
+    // NOTE: Planning blocks are informational only — SDRs can prospect even without scheduled blocks today.
 
-                    {/* Week preview */}
-                    {todayBlocksData.weekBlocks.length > 0 && (
-                        <div className="bg-white border border-slate-200 rounded-xl p-4 text-left">
-                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Vos créneaux cette semaine</p>
-                            <div className="space-y-2">
-                                {Array.from({ length: 5 }, (_, i) => {
-                                    const date = new Date(monday);
-                                    date.setDate(date.getDate() + i);
-                                    const dateStr = date.toISOString().slice(0, 10);
-                                    const dayBlocks = weekBlocksByDay[dateStr] ?? [];
-                                    const isToday = date.toDateString() === today.toDateString();
-                                    return (
-                                        <div key={i} className={`flex items-center gap-3 py-1.5 px-2 rounded-lg ${isToday ? 'bg-red-50' : ''}`}>
-                                            <span className={`text-xs font-bold w-8 ${isToday ? 'text-red-600' : 'text-slate-500'}`}>{weekDays[i]}</span>
-                                            <span className="text-xs text-slate-400 w-12">{date.getDate()}/{date.getMonth() + 1}</span>
-                                            {dayBlocks.length > 0 ? (
-                                                <div className="flex flex-wrap gap-1">
-                                                    {dayBlocks.map((b) => (
-                                                        <span key={b.id} className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
-                                                            {b.mission.name} {b.startTime}–{b.endTime}
-                                                        </span>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <span className={`text-xs italic ${isToday ? 'text-red-400' : 'text-slate-300'}`}>
-                                                    {isToday ? 'Aucun créneau' : '—'}
-                                                </span>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>
-        );
-    }
+    // Sync calls button — always visible in headers
+    const syncCallsButton = (
+        <button
+            type="button"
+            onClick={handleSyncCalls}
+            disabled={isSyncingCalls}
+            title="Synchroniser les résumés et transcriptions d'appels Allo (24 dernières heures)"
+            className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-all h-auto",
+                "border-white/20 bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm",
+                isSyncingCalls && "opacity-70 cursor-not-allowed"
+            )}
+        >
+            {isSyncingCalls ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+                <PhoneCall className="w-4 h-4" />
+            )}
+            {isSyncingCalls ? "Synchro…" : "Sync appels"}
+            {syncResult && !isSyncingCalls && (
+                <span className={cn(
+                    "ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold",
+                    syncResult.enriched > 0 ? "bg-emerald-400/30 text-emerald-200" : "bg-white/20 text-white/70"
+                )}>
+                    {syncResult.enriched}/{syncResult.total}
+                </span>
+            )}
+        </button>
+    );
 
     // ========== TABLE VIEW ==========
     if (viewMode === "table") {
@@ -1662,7 +1724,6 @@ export default function SDRActionPage() {
             {
                 key: "lastAction",
                 header: "Dernière action",
-                importance: "secondary",
                 render: (_, row) => {
                     if (!row.lastAction) {
                         return (
@@ -1677,6 +1738,8 @@ export default function SDRActionPage() {
                         BAD_CONTACT: { badge: "bg-red-50 text-red-600 border-red-200", dot: "bg-red-400" },
                         INTERESTED: { badge: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-400" },
                         CALLBACK_REQUESTED: { badge: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-400" },
+                        RELANCE: { badge: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-400" },
+                        RAPPEL: { badge: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-400" },
                         MEETING_BOOKED: { badge: "bg-indigo-50 text-indigo-700 border-indigo-200", dot: "bg-indigo-400" },
                         DISQUALIFIED: { badge: "bg-slate-100 text-slate-500 border-slate-200", dot: "bg-slate-400" },
                         ENVOIE_MAIL: { badge: "bg-blue-50 text-blue-700 border-blue-200", dot: "bg-blue-400" },
@@ -1709,13 +1772,52 @@ export default function SDRActionPage() {
             },
             {
                 key: "priority",
-                header: "Priorité",
-                importance: "secondary",
-                render: (v) => (
-                    <Badge className={cn("text-xs font-medium border", PRIORITY_LABELS[v as keyof typeof PRIORITY_LABELS]?.color ?? "bg-slate-100 text-slate-700 border-slate-200")}>
-                        {PRIORITY_LABELS[v as keyof typeof PRIORITY_LABELS]?.label ?? v}
-                    </Badge>
-                ),
+                header: "Urgence",
+                render: (_, row) => {
+                    const isCallbackRow = !!row.lastAction && isCallbackResult(row.lastAction.result);
+                    const callbackDateRaw = row.lastAction?.callbackDate;
+                    const callbackTs = callbackDateRaw ? new Date(callbackDateRaw).getTime() : NaN;
+                    const now = Date.now();
+                    const oneDayMs = 24 * 60 * 60 * 1000;
+                    const threeDaysMs = 3 * oneDayMs;
+
+                    if (!isCallbackRow || !Number.isFinite(callbackTs)) {
+                        return (
+                            <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200">
+                                Non planifié
+                            </span>
+                        );
+                    }
+
+                    const isOverdue = callbackTs < now;
+                    const isCritical = callbackTs <= now + oneDayMs;
+                    const isSoon = callbackTs <= now + threeDaysMs;
+                    const urgencyLabel = isOverdue ? "En retard" : isCritical ? "Urgent" : isSoon ? "Bientot" : "Planifié";
+                    const urgencyClass = isOverdue
+                        ? "bg-rose-50 text-rose-700 border-rose-200"
+                        : isCritical
+                            ? "bg-amber-50 text-amber-700 border-amber-200"
+                            : isSoon
+                                ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                                : "bg-emerald-50 text-emerald-700 border-emerald-200";
+
+                    return (
+                        <div className="space-y-1">
+                            <time className="block text-[11px] font-medium text-slate-600">
+                                {new Date(callbackDateRaw as string).toLocaleDateString("fr-FR", {
+                                    day: "2-digit",
+                                    month: "short",
+                                    year: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                })}
+                            </time>
+                            <Badge className={cn("text-xs font-medium border", urgencyClass)}>
+                                {urgencyLabel}
+                            </Badge>
+                        </div>
+                    );
+                },
             },
             {
                 key: "quickActions",
@@ -1738,6 +1840,8 @@ export default function SDRActionPage() {
                                     BAD_CONTACT: "hover:border-red-300 hover:bg-red-50 hover:text-red-600 hover:shadow-sm hover:shadow-red-100",
                                     INTERESTED: "hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600 hover:shadow-sm hover:shadow-emerald-100",
                                     CALLBACK_REQUESTED: "hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600 hover:shadow-sm hover:shadow-amber-100",
+                                    RELANCE: "hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600 hover:shadow-sm hover:shadow-amber-100",
+                                    RAPPEL: "hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600 hover:shadow-sm hover:shadow-amber-100",
                                     MEETING_BOOKED: "hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600 hover:shadow-sm hover:shadow-indigo-100",
                                     DISQUALIFIED: "hover:border-slate-400 hover:bg-slate-100 hover:text-slate-600 hover:shadow-sm",
                                     ENVOIE_MAIL: "hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 hover:shadow-sm hover:shadow-blue-100",
@@ -1843,6 +1947,8 @@ export default function SDRActionPage() {
                                     <BarChart2 className="w-4 h-4" />
                                     Stats
                                 </Button>
+
+                                {syncCallsButton}
 
                                 {/* Stats badge - Actions count only (no timer for SDR/BD) */}
                                 <div className="px-4 py-2 rounded-xl bg-white/10 border border-white/10 backdrop-blur-sm">
@@ -2103,11 +2209,18 @@ export default function SDRActionPage() {
                             selectable
                             selectedIds={tableSelectedIds}
                             onSelectionChange={(ids) => setTableSelectedIds(new Set(ids))}
-                            getRowClassName={(row) =>
-                                recentlyUpdatedRowKeys.has(queueRowKey(row))
-                                    ? "!bg-emerald-50/80 border-l-4 border-l-emerald-500 animate-fade-in"
-                                    : ""
-                            }
+                            getRowClassName={(row) => {
+                                if (recentlyUpdatedRowKeys.has(queueRowKey(row))) {
+                                    return "!bg-emerald-50/80 border-l-4 border-l-emerald-500 animate-fade-in";
+                                }
+                                const isCallbackRow = !!row.lastAction && isCallbackResult(row.lastAction.result);
+                                if (!isCallbackRow) return "";
+                                const callbackTs = row.lastAction?.callbackDate ? new Date(row.lastAction.callbackDate).getTime() : NaN;
+                                const in3Days = Number.isFinite(callbackTs) && callbackTs <= Date.now() + 3 * 24 * 60 * 60 * 1000;
+                                return in3Days
+                                    ? "!bg-amber-100/80 border-l-8 border-l-amber-500 ring-1 ring-amber-200/70"
+                                    : "!bg-amber-50/60 border-l-8 border-l-amber-300 ring-1 ring-amber-100/70";
+                            }}
                         />
                     )}
                 </div>
@@ -2123,6 +2236,11 @@ export default function SDRActionPage() {
                             missionName={unifiedDrawerMissionName}
                             clientBookingUrl={unifiedDrawerClientBookingUrl || undefined}
                             clientInterlocuteurs={unifiedDrawerInterlocuteurs}
+                            onBookingDialogOpenChange={setUnifiedBookingDialogOpen}
+                            onAlloDialogOpenChange={setUnifiedAlloDialogOpen}
+                            onContactSelect={(newContactId) => {
+                                setUnifiedDrawerContactId(newContactId);
+                            }}
                             onActionRecorded={() => {
                                 const rowKey = unifiedDrawerContactId ?? unifiedDrawerCompanyId ?? "";
                                 if (rowKey) {
@@ -2148,6 +2266,20 @@ export default function SDRActionPage() {
                         />
                     )
                 }
+
+                {/* Script companion drawer (table view only), synchronized with unified drawer */}
+                {unifiedDrawerOpen && unifiedDrawerMissionId && (
+                    <ScriptCompanionDrawer
+                        isOpen={
+                            unifiedDrawerOpen &&
+                            !unifiedBookingDialogOpen &&
+                            !unifiedAlloDialogOpen
+                        }
+                        onClose={closeUnifiedDrawer}
+                        missionId={unifiedDrawerMissionId}
+                        missionName={unifiedDrawerMissionName}
+                    />
+                )}
 
                 <QuickEmailModal
                     isOpen={showQuickEmailModal}
@@ -2342,6 +2474,7 @@ export default function SDRActionPage() {
                                     placeholder="Liste"
                                     className="min-w-[160px]"
                                 />
+                                {syncCallsButton}
                             </div>
                         </div>
                     </div>
@@ -2471,6 +2604,8 @@ export default function SDRActionPage() {
                                 <BarChart2 className="w-4 h-4" />
                                 Stats
                             </Button>
+
+                            {syncCallsButton}
 
                             {/* Stats Badges */}
                             <div className="px-4 py-2 rounded-xl bg-white/10 border border-white/10 backdrop-blur-sm">
@@ -2779,11 +2914,12 @@ export default function SDRActionPage() {
                                     <Badge className={cn("text-xs border font-medium", {
                                         "bg-slate-100 text-slate-600 border-slate-200": currentAction.lastAction.result === "NO_RESPONSE",
                                         "bg-red-50 text-red-600 border-red-200": currentAction.lastAction.result === "BAD_CONTACT",
-                                        "bg-emerald-50 text-emerald-700 border-emerald-200": currentAction.lastAction.result === "INTERESTED",
-                                        "bg-amber-100 text-amber-700 border-amber-200": currentAction.lastAction.result === "CALLBACK_REQUESTED",
+                                        "bg-emerald-50 text-emerald-700 border-emerald-200":
+                                            currentAction.lastAction.result === "INTERESTED" ||
+                                            currentAction.lastAction.result === "MAIL_ENVOYE",
+                                        "bg-amber-100 text-amber-700 border-amber-200": isCallbackResult(currentAction.lastAction.result),
                                         "bg-indigo-50 text-indigo-700 border-indigo-200": currentAction.lastAction.result === "MEETING_BOOKED",
                                         "bg-blue-50 text-blue-700 border-blue-200": currentAction.lastAction.result === "ENVOIE_MAIL",
-                                        "bg-emerald-50 text-emerald-700 border-emerald-200": currentAction.lastAction.result === "MAIL_ENVOYE",
                                     })}>
                                         {RESULT_ICON_MAP[currentAction.lastAction.result]}
                                         <span className="ml-1">{statusLabels[currentAction.lastAction.result] ?? currentAction.lastAction.result}</span>
@@ -2803,6 +2939,7 @@ export default function SDRActionPage() {
                 </div>
 
                 {/* Right - Script Panel (3 cols) */}
+                {!showBookingDrawer && (
                 <div className="lg:col-span-3">
                     <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm h-full overflow-hidden">
                         <div className="p-5 border-b border-slate-100 bg-gradient-to-r from-slate-50/80 to-white">
@@ -2812,13 +2949,20 @@ export default function SDRActionPage() {
                                 </div>
                                 <div>
                                     <h3 className="text-sm font-bold text-slate-900">Script d'appel</h3>
-                                    <p className="text-xs text-slate-500">Guide conversationnel</p>
+                                    <p className="text-xs text-slate-500">
+                                        Guide conversationnel
+                                        {currentAction?.scriptDefaultTab && (
+                                            <span className="ml-2 inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                                                Defaut: {SCRIPT_TABS.find((t) => t.id === currentAction.scriptDefaultTab)?.label ?? "Script"}
+                                            </span>
+                                        )}
+                                    </p>
                                 </div>
                             </div>
                         </div>
 
                         <div className="p-5">
-                            {scriptSections && availableScriptTabs.length > 0 ? (
+                            {availableScriptTabs.length > 0 ? (
                                 <>
                                     <Tabs
                                         tabs={availableScriptTabs}
@@ -2828,7 +2972,7 @@ export default function SDRActionPage() {
                                     />
                                     <div className="bg-gradient-to-br from-slate-50 to-slate-100/50 border border-slate-200/60 rounded-xl p-5 min-h-[200px]">
                                         <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                                            {scriptSections[activeTab] || ""}
+                                            {scriptPanelContent[activeTab as keyof typeof scriptPanelContent] || ""}
                                         </p>
                                     </div>
                                 </>
@@ -2850,6 +2994,7 @@ export default function SDRActionPage() {
                         </div>
                     </div>
                 </div>
+                )}
             </div>
 
             {/* Action Results */}
@@ -2871,6 +3016,7 @@ export default function SDRActionPage() {
                             <button
                                 key={option.value}
                                 onClick={() => setSelectedResult(option.value)}
+                                title={STATUS_HOVER_HINTS[option.value]}
                                 className={cn(
                                     "relative flex items-center gap-3 p-4 rounded-xl border-2 transition-all",
                                     selectedResult === option.value
@@ -2920,26 +3066,27 @@ export default function SDRActionPage() {
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={handleImproveNote}
-                                disabled={!note.trim() || isImprovingNote}
-                                className="gap-1.5 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 border border-indigo-200/60"
-                            >
-                                {isImprovingNote ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                    <Sparkles className="w-3.5 h-3.5" />
-                                )}
-                                {isImprovingNote ? "En cours..." : "Améliorer avec l'IA"}
-                            </Button>
                             <span className="text-xs text-slate-400 font-medium">{note.length}/500</span>
+                            {/* Link Allo call button — only for CALL channel */}
+                            {currentAction?.channel === 'CALL' && (
+                                <button
+                                    type="button"
+                                    onClick={openAlloDialog}
+                                    className={cn(
+                                        "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all",
+                                        linkedAlloCall
+                                            ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                                            : "bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100"
+                                    )}
+                                >
+                                    <PhoneCall className="w-3.5 h-3.5" />
+                                    {linkedAlloCall ? "Appel validé ✓" : "Valider l'appel (Allo)"}
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
-                <div className="p-5">
+                <div className="p-5 space-y-3">
                     <textarea
                         value={note}
                         onChange={(e) => setNote(e.target.value)}
@@ -2948,11 +3095,55 @@ export default function SDRActionPage() {
                         maxLength={500}
                         className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl bg-slate-50/50 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent focus:bg-white resize-none transition-colors"
                     />
+                    {/* Linked call preview */}
+                    {linkedAlloCall && (
+                        <div className="flex items-start gap-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                            <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                <PhoneCall className="w-3.5 h-3.5 text-emerald-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-xs font-semibold text-emerald-800">Appel Allo lié</span>
+                                    {linkedAlloCall.duration > 0 && (
+                                        <span className="text-[11px] text-emerald-600 bg-emerald-100 px-1.5 py-0.5 rounded-md font-medium">
+                                            {Math.floor(linkedAlloCall.duration / 60)}m{linkedAlloCall.duration % 60}s
+                                        </span>
+                                    )}
+                                    {linkedAlloCall.outcome && (
+                                        <span className="text-[11px] text-slate-500">{linkedAlloCall.outcome}</span>
+                                    )}
+                                </div>
+                                {linkedAlloCall.summary && (
+                                    <p className="text-xs text-emerald-700 mt-1 line-clamp-2">{linkedAlloCall.summary}</p>
+                                )}
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setLinkedAlloCall(null)}
+                                className="w-5 h-5 rounded flex items-center justify-center text-emerald-400 hover:text-emerald-600 transition-colors flex-shrink-0"
+                                title="Retirer le lien"
+                            >
+                                <XCircle className="w-4 h-4" />
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
 
-            {/* Callback date (Rappel) - calendar when "Rappel demandé" */}
-            {selectedResult === "CALLBACK_REQUESTED" && (
+            <AlloCallPickerModal
+                isOpen={alloDialogOpen}
+                onClose={() => setAlloDialogOpen(false)}
+                loading={alloDialogLoading}
+                calls={alloDialogCalls as unknown[]}
+                filterPhone={alloDialogFilterPhone}
+                alloLineCount={alloDialogAlloLineCount}
+                selectedId={alloDialogSelectedId}
+                onSelectId={setAlloDialogSelectedId}
+                onConfirm={confirmAlloCall}
+            />
+
+            {/* Callback date (Rappel) - calendar when status triggers callback */}
+            {isCallbackResult(selectedResult) && (
                 <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-2xl border border-amber-200 shadow-sm overflow-hidden">
                     <div className="p-5 border-b border-amber-100 bg-gradient-to-r from-amber-100/50 to-transparent">
                         <div className="flex items-center gap-3">
@@ -3145,6 +3336,11 @@ export default function SDRActionPage() {
                     missionName={unifiedDrawerMissionName}
                     clientBookingUrl={unifiedDrawerClientBookingUrl || undefined}
                     clientInterlocuteurs={unifiedDrawerInterlocuteurs}
+                    onBookingDialogOpenChange={setUnifiedBookingDialogOpen}
+                    onAlloDialogOpenChange={setUnifiedAlloDialogOpen}
+                    onContactSelect={(newContactId) => {
+                        setUnifiedDrawerContactId(newContactId);
+                    }}
                     onActionRecorded={() => {
                         const rowKey = unifiedDrawerContactId ?? unifiedDrawerCompanyId ?? "";
                         if (rowKey) setActionsCompleted((c) => c + 1);

@@ -1,7 +1,7 @@
 "use client";
 
 import {
-    useState, useEffect, useCallback, useMemo, useRef, useReducer
+    Fragment, useState, useEffect, useCallback, useMemo, useRef
 } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
@@ -12,10 +12,12 @@ import {
     Activity, Target, Send, PhoneMissed, ThumbsUp, PhoneOff,
     CalendarX, RotateCw, SlidersHorizontal, Download, Columns3,
     X, Minus, Radio, Zap, Users, Filter, ArrowUpDown,
-    Eye, EyeOff, MoreHorizontal, ExternalLink, Maximize2,
+    Eye, EyeOff, MoreHorizontal, Maximize2, Play, Mic,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { Card, Button, useToast } from "@/components/ui";
+import { CallRecordingModal } from "@/components/prospection/CallRecordingModal";
+import { ManagerCallEnrichmentSyncModal } from "@/components/prospection/ManagerCallEnrichmentSyncModal";
 import { ACTION_RESULT_LABELS } from "@/lib/types";
 
 const UnifiedActionDrawer = dynamic(
@@ -46,6 +48,7 @@ interface MissionItem {
     channels?: string[];
     client: { id: string; name: string };
     _count?: { actions: number; campaigns: number };
+    sdrAssignments?: { sdrId: string; sdr: { id: string; name: string } }[];
 }
 
 interface ActionRecord {
@@ -63,13 +66,13 @@ interface ActionRecord {
     channel: string;
     result: string;
     note?: string;
+    callSummary?: string | null;
+    callTranscription?: string | null;
+    callRecordingUrl?: string | null;
     duration?: number;
     createdAt: string;
     callbackDate?: string | null;
     _searchKey?: string;
-    voipProvider?: string | null;
-    voipSummary?: string | null;
-    voipRecordingUrl?: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -236,13 +239,12 @@ function Th({
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ALL_COLS = [
-    { key: "date", label: "Date & Heure" },
+    { key: "date", label: "Créée le" },
     { key: "name", label: "Contact / Société" },
     { key: "sdr", label: "Effectué par" },
     { key: "result", label: "Résultat" },
-    { key: "note", label: "Note / Résumé" },
+    { key: "note", label: "Résumé / Note" },
     { key: "duration", label: "Durée" },
-    { key: "voip", label: "Enregistrement" },
 ] as const;
 type ColKey = (typeof ALL_COLS)[number]["key"];
 
@@ -417,14 +419,12 @@ function ResultFilterBar({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function exportCSV(rows: ActionRecord[], mission: string) {
-    const headers = ["Date", "Contact", "Société", "SDR", "Résultat", "Note", "Durée (s)"];
+    const headers = ["Date (création action)", "Contact", "Société", "SDR", "Résultat", "Résumé / Note", "Durée (s)"];
     const lines = rows.map(r => {
-        const name = r.contact
-            ? `${r.contact.firstName || ""} ${r.contact.lastName || ""}`.trim()
-            : "";
-        const company = r.company?.name ?? r.contact?.company?.name ?? "";
-        const note = (r.voipSummary ?? r.note ?? "").replace(/"/g, '""');
-        const dateKey = (r.callbackDate as string | null) || r.createdAt;
+        const name = getContactName(r);
+        const company = getCompanyName(r);
+        const note = (r.callSummary?.trim() || r.note || "").replace(/"/g, '""');
+        const dateKey = r.createdAt;
         return [
             new Date(dateKey).toLocaleString("fr-FR"),
             name, company,
@@ -439,6 +439,20 @@ function exportCSV(rows: ActionRecord[], mission: string) {
     a.href = URL.createObjectURL(blob);
     a.download = `prospection_${mission}_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
+}
+
+function getContactName(action: ActionRecord): string {
+    const full = `${action.contact?.firstName || ""} ${action.contact?.lastName || ""}`.trim();
+    if (full) return full;
+    return "";
+}
+
+function getCompanyName(action: ActionRecord): string {
+    return action.company?.name || action.contact?.company?.name || "";
+}
+
+function getActionDisplaySummary(action: ActionRecord): string {
+    return action.callSummary?.trim() || action.note?.trim() || "";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -463,19 +477,29 @@ export default function ManagerProspectionPage() {
     const [actions, setActions] = useState<ActionRecord[]>([]);
     const [stats, setStats] = useState<Record<string, any> | null>(null);
     const [loadingData, setLoadingData] = useState(false);
-    const [isSyncingAllo, setIsSyncingAllo] = useState(false);
     const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
     const [newCount, setNewCount] = useState(0); // rows added since last manual refresh
     const { error: showError, success: showSuccess } = useToast();
     const [sdrOptions, setSdrOptions] = useState<{ id: string; name: string }[]>([]);
+    /** Mission picker (avant ouverture d'une mission) */
+    const [pickerMissionSearch, setPickerMissionSearch] = useState("");
+    const [pickerClientId, setPickerClientId] = useState("");
+    const [pickerSdrId, setPickerSdrId] = useState("");
     const [drawerAction, setDrawerAction] = useState<ActionRecord | null>(null);
+    const [audioModalAction, setAudioModalAction] = useState<ActionRecord | null>(null);
+    const [callSyncModalOpen, setCallSyncModalOpen] = useState(false);
+    const [bulkCallSyncOpen, setBulkCallSyncOpen] = useState(false);
     const [drawerClientBookingUrl, setDrawerClientBookingUrl] = useState<string>("");
     const liveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // ── table state ─────────────────────────────────────────────────────────
     const [search, setSearch] = useState("");
     const [sdrFilter, setSdrFilter] = useState("");
+    /** Filtre canal sur les lignes d'historique (toutes missions / une mission) */
+    const [actionChannelFilter, setActionChannelFilter] = useState<"" | ChannelTabValue>("");
     const [resultFilters, setResultFilters] = useState<Set<string>>(new Set());
+    const [dateFrom, setDateFrom] = useState("");
+    const [dateTo, setDateTo] = useState("");
     const [sortKey, setSortKey] = useState<SortKey>("createdAt");
     const [sortDir, setSortDir] = useState<SortDir>("desc");
     const [density, setDensity] = useState<Density>("default");
@@ -489,18 +513,28 @@ export default function ManagerProspectionPage() {
     const searchRef = useRef<HTMLInputElement>(null);
     const prevActionsRef = useRef<ActionRecord[]>([]);
 
-    // ── init ────────────────────────────────────────────────────────────────
+    // ── init SDR list ───────────────────────────────────────────────────────
     useEffect(() => {
         let cancelled = false;
-        fetch("/api/missions?isActive=true&limit=100")
-            .then(r => r.json())
-            .then(j => { if (!cancelled && j.success) setMissions(j.data); })
-            .finally(() => { if (!cancelled) setMissionsLoading(false); });
         fetch("/api/users?role=SDR,BUSINESS_DEVELOPER")
             .then(r => r.json())
             .then(j => { if (!cancelled && j.success) setSdrOptions(Array.isArray(j.data) ? j.data : []); });
         return () => { cancelled = true; };
     }, []);
+
+    // ── missions catalogue (par canal) — filtres mission / client / SDR en local ──
+    const reloadMissionsCatalog = useCallback(() => {
+        setMissionsLoading(true);
+        const p = new URLSearchParams({ isActive: "true", limit: "100", channel });
+        fetch(`/api/missions?${p}`)
+            .then(r => r.json())
+            .then(j => { if (j.success) setMissions(j.data); })
+            .finally(() => setMissionsLoading(false));
+    }, [channel]);
+
+    useEffect(() => {
+        reloadMissionsCatalog();
+    }, [reloadMissionsCatalog]);
 
     // ── keyboard shortcut: "/" focuses search ────────────────────────────────
     useEffect(() => {
@@ -513,6 +547,12 @@ export default function ManagerProspectionPage() {
                 setSearch("");
                 setResultFilters(new Set());
                 setSdrFilter("");
+                setActionChannelFilter("");
+                setDateFrom("");
+                setDateTo("");
+                setPickerMissionSearch("");
+                setPickerClientId("");
+                setPickerSdrId("");
             }
         };
         window.addEventListener("keydown", handler);
@@ -536,18 +576,34 @@ export default function ManagerProspectionPage() {
         return () => { cancelled = true; };
     }, [drawerAction, selectedMission?.client?.id]);
 
-    // ── fetch mission data ───────────────────────────────────────────────────
+    const fetchMissionStats = useCallback(async (missionId: string) => {
+        const qs = new URLSearchParams();
+        if (sdrFilter) qs.set("sdrId", sdrFilter);
+        if (actionChannelFilter) qs.set("channel", actionChannelFilter);
+        if (dateFrom) qs.set("from", `${dateFrom}T00:00:00`);
+        if (dateTo) qs.set("to", `${dateTo}T23:59:59.999`);
+        const suffix = qs.toString() ? `?${qs}` : "";
+        const statsJson = await fetch(`/api/missions/${missionId}/action-stats${suffix}`).then(r => r.json());
+        if (statsJson.success) setStats(statsJson.data);
+    }, [sdrFilter, actionChannelFilter, dateFrom, dateTo]);
+
     const fetchMissionData = useCallback(async (missionId: string, silent = false) => {
         if (!silent) setLoadingData(true);
         try {
-            const [actionsJson, statsJson] = await Promise.all([
-                fetch(`/api/actions?missionId=${missionId}&limit=2000`).then(r => r.json()),
-                fetch(`/api/missions/${missionId}/action-stats`).then(r => r.json()),
-            ]);
+            const actionsJson = await fetch(`/api/actions?missionId=${missionId}&limit=2000`).then(r => r.json());
             if (actionsJson.success) {
                 const next: ActionRecord[] = (actionsJson.data || []).map((a: ActionRecord) => ({
                     ...a,
-                    _searchKey: `${a.contact?.firstName || ""} ${a.contact?.lastName || ""} ${a.company?.name || ""} ${a.contact?.company?.name || ""}`.toLowerCase(),
+                    _searchKey: [
+                        getContactName(a),
+                        getCompanyName(a),
+                        a.note,
+                        a.callSummary,
+                        a.callTranscription,
+                    ]
+                        .filter(Boolean)
+                        .join(" ")
+                        .toLowerCase(),
                 }));
                 setActions(prev => {
                     const added = next.filter(n => !prev.some(p => p.id === n.id)).length;
@@ -556,7 +612,6 @@ export default function ManagerProspectionPage() {
                 });
                 setLastRefresh(new Date());
             }
-            if (statsJson.success) setStats(statsJson.data);
         } finally {
             if (!silent) setLoadingData(false);
         }
@@ -567,6 +622,11 @@ export default function ManagerProspectionPage() {
         fetchMissionData(selectedMission.id);
     }, [selectedMission, fetchMissionData]);
 
+    useEffect(() => {
+        if (!selectedMission) return;
+        fetchMissionStats(selectedMission.id);
+    }, [selectedMission, fetchMissionStats]);
+
     // ── live auto-refresh every 30s ──────────────────────────────────────────
     useEffect(() => {
         if (!selectedMission || !liveRefresh) {
@@ -575,39 +635,41 @@ export default function ManagerProspectionPage() {
         }
         liveTimerRef.current = setInterval(() => {
             fetchMissionData(selectedMission.id, true);
+            fetchMissionStats(selectedMission.id);
         }, 30_000);
         return () => { if (liveTimerRef.current) clearInterval(liveTimerRef.current); };
-    }, [selectedMission, liveRefresh, fetchMissionData]);
+    }, [selectedMission, liveRefresh, fetchMissionData, fetchMissionStats]);
 
-    // ── allo sync ────────────────────────────────────────────────────────────
-    const handleSyncAllo = async () => {
-        const alloActions = actions.filter(
-            a => a.channel === "CALL" && a.voipProvider === "allo" && !a.voipSummary
-        );
-        if (!alloActions.length) { showError("Aucun appel Allo en attente."); return; }
-        setIsSyncingAllo(true);
-        let updated = 0;
-        try {
-            await Promise.allSettled(alloActions.map(async a => {
-                const res = await fetch("/api/voip/allo/sync-call", {
-                    method: "POST", headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ actionId: a.id }),
-                });
-                const j = await res.json();
-                if (j.ok && j.updated) updated++;
-            }));
-            if (selectedMission) await fetchMissionData(selectedMission.id, true);
-            showSuccess(updated > 0
-                ? `${updated} appel(s) synchronisé(s).`
-                : "Synchronisation terminée, aucune nouvelle donnée.");
-        } catch { showError("Erreur de synchronisation Allo."); }
-        finally { setIsSyncingAllo(false); }
-    };
-
-    // ── derived: missions by channel ─────────────────────────────────────────
+    // ── derived: missions by channel puis filtres sélection ─────────────────
     const missionsForChannel = useMemo(() =>
         missions.filter(m => m.channels?.includes(channel) ?? m.channel === channel),
         [missions, channel]);
+
+    const clientPickerOptions = useMemo(() => {
+        const map = new Map<string, string>();
+        missionsForChannel.forEach(m => {
+            if (m.client?.id) map.set(m.client.id, m.client.name);
+        });
+        return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1], "fr"));
+    }, [missionsForChannel]);
+
+    const missionsForPicker = useMemo(() => {
+        let list = missionsForChannel;
+        if (pickerClientId) list = list.filter(m => m.client.id === pickerClientId);
+        if (pickerSdrId) list = list.filter(m =>
+            m.sdrAssignments?.some(a => a.sdrId === pickerSdrId));
+        const q = pickerMissionSearch.trim().toLowerCase();
+        if (q) {
+            list = list.filter(
+                m =>
+                    m.name.toLowerCase().includes(q) ||
+                    m.client.name.toLowerCase().includes(q)
+            );
+        }
+        return list;
+    }, [missionsForChannel, pickerClientId, pickerSdrId, pickerMissionSearch]);
+
+    const pickerHasFilters = !!(pickerMissionSearch.trim() || pickerClientId || pickerSdrId);
 
     // ── result counts ────────────────────────────────────────────────────────
     const resultCounts = useMemo(() => {
@@ -652,10 +714,17 @@ export default function ManagerProspectionPage() {
 
     // ── filtered + sorted ─────────────────────────────────────────────────────
     const processed = useMemo(() => {
+        const fromTs = dateFrom ? new Date(dateFrom).getTime() : null;
+        const toTs = dateTo ? new Date(dateTo + "T23:59:59").getTime() : null;
         let rows = actions.filter(a => {
             if (sdrFilter && a.sdr?.id !== sdrFilter) return false;
             if (resultFilters.size && !resultFilters.has(a.result)) return false;
             if (search && !a._searchKey?.includes(search.toLowerCase())) return false;
+            if (fromTs || toTs) {
+                const ts = new Date((a.callbackDate as string | null) || a.createdAt).getTime();
+                if (fromTs && ts < fromTs) return false;
+                if (toTs && ts > toTs) return false;
+            }
             return true;
         });
 
@@ -670,14 +739,14 @@ export default function ManagerProspectionPage() {
             else if (sortKey === "sdr") cmp = (a.sdr?.name || "").localeCompare(b.sdr?.name || "");
             else if (sortKey === "duration") cmp = (a.duration || 0) - (b.duration || 0);
             else if (sortKey === "name") {
-                const na = (a.contact ? `${a.contact.firstName} ${a.contact.lastName}` : a.company?.name || "").trim();
-                const nb = (b.contact ? `${b.contact.firstName} ${b.contact.lastName}` : b.company?.name || "").trim();
+                const na = getContactName(a) || getCompanyName(a);
+                const nb = getContactName(b) || getCompanyName(b);
                 cmp = na.localeCompare(nb);
             }
             return sortDir === "asc" ? cmp : -cmp;
         });
         return rows;
-    }, [actions, sdrFilter, resultFilters, search, sortKey, sortDir]);
+    }, [actions, sdrFilter, resultFilters, search, dateFrom, dateTo, sortKey, sortDir]);
 
     const totalPages = Math.max(1, Math.ceil(processed.length / pageSize));
     const pageRows = processed.slice((page - 1) * pageSize, page * pageSize);
@@ -710,6 +779,14 @@ export default function ManagerProspectionPage() {
     };
 
     // sparkline: last-7-hour buckets
+    const missionSupportsCall = useMemo(() => {
+        if (!selectedMission) return false;
+        const ch = selectedMission.channels?.length
+            ? selectedMission.channels
+            : [selectedMission.channel];
+        return ch.includes("CALL");
+    }, [selectedMission]);
+
     const hourlySparkData = useMemo(() => {
         const buckets = Array(8).fill(0);
         const now = Date.now();
@@ -723,7 +800,7 @@ export default function ManagerProspectionPage() {
 
     // row padding by density
     const rowPy = density === "compact" ? "py-2" : density === "comfortable" ? "py-4" : "py-3";
-    const hasFilters = !!(search || sdrFilter || resultFilters.size);
+    const hasFilters = !!(search || sdrFilter || resultFilters.size || dateFrom || dateTo);
 
     // ─────────────────────────────────────────────────────────────────────────
     // MISSION PICKER VIEW
@@ -733,9 +810,10 @@ export default function ManagerProspectionPage() {
         const ChannelIcon = CHANNEL_TABS.find(t => t.value === channel)?.icon ?? Phone;
         const channelLabel = CHANNEL_TABS.find(t => t.value === channel)?.label ?? "";
         return (
+            <Fragment>
             <div className="max-w-7xl mx-auto pb-12 space-y-8">
                 {/* Page header */}
-                <div className="flex items-start justify-between gap-4 pt-2">
+                <div className="flex items-start justify-between gap-4 pt-2 flex-wrap">
                     <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center shadow-sm">
                             <ChannelIcon className="w-6 h-6 text-indigo-700" aria-hidden />
@@ -749,6 +827,17 @@ export default function ManagerProspectionPage() {
                             </p>
                         </div>
                     </div>
+                    {channel === "CALL" && (
+                        <button
+                            type="button"
+                            onClick={() => setBulkCallSyncOpen(true)}
+                            aria-label="Synchroniser les appels Allo pour toutes les missions"
+                            className="h-10 px-4 flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 text-violet-900 text-sm font-bold hover:bg-violet-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 shrink-0"
+                        >
+                            <Mic className="w-4 h-4 shrink-0" aria-hidden />
+                            Sync Allo (toutes les missions)
+                        </button>
+                    )}
                 </div>
 
                 {/* Channel tabs */}
@@ -781,6 +870,82 @@ export default function ManagerProspectionPage() {
                     })}
                 </div>
 
+                {/* Filtres de sélection de mission */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Filtrer les missions
+                    </p>
+                    <div className="flex flex-wrap items-end gap-3">
+                        <div className="flex-1 min-w-[200px]">
+                            <label htmlFor="picker-mission-search" className="sr-only">
+                                Rechercher une mission
+                            </label>
+                            <div className="relative">
+                                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" aria-hidden />
+                                <input
+                                    id="picker-mission-search"
+                                    type="text"
+                                    value={pickerMissionSearch}
+                                    onChange={e => setPickerMissionSearch(e.target.value)}
+                                    placeholder="Nom de mission ou client…"
+                                    className="w-full h-9 pl-10 pr-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400/30 focus:border-indigo-400"
+                                />
+                            </div>
+                        </div>
+                        <div className="min-w-[180px]">
+                            <label htmlFor="picker-client" className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">
+                                Client
+                            </label>
+                            <select
+                                id="picker-client"
+                                value={pickerClientId}
+                                onChange={e => setPickerClientId(e.target.value)}
+                                className="w-full h-9 px-3 text-sm font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:border-indigo-400 cursor-pointer"
+                            >
+                                <option value="">Tous les clients</option>
+                                {clientPickerOptions.map(([id, name]) => (
+                                    <option key={id} value={id}>{name}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="min-w-[180px]">
+                            <label htmlFor="picker-sdr" className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">
+                                SDR assigné
+                            </label>
+                            <select
+                                id="picker-sdr"
+                                value={pickerSdrId}
+                                onChange={e => setPickerSdrId(e.target.value)}
+                                className="w-full h-9 px-3 text-sm font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:border-indigo-400 cursor-pointer"
+                            >
+                                <option value="">Tous les SDR</option>
+                                {sdrOptions.map(s => (
+                                    <option key={s.id} value={s.id}>{s.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                        {pickerHasFilters && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setPickerMissionSearch("");
+                                    setPickerClientId("");
+                                    setPickerSdrId("");
+                                }}
+                                className="h-9 px-3 flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs font-bold hover:bg-slate-50"
+                            >
+                                <RotateCcw className="w-3.5 h-3.5" aria-hidden />
+                                Effacer
+                            </button>
+                        )}
+                    </div>
+                    <p className="text-xs text-slate-400">
+                        {missionsForPicker.length} mission{missionsForPicker.length !== 1 ? "s" : ""}
+                        {pickerHasFilters && missionsForChannel.length > 0
+                            ? ` sur ${missionsForChannel.length}` : ""}
+                    </p>
+                </div>
+
                 {/* Mission grid */}
                 {missionsLoading ? (
                     <div className="flex flex-col items-center justify-center py-24 gap-3">
@@ -793,9 +958,26 @@ export default function ManagerProspectionPage() {
                         <p className="text-base font-bold text-slate-600">Aucune mission {channelLabel}</p>
                         <p className="text-sm text-slate-400">Créez une mission avec ce canal pour la voir ici.</p>
                     </div>
+                ) : missionsForPicker.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-24 gap-3 border-2 border-dashed border-slate-200 rounded-3xl">
+                        <Filter className="w-10 h-10 text-slate-300" />
+                        <p className="text-base font-bold text-slate-600">Aucune mission ne correspond</p>
+                        <p className="text-sm text-slate-400">Élargissez ou réinitialisez les filtres ci-dessus.</p>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setPickerMissionSearch("");
+                                setPickerClientId("");
+                                setPickerSdrId("");
+                            }}
+                            className="mt-1 px-4 py-2 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold hover:bg-indigo-100 transition-colors"
+                        >
+                            Réinitialiser les filtres
+                        </button>
+                    </div>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                        {missionsForChannel.map((mission, i) => {
+                        {missionsForPicker.map((mission, i) => {
                             const channelList = mission.channels?.length ? mission.channels : [mission.channel];
                             const isMultiCanal = channelList.length > 1;
                             const ChannelIconCard = CHANNEL_ICONS[mission.channel] ?? Phone;
@@ -870,14 +1052,25 @@ export default function ManagerProspectionPage() {
                     </div>
                 )}
             </div>
+
+            {channel === "CALL" && (
+                <ManagerCallEnrichmentSyncModal
+                    isOpen={bulkCallSyncOpen}
+                    onClose={() => setBulkCallSyncOpen(false)}
+                    onSynced={reloadMissionsCatalog}
+                    onToast={(kind, title, message) => {
+                        if (kind === "success") showSuccess(title, message);
+                        else showError(title, message);
+                    }}
+                />
+            )}
+            </Fragment>
         );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // CONTROL CENTER VIEW
     // ─────────────────────────────────────────────────────────────────────────
-
-    const alloWaitCount = actions.filter(a => a.channel === "CALL" && a.voipProvider === "allo" && !a.voipSummary).length;
 
     return (
         <div className="max-w-7xl mx-auto pb-12 space-y-5">
@@ -888,7 +1081,20 @@ export default function ManagerProspectionPage() {
                     <div className="flex items-center gap-3">
                         <button
                             type="button"
-                            onClick={() => { setSelectedMission(null); setActions([]); setStats(null); }}
+                            onClick={() => {
+                                setSelectedMission(null);
+                                setActions([]);
+                                setStats(null);
+                                setSearch("");
+                                setSdrFilter("");
+                                setActionChannelFilter("");
+                                setResultFilters(new Set());
+                                setDateFrom("");
+                                setDateTo("");
+                                setPage(1);
+                                setSelectedIds(new Set());
+                                setNewCount(0);
+                            }}
                             aria-label="Retour aux missions"
                             className="w-9 h-9 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
                         >
@@ -932,31 +1138,14 @@ export default function ManagerProspectionPage() {
                             Live
                         </button>
 
-                        {/* Allo sync */}
-                        {channel === "CALL" && (
-                            <button
-                                type="button"
-                                onClick={handleSyncAllo}
-                                disabled={isSyncingAllo}
-                                aria-label="Synchroniser avec Web Allo"
-                                className="h-9 px-3 flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-bold hover:bg-emerald-100 transition-all disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
-                            >
-                                {isSyncingAllo
-                                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
-                                    : <RefreshCw className="w-3.5 h-3.5" aria-hidden />}
-                                Sync Allo
-                                {alloWaitCount > 0 && (
-                                    <span className="ml-0.5 bg-emerald-200 text-emerald-800 text-[10px] font-black px-1.5 py-0.5 rounded-md">
-                                        {alloWaitCount}
-                                    </span>
-                                )}
-                            </button>
-                        )}
-
                         {/* Manual refresh */}
                         <button
                             type="button"
-                            onClick={() => { fetchMissionData(selectedMission.id); setNewCount(0); }}
+                            onClick={() => {
+                                fetchMissionData(selectedMission.id);
+                                fetchMissionStats(selectedMission.id);
+                                setNewCount(0);
+                            }}
                             disabled={loadingData}
                             aria-label="Actualiser les données"
                             className="h-9 px-3 flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs font-bold hover:bg-slate-50 transition-all disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
@@ -964,6 +1153,18 @@ export default function ManagerProspectionPage() {
                             <RefreshCw className={cn("w-3.5 h-3.5", loadingData && "animate-spin")} aria-hidden />
                             Actualiser
                         </button>
+
+                        {missionSupportsCall && (
+                            <button
+                                type="button"
+                                onClick={() => setCallSyncModalOpen(true)}
+                                aria-label="Synchroniser les appels Allo"
+                                className="h-9 px-3 flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 text-violet-800 text-xs font-bold hover:bg-violet-100 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                            >
+                                <Mic className="w-3.5 h-3.5" aria-hidden />
+                                Sync appels
+                            </button>
+                        )}
 
                         {/* Export */}
                         <button
@@ -1055,18 +1256,65 @@ export default function ManagerProspectionPage() {
                     <select
                         value={sdrFilter}
                         onChange={e => { setSdrFilter(e.target.value); setPage(1); }}
-                        aria-label="Filtrer par utilisateur"
+                        aria-label="Filtrer par utilisateur (auteur de l'action)"
                         className="h-9 px-3 text-sm font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:border-indigo-400 min-w-[160px] cursor-pointer"
                     >
                         <option value="">Tous les utilisateurs</option>
                         {sdrOptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
 
+                    <div className="w-px h-7 bg-slate-100 shrink-0 hidden sm:block" aria-hidden />
+
+                    <select
+                        value={actionChannelFilter}
+                        onChange={e => {
+                            setActionChannelFilter((e.target.value || "") as "" | ChannelTabValue);
+                            setPage(1);
+                        }}
+                        aria-label="Filtrer par canal de l'action"
+                        className="h-9 px-3 text-sm font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:border-indigo-400 min-w-[140px] cursor-pointer"
+                    >
+                        <option value="">Tous canaux</option>
+                        <option value="CALL">Appels</option>
+                        <option value="EMAIL">Email</option>
+                        <option value="LINKEDIN">LinkedIn</option>
+                    </select>
+
+                    <div className="w-px h-7 bg-slate-100 shrink-0 hidden sm:block" aria-hidden />
+
+                    {/* Date range filter (création de l'action) */}
+                    <div className="flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" aria-hidden />
+                        <input
+                            type="date"
+                            value={dateFrom}
+                            onChange={e => { setDateFrom(e.target.value); setPage(1); }}
+                            aria-label="Date de début (création de l'action)"
+                            className="h-9 px-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:border-indigo-400 cursor-pointer"
+                        />
+                        <span className="text-xs text-slate-400 font-medium">→</span>
+                        <input
+                            type="date"
+                            value={dateTo}
+                            onChange={e => { setDateTo(e.target.value); setPage(1); }}
+                            aria-label="Date de fin (création de l'action)"
+                            className="h-9 px-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:border-indigo-400 cursor-pointer"
+                        />
+                    </div>
+
                     <div className="ml-auto flex items-center gap-2">
                         {hasFilters && (
                             <button
                                 type="button"
-                                onClick={() => { setSearch(""); setSdrFilter(""); setResultFilters(new Set()); setPage(1); }}
+                                onClick={() => {
+                                    setSearch("");
+                                    setSdrFilter("");
+                                    setActionChannelFilter("");
+                                    setResultFilters(new Set());
+                                    setDateFrom("");
+                                    setDateTo("");
+                                    setPage(1);
+                                }}
                                 className="h-9 px-3 flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 text-red-600 text-xs font-bold hover:bg-red-100 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
                                 aria-label="Réinitialiser tous les filtres"
                             >
@@ -1159,7 +1407,14 @@ export default function ManagerProspectionPage() {
                         <p className="text-xs text-slate-400">Modifiez vos filtres pour voir des données.</p>
                         <button
                             type="button"
-                            onClick={() => { setSearch(""); setSdrFilter(""); setResultFilters(new Set()); }}
+                            onClick={() => {
+                                setSearch("");
+                                setSdrFilter("");
+                                setActionChannelFilter("");
+                                setResultFilters(new Set());
+                                setDateFrom("");
+                                setDateTo("");
+                            }}
                             className="mt-1 px-4 py-2 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold hover:bg-indigo-100 transition-colors"
                         >
                             Réinitialiser les filtres
@@ -1181,7 +1436,7 @@ export default function ManagerProspectionPage() {
                                         />
                                     </th>
                                     {visibleCols.has("date") && (
-                                        <Th label="Date" sortKey="createdAt" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
+                                        <Th label="Créée le" sortKey="createdAt" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
                                     )}
                                     {visibleCols.has("name") && (
                                         <Th label="Contact / Société" sortKey="name" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="min-w-[200px]" />
@@ -1194,16 +1449,11 @@ export default function ManagerProspectionPage() {
                                     )}
                                     {visibleCols.has("note") && (
                                         <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400 min-w-[220px]">
-                                            Note / Résumé
+                                            Résumé / Note
                                         </th>
                                     )}
                                     {visibleCols.has("duration") && (
                                         <Th label="Durée" sortKey="duration" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
-                                    )}
-                                    {visibleCols.has("voip") && (
-                                        <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                                            <span className="sr-only">Enregistrement</span>
-                                        </th>
                                     )}
                                     {/* Row action */}
                                     <th className="w-10 px-2 py-3" aria-hidden />
@@ -1213,21 +1463,19 @@ export default function ManagerProspectionPage() {
                                 {pageRows.map((row, idx) => {
                                     const cfg = getCfg(row.result);
                                     const isSelected = selectedIds.has(row.id);
-                                    const displayNote = row.voipSummary ?? row.note;
-                                    const isVoip = row.channel === "CALL" && row.voipProvider;
-                                    const waitingVoip = isVoip && !row.voipSummary && !row.note;
-                                    const name = row.contact
-                                        ? `${row.contact.firstName || ""} ${row.contact.lastName || ""}`.trim() || row.company?.name || ""
-                                        : row.company?.name || "—";
-                                    const companyName = row.contact
-                                        ? (row.contact.company?.name || row.company?.name)
-                                        : row.company?.name;
+                                    const displaySummary = getActionDisplaySummary(row);
+                                    const hasRecording =
+                                        row.channel === "CALL" &&
+                                        !!row.callRecordingUrl?.trim();
+                                    const contactName = getContactName(row);
+                                    const companyName = getCompanyName(row);
+                                    const name = contactName || companyName || "—";
                                     const showCompany = companyName && companyName !== name;
 
                                     return (
                                         <tr
                                             key={row.id}
-                                            onClick={() => setDrawerAction(row)}
+                                            onClick={() => toggleRow(row.id)}
                                             className={cn(
                                                 "group cursor-pointer transition-colors duration-100",
                                                 isSelected
@@ -1240,7 +1488,7 @@ export default function ManagerProspectionPage() {
                                             {/* Checkbox */}
                                             <td
                                                 className={cn("px-4 text-center", rowPy)}
-                                                onClick={e => { e.stopPropagation(); toggleRow(row.id); }}
+                                                onClick={e => e.stopPropagation()}
                                             >
                                                 <input
                                                     type="checkbox"
@@ -1255,8 +1503,10 @@ export default function ManagerProspectionPage() {
                                             {visibleCols.has("date") && (
                                                 <td className={cn("px-4 whitespace-nowrap", rowPy)}>
                                                     {(() => {
-                                                        const dateKey = (row.callbackDate as string | null) || row.createdAt;
-                                                        const d = new Date(dateKey);
+                                                        const d = new Date(row.createdAt);
+                                                        const cb = row.callbackDate
+                                                            ? new Date(row.callbackDate as string)
+                                                            : null;
                                                         return (
                                                             <>
                                                                 <p className="text-sm font-semibold text-slate-800 tabular-nums">
@@ -1271,6 +1521,15 @@ export default function ManagerProspectionPage() {
                                                                         minute: "2-digit",
                                                                     })}
                                                                 </p>
+                                                                {cb && !Number.isNaN(cb.getTime()) && (
+                                                                    <p className="text-[10px] text-amber-700 font-semibold mt-0.5 tabular-nums">
+                                                                        Rappel :{" "}
+                                                                        {cb.toLocaleDateString("fr-FR", {
+                                                                            day: "2-digit",
+                                                                            month: "short",
+                                                                        })}
+                                                                    </p>
+                                                                )}
                                                             </>
                                                         );
                                                     })()}
@@ -1320,29 +1579,41 @@ export default function ManagerProspectionPage() {
                                                 </td>
                                             )}
 
-                                            {/* Note */}
+                                            {/* Résumé (callSummary) + note + lecture audio */}
                                             {visibleCols.has("note") && (
-                                                <td className={cn("px-4 max-w-[260px]", rowPy)}>
-                                                    {waitingVoip ? (
-                                                        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-600">
-                                                            <Loader2 className="w-3 h-3 animate-spin shrink-0" aria-hidden />
-                                                            <span>En attente résumé…</span>
-                                                            <span className="sr-only">Chargement</span>
-                                                        </span>
-                                                    ) : displayNote ? (
-                                                        <div>
-                                                            {isVoip && (
-                                                                <span className="text-[9px] font-black uppercase tracking-widest text-emerald-600 block mb-0.5">
-                                                                    {row.voipProvider === "allo" ? "Allo AI" : row.voipProvider}
-                                                                </span>
+                                                <td className={cn("px-4 max-w-[320px]", rowPy)}>
+                                                    <div className="flex items-start gap-2 min-w-0">
+                                                        {hasRecording && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setAudioModalAction(row);
+                                                                }}
+                                                                aria-label="Écouter l'enregistrement et la transcription"
+                                                                className={cn(
+                                                                    "shrink-0 mt-0.5 w-8 h-8 rounded-xl border border-indigo-200",
+                                                                    "bg-indigo-50 text-indigo-600 flex items-center justify-center",
+                                                                    "hover:bg-indigo-100 hover:border-indigo-300 transition-colors",
+                                                                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+                                                                )}
+                                                            >
+                                                                <Play className="w-3.5 h-3.5 ml-0.5" fill="currentColor" aria-hidden />
+                                                            </button>
+                                                        )}
+                                                        <div className="min-w-0 flex-1">
+                                                            {displaySummary ? (
+                                                                <p
+                                                                    className="text-xs text-slate-600 line-clamp-2"
+                                                                    title={displaySummary}
+                                                                >
+                                                                    {displaySummary}
+                                                                </p>
+                                                            ) : (
+                                                                <span className="text-[11px] text-slate-300 italic">—</span>
                                                             )}
-                                                            <p className="text-xs text-slate-600 truncate" title={displayNote}>
-                                                                {displayNote}
-                                                            </p>
                                                         </div>
-                                                    ) : (
-                                                        <span className="text-[11px] text-slate-300 italic">—</span>
-                                                    )}
+                                                    </div>
                                                 </td>
                                             )}
 
@@ -1359,29 +1630,16 @@ export default function ManagerProspectionPage() {
                                                 </td>
                                             )}
 
-                                            {/* Recording */}
-                                            {visibleCols.has("voip") && (
-                                                <td className={cn("px-4", rowPy)} onClick={e => e.stopPropagation()}>
-                                                    {row.voipRecordingUrl ? (
-                                                        <a
-                                                            href={row.voipRecordingUrl}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            aria-label="Écouter l'enregistrement"
-                                                            className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400 rounded"
-                                                        >
-                                                            <ExternalLink className="w-3 h-3" aria-hidden />
-                                                            Écouter
-                                                        </a>
-                                                    ) : (
-                                                        <span className="text-slate-200 text-xs">—</span>
-                                                    )}
-                                                </td>
-                                            )}
-
                                             {/* Open drawer chevron */}
-                                            <td className={cn("pr-3 text-right", rowPy)}>
-                                                <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-400 transition-colors" aria-hidden />
+                                            <td className={cn("pr-3 text-right", rowPy)} onClick={e => e.stopPropagation()}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setDrawerAction(row)}
+                                                    aria-label={`Ouvrir les détails de ${name}`}
+                                                    className="rounded p-1 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400"
+                                                >
+                                                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-400 transition-colors" aria-hidden />
+                                                </button>
                                             </td>
                                         </tr>
                                     );
@@ -1481,6 +1739,37 @@ export default function ManagerProspectionPage() {
             </div>
 
             {/* ── Unified Action Drawer ────────────────────────────────── */}
+            {missionSupportsCall && (
+                <ManagerCallEnrichmentSyncModal
+                    isOpen={callSyncModalOpen}
+                    onClose={() => setCallSyncModalOpen(false)}
+                    missionId={selectedMission.id}
+                    missionName={selectedMission.name}
+                    onSynced={() => {
+                        fetchMissionData(selectedMission.id, true);
+                        fetchMissionStats(selectedMission.id);
+                    }}
+                    onToast={(kind, title, message) => {
+                        if (kind === "success") showSuccess(title, message);
+                        else showError(title, message);
+                    }}
+                />
+            )}
+
+            {audioModalAction?.callRecordingUrl && (
+                <CallRecordingModal
+                    isOpen={!!audioModalAction}
+                    onClose={() => setAudioModalAction(null)}
+                    actionId={audioModalAction.id}
+                    transcription={audioModalAction.callTranscription}
+                    subtitle={
+                        [getContactName(audioModalAction), getCompanyName(audioModalAction)]
+                            .filter(Boolean)
+                            .join(" · ") || undefined
+                    }
+                />
+            )}
+
             {drawerAction && (
                 <UnifiedActionDrawer
                     isOpen={!!drawerAction}
@@ -1490,7 +1779,10 @@ export default function ManagerProspectionPage() {
                     missionId={selectedMission.id}
                     missionName={selectedMission.name}
                     clientBookingUrl={drawerClientBookingUrl || undefined}
-                    onActionRecorded={() => fetchMissionData(selectedMission.id, true)}
+                    onActionRecorded={() => {
+                        fetchMissionData(selectedMission.id, true);
+                        fetchMissionStats(selectedMission.id);
+                    }}
                     onContactSelect={(newContactId) => {
                         // Switch drawer context to the new contact
                         setDrawerAction({
