@@ -61,8 +61,9 @@ export const GET = withErrorHandler(async (
 
     const meetingWhere: Record<string, unknown> = {
         result: { in: ['MEETING_BOOKED', 'MEETING_CANCELLED'] },
-        // SAS RDV: clients see meetings only once confirmed
-        confirmationStatus: 'CONFIRMED',
+        // Client portal should show RDV sourced from Action rows even when
+        // confirmation is still pending in the internal workflow.
+        confirmationStatus: { in: ['CONFIRMED', 'PENDING'] },
         campaign: {
             missionId: { in: missionIds },
         },
