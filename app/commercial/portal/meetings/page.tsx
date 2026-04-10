@@ -1,13 +1,16 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, type ElementType } from "react";
 import {
     Calendar, Search, X, ThumbsUp, Minus, ThumbsDown, XCircle,
     Check, Loader2, MessageSquare, Building2, MapPin, Video, Phone,
-    ArrowRight, ChevronDown, ChevronUp, Filter,
+    ArrowRight, ChevronDown, ChevronUp, Filter, FileText, AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui";
+import { DynamicFicheForm } from "@/components/fiche/DynamicFicheForm";
+import type { FicheTemplateDTO, FicheValues, FicheValidationError } from "@/lib/fiche/types";
+import { isFicheEmpty } from "@/lib/fiche/types";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -21,6 +24,8 @@ interface Meeting {
     meetingJoinUrl?: string | null;
     meetingPhone?: string | null;
     cancellationReason?: string | null;
+    rdvFiche?: Record<string, unknown> | null;
+    rdvFicheUpdatedAt?: string | null;
     contact?: {
         id: string;
         firstName?: string | null;
@@ -85,7 +90,7 @@ function MeetingTypePill({ type }: { type?: string | null }) {
         VISIO: { icon: Video, color: "text-blue-600 bg-blue-50 border-blue-200" },
         PHYSIQUE: { icon: MapPin, color: "text-purple-600 bg-purple-50 border-purple-200" },
         TELEPHONIQUE: { icon: Phone, color: "text-orange-600 bg-orange-50 border-orange-200" },
-    } as Record<string, { icon: React.ElementType; color: string }>;
+    } as Record<string, { icon: ElementType; color: string }>;
     const c = config[type];
     if (!c) return null;
     const Icon = c.icon;
@@ -213,15 +218,120 @@ function FeedbackForm({
     );
 }
 
+// ── Fiche Panel (lazy-loads template + saves dynamic fiche) ────────────────
+
+function FichePanel({
+    meeting,
+    onSaved,
+}: {
+    meeting: Meeting;
+    onSaved: (fiche: Record<string, unknown>, updatedAt: string) => void;
+}) {
+    const toast = useToast();
+    const [template, setTemplate] = useState<FicheTemplateDTO | null>(null);
+    const [fiche, setFiche] = useState<Record<string, unknown>>({});
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [errors, setErrors] = useState<FicheValidationError[]>([]);
+    const [loadError, setLoadError] = useState<string | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        setLoading(true);
+        setLoadError(null);
+        fetch(`/api/commercial/meetings/${meeting.id}/fiche`)
+            .then(async (r) => {
+                const json = await r.json();
+                if (cancelled) return;
+                if (!json?.success) {
+                    setLoadError(json?.error || "Impossible de charger la fiche.");
+                    return;
+                }
+                setTemplate(json.data.template as FicheTemplateDTO);
+                setFiche((json.data.fiche as Record<string, unknown>) || {});
+            })
+            .catch(() => !cancelled && setLoadError("Erreur réseau."))
+            .finally(() => !cancelled && setLoading(false));
+        return () => {
+            cancelled = true;
+        };
+    }, [meeting.id]);
+
+    const handleSubmit = async (values: FicheValues) => {
+        setSaving(true);
+        setErrors([]);
+        try {
+            const res = await fetch(`/api/commercial/meetings/${meeting.id}/fiche`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ fiche: values }),
+            });
+            const json = await res.json();
+            if (!json?.success) {
+                toast.error("Erreur", json?.error || "Impossible d'enregistrer la fiche.");
+                return;
+            }
+            if (json.data?.ok === false) {
+                setErrors((json.data.errors as FicheValidationError[]) || []);
+                toast.error("Validation", "Merci de corriger les champs requis.");
+                return;
+            }
+            toast.success("Fiche enregistrée", "La fiche a bien été sauvegardée.");
+            onSaved(json.data.fiche as Record<string, unknown>, json.data.rdvFicheUpdatedAt as string);
+        } catch {
+            toast.error("Erreur", "Impossible d'enregistrer la fiche.");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    if (loading) {
+        return (
+            <div className="mt-4 pt-4 border-t border-[#E8EBF0]">
+                <div className="flex items-center gap-2 text-sm text-[#6B7194]">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Chargement de la fiche…
+                </div>
+            </div>
+        );
+    }
+    if (loadError || !template) {
+        return (
+            <div className="mt-4 pt-4 border-t border-[#E8EBF0]">
+                <p className="text-sm text-red-600 inline-flex items-center gap-1">
+                    <AlertCircle className="w-4 h-4" />
+                    {loadError ?? "Template introuvable."}
+                </p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="mt-4 pt-4 border-t border-[#E8EBF0]">
+            <DynamicFicheForm
+                template={template}
+                initialValues={fiche as FicheValues}
+                saving={saving}
+                errors={errors}
+                onSubmit={handleSubmit}
+                bare
+                submitLabel="Enregistrer la fiche"
+            />
+        </div>
+    );
+}
+
 // ── Meeting Card ───────────────────────────────────────────────────────────
 
-function MeetingCard({ meeting, onFeedbackSaved }: {
+function MeetingCard({ meeting, onFeedbackSaved, onFicheSaved }: {
     meeting: Meeting;
     onFeedbackSaved: (id: string, feedback: Meeting["meetingFeedback"]) => void;
+    onFicheSaved: (id: string, fiche: Record<string, unknown>, updatedAt: string) => void;
 }) {
     const [expanded, setExpanded] = useState(false);
+    const [showFiche, setShowFiche] = useState(false);
     const isCancelled = meeting.result === "MEETING_CANCELLED";
     const hasFeedback = !!meeting.meetingFeedback;
+    const ficheMissing = isFicheEmpty(meeting.rdvFiche);
     const dateInfo = meeting.callbackDate ? formatShortDate(meeting.callbackDate) : null;
 
     return (
@@ -297,6 +407,16 @@ function MeetingCard({ meeting, onFeedbackSaved }: {
                                 <MessageSquare className="w-3 h-3" /> Feedback attendu
                             </span>
                         )}
+                        {ficheMissing && !isCancelled && (
+                            <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-orange-700 bg-orange-50 border border-orange-200 px-2 py-[2px] rounded-full">
+                                <FileText className="w-3 h-3" /> Fiche manquante
+                            </span>
+                        )}
+                        {!ficheMissing && !isCancelled && (
+                            <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-[2px] rounded-full">
+                                <FileText className="w-3 h-3" /> Fiche complétée
+                            </span>
+                        )}
                     </div>
                 </div>
 
@@ -347,6 +467,34 @@ function MeetingCard({ meeting, onFeedbackSaved }: {
                         </div>
                     )}
 
+                    {/* Fiche RDV */}
+                    {!isCancelled && (
+                        <div className="mt-4">
+                            {!showFiche ? (
+                                <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); setShowFiche(true); }}
+                                    className={cn(
+                                        "inline-flex items-center gap-2 text-sm font-semibold border px-3 py-2 rounded-lg transition-all",
+                                        ficheMissing
+                                            ? "bg-orange-50 hover:bg-orange-100 text-orange-700 border-orange-200"
+                                            : "bg-white hover:bg-[#F8F9FC] text-[#3D3F6B] border-[#E8EBF0]"
+                                    )}
+                                >
+                                    <FileText className="w-4 h-4" />
+                                    {ficheMissing ? "Compléter la fiche" : "Voir / modifier la fiche"}
+                                </button>
+                            ) : (
+                                <FichePanel
+                                    meeting={meeting}
+                                    onSaved={(fiche, updatedAt) => {
+                                        onFicheSaved(meeting.id, fiche, updatedAt);
+                                    }}
+                                />
+                            )}
+                        </div>
+                    )}
+
                     {/* Feedback form */}
                     {!isCancelled && (
                         <FeedbackForm
@@ -367,7 +515,7 @@ export default function CommercialMeetingsPage() {
     const [meetings, setMeetings] = useState<Meeting[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [search, setSearch] = useState("");
-    const [filter, setFilter] = useState<"all" | "upcoming" | "feedback_pending" | "cancelled">("upcoming");
+    const [filter, setFilter] = useState<"all" | "upcoming" | "feedback_pending" | "fiche_missing" | "cancelled">("upcoming");
 
     const fetchMeetings = useCallback(async () => {
         setIsLoading(true);
@@ -391,12 +539,19 @@ export default function CommercialMeetingsPage() {
         );
     }, []);
 
+    const handleFicheSaved = useCallback((id: string, fiche: Record<string, unknown>, updatedAt: string) => {
+        setMeetings((prev) =>
+            prev.map((m) => m.id === id ? { ...m, rdvFiche: fiche, rdvFicheUpdatedAt: updatedAt } : m)
+        );
+    }, []);
+
     const filteredMeetings = useMemo(() => {
         const now = new Date();
         return meetings
             .filter((m) => {
                 if (filter === "upcoming") return m.result === "MEETING_BOOKED" && m.callbackDate && new Date(m.callbackDate) >= now;
                 if (filter === "feedback_pending") return m.result === "MEETING_BOOKED" && !m.meetingFeedback;
+                if (filter === "fiche_missing") return m.result === "MEETING_BOOKED" && isFicheEmpty(m.rdvFiche);
                 if (filter === "cancelled") return m.result === "MEETING_CANCELLED";
                 return true;
             })
@@ -415,11 +570,15 @@ export default function CommercialMeetingsPage() {
     const pendingFeedbackCount = meetings.filter(
         (m) => m.result === "MEETING_BOOKED" && !m.meetingFeedback
     ).length;
+    const ficheMissingCount = meetings.filter(
+        (m) => m.result === "MEETING_BOOKED" && isFicheEmpty(m.rdvFiche)
+    ).length;
 
     const FILTER_TABS = [
         { id: "upcoming" as const, label: "À venir" },
         { id: "all" as const, label: "Tous" },
         { id: "feedback_pending" as const, label: `Feedback attendu${pendingFeedbackCount > 0 ? ` (${pendingFeedbackCount})` : ""}` },
+        { id: "fiche_missing" as const, label: `Fiche manquante${ficheMissingCount > 0 ? ` (${ficheMissingCount})` : ""}` },
         { id: "cancelled" as const, label: "Annulés" },
     ];
 
@@ -494,6 +653,7 @@ export default function CommercialMeetingsPage() {
                             key={m.id}
                             meeting={m}
                             onFeedbackSaved={handleFeedbackSaved}
+                            onFicheSaved={handleFicheSaved}
                         />
                     ))}
                 </div>

@@ -813,6 +813,24 @@ model Action {
   @@index([callbackDate])
 }
 
+// Dynamic fiche template (RDV briefing form)
+// Resolution order at read time: missionId match -> clientId match (mission null) -> system default (both null)
+model FicheTemplate {
+  id          String   @id @default(cuid())
+  clientId    String?
+  missionId   String?
+  name        String   @default("Fiche RDV")
+  // Field schema array — see lib/fiche/types.ts
+  // Each element: { key, label, type, required, options?, order, active, placeholder? }
+  fields      Json     @default("[]")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([missionId])
+}
+
 // Config-driven action status definitions (per scope: GLOBAL, CLIENT, MISSION, CAMPAIGN)
 model ActionStatusDefinition {
   id                 String             @id @default(cuid())
