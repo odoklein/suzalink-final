@@ -2,7 +2,21 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Plus, Save, Trash2, ChevronUp, ChevronDown, Loader2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Plus,
+  Save,
+  Trash2,
+  ChevronUp,
+  ChevronDown,
+  Loader2,
+  FileText,
+  Sparkles,
+  ShieldCheck,
+  Building2,
+  Target,
+  Layers,
+} from "lucide-react";
 import type { FicheField, FicheFieldType } from "@/lib/fiche/types";
 
 interface TemplateRow {
@@ -40,6 +54,28 @@ function emptyField(order: number): FicheField {
   };
 }
 
+function scopeBadge(scope: TemplateRow["scope"]) {
+  if (scope === "mission") {
+    return {
+      label: "Mission",
+      cls: "text-purple-700 bg-purple-50 border-purple-200",
+      icon: Target,
+    };
+  }
+  if (scope === "client") {
+    return {
+      label: "Client",
+      cls: "text-blue-700 bg-blue-50 border-blue-200",
+      icon: Building2,
+    };
+  }
+  return {
+    label: "Défaut",
+    cls: "text-emerald-700 bg-emerald-50 border-emerald-200",
+    icon: ShieldCheck,
+  };
+}
+
 export default function FicheTemplatesPage() {
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -52,6 +88,14 @@ export default function FicheTemplatesPage() {
   const selected = useMemo(
     () => templates.find((t) => t.id === selectedId) ?? null,
     [templates, selectedId],
+  );
+  const totalFields = useMemo(
+    () => templates.reduce((sum, t) => sum + (t.fields?.length ?? 0), 0),
+    [templates],
+  );
+  const activeTemplates = useMemo(
+    () => templates.filter((t) => t.isActive).length,
+    [templates],
   );
 
   const load = useCallback(async () => {
@@ -199,34 +243,58 @@ export default function FicheTemplatesPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8 space-y-4">
+    <div className="max-w-7xl mx-auto px-4 py-8 space-y-5">
       <div className="flex items-center gap-3">
         <Link
           href="/manager/settings"
-          className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50"
+          className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 shadow-sm"
         >
           <ArrowLeft className="w-4 h-4 text-slate-600" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Templates Fiche RDV</h1>
-          <p className="text-sm text-slate-500">
+          <h1 className="text-2xl font-bold text-slate-900 inline-flex items-center gap-2">
+            <FileText className="w-6 h-6 text-indigo-500" />
+            Templates Fiche RDV
+          </h1>
+          <p className="text-sm text-slate-500 mt-0.5">
             Configurez les champs dynamiques (ordre, requis, actif, options).
           </p>
         </div>
       </div>
 
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
+          <p className="text-xs text-slate-500">Templates</p>
+          <p className="text-2xl font-bold text-slate-900">{templates.length}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
+          <p className="text-xs text-slate-500">Actifs</p>
+          <p className="text-2xl font-bold text-emerald-600">{activeTemplates}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
+          <p className="text-xs text-slate-500">Champs totaux</p>
+          <p className="text-2xl font-bold text-slate-900">{totalFields}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
+          <p className="text-xs text-slate-500">Sélectionné</p>
+          <p className="text-sm font-semibold text-slate-800 mt-1 truncate">
+            {selected?.name ?? "—"}
+          </p>
+        </div>
+      </div>
+
       {msg && (
-        <div className="text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700">
+        <div className="text-sm px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm">
           {msg}
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-3 space-y-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 space-y-2 shadow-sm">
           <button
             onClick={createTemplate}
             disabled={creating}
-            className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium disabled:opacity-50"
+            className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium disabled:opacity-50 shadow"
           >
             {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
             Nouveau template
@@ -241,15 +309,33 @@ export default function FicheTemplatesPage() {
                 <button
                   key={t.id}
                   onClick={() => setSelectedId(t.id)}
-                  className={`w-full text-left p-2.5 rounded-lg border text-sm ${
+                  className={`w-full text-left p-2.5 rounded-lg border text-sm transition-all ${
                     selectedId === t.id
-                      ? "border-indigo-200 bg-indigo-50"
+                      ? "border-indigo-200 bg-indigo-50 shadow-sm"
                       : "border-slate-200 bg-white hover:bg-slate-50"
                   }`}
                 >
-                  <div className="font-semibold text-slate-800 truncate">{t.name}</div>
-                  <div className="text-xs text-slate-500">
-                    {t.scope} • {t.fields?.length ?? 0} champs
+                  <div className="font-semibold text-slate-800 truncate flex items-center gap-2">
+                    {t.name}
+                    {!t.isActive && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                        Inactif
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-500 flex items-center gap-2 mt-1">
+                    <span className="inline-flex items-center gap-1">
+                      <Layers className="w-3 h-3" />
+                      {t.fields?.length ?? 0} champs
+                    </span>
+                    <span>•</span>
+                    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border ${scopeBadge(t.scope).cls}`}>
+                      {(() => {
+                        const Icon = scopeBadge(t.scope).icon;
+                        return <Icon className="w-3 h-3" />;
+                      })()}
+                      {scopeBadge(t.scope).label}
+                    </span>
                   </div>
                   <div className="text-[11px] text-slate-400 truncate">
                     {t.missionName ?? t.clientName ?? "Template par défaut"}
@@ -260,11 +346,21 @@ export default function FicheTemplatesPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           {!selected ? (
             <div className="text-sm text-slate-500 py-12 text-center">Sélectionnez un template</div>
           ) : (
             <div className="space-y-4">
+              <div className="flex items-center justify-between rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2">
+                <div className="text-sm text-indigo-900 font-medium inline-flex items-center gap-2">
+                  <Sparkles className="w-4 h-4" />
+                  Édition du template: <span className="font-bold">{selected.name}</span>
+                </div>
+                <span className={`text-xs px-2 py-1 rounded-full border ${scopeBadge(selected.scope).cls}`}>
+                  {scopeBadge(selected.scope).label}
+                </span>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-slate-500 mb-1">Nom</label>
@@ -317,7 +413,10 @@ export default function FicheTemplatesPage() {
 
               <div className="space-y-2 max-h-[55vh] overflow-auto pr-1">
                 {selected.fields.map((f, idx) => (
-                  <div key={`${selected.id}-${idx}`} className="border border-slate-200 rounded-xl p-3 space-y-2">
+                  <div key={`${selected.id}-${idx}`} className="border border-slate-200 rounded-xl p-3 space-y-2 bg-slate-50/40">
+                    <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                      Champ #{idx + 1}
+                    </div>
                     <div className="flex gap-2">
                       <input
                         value={f.key}
@@ -411,7 +510,7 @@ export default function FicheTemplatesPage() {
                 ))}
               </div>
 
-              <div className="flex justify-between pt-2">
+              <div className="flex justify-between pt-2 sticky bottom-0 bg-white border-t border-slate-100 -mx-4 px-4 py-3">
                 <button
                   onClick={deleteTemplate}
                   disabled={deleting || selected.scope === "default"}
@@ -423,7 +522,7 @@ export default function FicheTemplatesPage() {
                 <button
                   onClick={saveTemplate}
                   disabled={saving}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-sm text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg disabled:opacity-50"
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg disabled:opacity-50 shadow"
                 >
                   {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   Enregistrer
