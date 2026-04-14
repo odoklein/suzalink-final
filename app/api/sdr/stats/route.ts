@@ -44,7 +44,7 @@ export async function GET() {
         const meetingsBooked = await prisma.action.count({
             where: {
                 sdrId,
-                result: "MEETING_BOOKED",
+                result: { in: ["MEETING_BOOKED", "MEETING_BOOKED_FORM"] },
                 createdAt: {
                     gte: weekStart,
                 },

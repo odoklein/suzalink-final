@@ -149,7 +149,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
             _count: true,
         }),
         prisma.action.count({
-            where: { ...actionWhere, result: 'MEETING_BOOKED' },
+            where: { ...actionWhere, result: { in: ['MEETING_BOOKED', 'MEETING_BOOKED_FORM'] } },
         }),
         prisma.opportunity.count({
             where: {
@@ -206,7 +206,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         const rdvRows = await prisma.action.findMany({
             where: {
                 ...actionWhere,
-                result: 'MEETING_BOOKED',
+                result: { in: ['MEETING_BOOKED', 'MEETING_BOOKED_FORM'] },
             },
             select: { sdrId: true },
         });
@@ -229,6 +229,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         INTERESTED: 0,
         CALLBACK_REQUESTED: 0,
         MEETING_BOOKED: 0,
+        MEETING_BOOKED_FORM: 0,
         DISQUALIFIED: 0,
     };
 

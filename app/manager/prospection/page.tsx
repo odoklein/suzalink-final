@@ -8,7 +8,7 @@ import {
     Phone, Mail, Linkedin, Building2, User, CheckCircle2,
     XCircle, Ban, Loader2, Clock, Calendar, Sparkles, RotateCcw,
     RefreshCw, ArrowLeft, BarChart3, TrendingUp, TrendingDown,
-    Search, CalendarPlus, ChevronRight, ChevronUp, ChevronDown,
+    Search, CalendarPlus, ClipboardList, ChevronRight, ChevronUp, ChevronDown,
     Activity, Target, Send, PhoneMissed, ThumbsUp, PhoneOff,
     CalendarX, RotateCw, SlidersHorizontal, Download, Columns3,
     X, Minus, Radio, Zap, Users, Filter, ArrowUpDown,
@@ -88,6 +88,7 @@ const RESULT_CFG: Record<string, {
     INTERESTED: { label: "Intéressé", icon: ThumbsUp, text: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200", dot: "bg-emerald-500" },
     CALLBACK_REQUESTED: { label: "Rappel demandé", icon: RotateCw, text: "text-amber-700", bg: "bg-amber-50", border: "border-amber-200", dot: "bg-amber-500" },
     MEETING_BOOKED: { label: "RDV planifié", icon: CalendarPlus, text: "text-indigo-700", bg: "bg-indigo-50", border: "border-indigo-200", dot: "bg-indigo-500" },
+    MEETING_BOOKED_FORM: { label: "RDV planifié - Formulaire", icon: ClipboardList, text: "text-violet-700", bg: "bg-violet-50", border: "border-violet-200", dot: "bg-violet-500" },
     MEETING_CANCELLED: { label: "RDV annulé", icon: CalendarX, text: "text-red-600", bg: "bg-red-50", border: "border-red-200", dot: "bg-red-400" },
     DISQUALIFIED: { label: "Disqualifié", icon: Ban, text: "text-slate-500", bg: "bg-slate-100", border: "border-slate-200", dot: "bg-slate-300" },
     ENVOIE_MAIL: { label: "Mail à envoyer", icon: Send, text: "text-blue-700", bg: "bg-blue-50", border: "border-blue-200", dot: "bg-blue-400" },
@@ -772,7 +773,7 @@ export default function ManagerProspectionPage() {
     // ── stats ─────────────────────────────────────────────────────────────────
     const sc = {
         total: stats?.total ?? 0,
-        rdv: stats?.resultBreakdown?.MEETING_BOOKED ?? 0,
+        rdv: (stats?.resultBreakdown?.MEETING_BOOKED ?? 0) + (stats?.resultBreakdown?.MEETING_BOOKED_FORM ?? 0),
         interested: stats?.resultBreakdown?.INTERESTED ?? 0,
         callbacks: stats?.resultBreakdown?.CALLBACK_REQUESTED ?? 0,
         rate: parseFloat(stats?.conversionRate ?? "0").toFixed(1),
@@ -1165,6 +1166,17 @@ export default function ManagerProspectionPage() {
                                 Sync appels
                             </button>
                         )}
+
+                        {/* Formulaires (RDV avec fiche) */}
+                        <button
+                            type="button"
+                            onClick={() => router.push(`/manager/formulaires?missionId=${selectedMission.id}&clientId=${selectedMission.client.id}`)}
+                            aria-label="Voir les fiches de renseignement de cette mission"
+                            className="h-9 px-3 flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 text-violet-800 text-xs font-bold hover:bg-violet-100 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                        >
+                            <ClipboardList className="w-3.5 h-3.5" aria-hidden />
+                            Formulaires
+                        </button>
 
                         {/* Export */}
                         <button

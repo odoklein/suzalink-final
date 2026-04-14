@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Drawer, Button, Badge, Select, useToast, TextSkeleton, ListSkeleton, DateTimePicker, Modal } from "@/components/ui";
 import { ACTION_RESULT_LABELS, type ActionResult } from "@/lib/types";
+import { FORMULAIRE_TEMPLATE_DEFAULT } from "@/lib/constants/formulaireTemplate";
 import {
     Building2,
     User,
@@ -46,6 +47,7 @@ import {
     Video,
     UserX,
     XCircle,
+    ClipboardList,
 } from "lucide-react";
 import { AlloCallPickerModal } from "@/components/sdr/AlloCallPickerModal";
 import { BookingDrawer } from "@/components/sdr/BookingDrawer";
@@ -254,6 +256,17 @@ const RESULT_CHIP_CONFIG: Record<
         selectedBg: "bg-indigo-100",
         selectedText: "text-indigo-800",
         selectedBorder: "border-indigo-500",
+    },
+    MEETING_BOOKED_FORM: {
+        label: "RDV planifié - Formulaire",
+        icon: ClipboardList,
+        bg: "bg-violet-50",
+        text: "text-violet-700",
+        border: "border-violet-200",
+        dot: "bg-violet-400",
+        selectedBg: "bg-violet-100",
+        selectedText: "text-violet-800",
+        selectedBorder: "border-violet-500",
     },
     MEETING_CANCELLED: {
         label: "RDV annulé",
@@ -558,6 +571,7 @@ export function UnifiedActionDrawer({
     const [meetingJoinUrl, setMeetingJoinUrl] = useState("");
     const [meetingAddress, setMeetingAddress] = useState("");
     const [meetingPhone, setMeetingPhone] = useState("");
+    const [formulaireContent, setFormulaireContent] = useState("");
     useEffect(() => {
         onBookingDialogOpenChange?.(showBookingDrawer);
     }, [showBookingDrawer, onBookingDialogOpenChange]);
@@ -1052,6 +1066,9 @@ export function UnifiedActionDrawer({
                             : "Une note est requise pour ce résultat"
                 );
             }
+            if (newActionResult === "MEETING_BOOKED_FORM" && !formulaireContent.trim()) {
+                throw new Error("La fiche de renseignement est requise pour ce résultat");
+            }
             const selectedCampaign = campaigns[0];
             const channel = (selectedCampaign?.mission?.channel ?? "CALL") as "CALL" | "EMAIL" | "LINKEDIN";
             const res = await fetch("/api/actions", {
@@ -1083,6 +1100,38 @@ export function UnifiedActionDrawer({
             if (!json.success) throw new Error(json.error || "Impossible d'enregistrer l'action");
 
             const newActionId = json.data?.id as string | undefined;
+
+            if (newActionResult === "MEETING_BOOKED_FORM" && formulaireContent.trim()) {
+                if (!missionId) {
+                    throw new Error("Mission manquante : impossible de créer la fiche");
+                }
+                try {
+                    const formRes = await fetch("/api/formulaires", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            missionId,
+                            contactId: contactId || undefined,
+                            companyId: contactId ? undefined : companyId,
+                            actionId: newActionId,
+                            content: formulaireContent,
+                        }),
+                    });
+                    const formJson = await formRes.json();
+                    if (!formJson.success) {
+                        showError(
+                            "Fiche non enregistrée",
+                            formJson.error ?? "La fiche de renseignement n'a pas pu être sauvegardée."
+                        );
+                    }
+                } catch {
+                    showError(
+                        "Fiche non enregistrée",
+                        "Erreur réseau lors de l'enregistrement de la fiche."
+                    );
+                }
+            }
+
             const callToLink = linkedAlloCallRef.current;
             const missionChannel = (selectedCampaign?.mission?.channel ?? "CALL") as string;
             if (newActionId && missionChannel === "CALL" && callToLink) {
@@ -1120,6 +1169,7 @@ export function UnifiedActionDrawer({
             setNewActionNote("");
             setNewActionResult("");
             setNewCallbackDateValue("");
+            setFormulaireContent("");
             setLinkedAlloCall(null);
             queryClient.invalidateQueries({ queryKey: actionsQueryKey });
             onActionRecorded?.();
@@ -1253,6 +1303,7 @@ export function UnifiedActionDrawer({
         !!newActionResult &&
         !requiresSavedInterlocutorBeforeSubmit &&
         (!textFieldRequiredForResult || newActionNote.trim().length > 0) &&
+        (newActionResult !== "MEETING_BOOKED_FORM" || formulaireContent.trim().length > 0) &&
         !addActionMutation.isPending;
 
     const sortedHistoryActions = useMemo(() => {
@@ -2690,6 +2741,12 @@ export function UnifiedActionDrawer({
                                                         aria-checked={isSelected}
                                                         onClick={() => {
                                                             setNewActionResult(opt.value);
+                                                            if (
+                                                                opt.value === "MEETING_BOOKED_FORM" &&
+                                                                !formulaireContent.trim()
+                                                            ) {
+                                                                setFormulaireContent(FORMULAIRE_TEMPLATE_DEFAULT);
+                                                            }
                                                         }}
                                                         className={cn(
                                                             "flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
@@ -2928,6 +2985,44 @@ export function UnifiedActionDrawer({
                                                     </Button>
                                                 </>
                                             )}
+                                        </div>
+                                    )}
+
+                                    {/* Contextual: formulaire editor — shown for MEETING_BOOKED_FORM */}
+                                    {newActionResult === "MEETING_BOOKED_FORM" && (
+                                        <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-3.5 space-y-2">
+                                            <div className="flex items-start gap-2">
+                                                <ClipboardList className="w-4 h-4 text-violet-600 mt-0.5" aria-hidden="true" />
+                                                <div className="flex-1">
+                                                    <p className="text-sm font-semibold text-violet-800">Fiche de renseignement</p>
+                                                    <p className="text-xs text-violet-700/90">
+                                                        Ce formulaire sera enregistré et lié à la mission et au client pour le suivi manager.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <label htmlFor="formulaire-content" className="sr-only">
+                                                Contenu de la fiche de renseignement
+                                            </label>
+                                            <textarea
+                                                id="formulaire-content"
+                                                value={formulaireContent}
+                                                onChange={(e) => setFormulaireContent(e.target.value)}
+                                                rows={14}
+                                                placeholder="Remplissez la fiche de renseignement..."
+                                                className="w-full px-3 py-2.5 text-xs font-mono border border-violet-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-400/30 focus:border-violet-400 resize-y"
+                                            />
+                                            <div className="flex items-center justify-between gap-2">
+                                                <p className="text-[11px] text-violet-700/80">
+                                                    {formulaireContent.length} caractères
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setFormulaireContent(FORMULAIRE_TEMPLATE_DEFAULT)}
+                                                    className="text-[11px] font-semibold text-violet-700 hover:text-violet-900 underline"
+                                                >
+                                                    Réinitialiser le modèle
+                                                </button>
+                                            </div>
                                         </div>
                                     )}
 

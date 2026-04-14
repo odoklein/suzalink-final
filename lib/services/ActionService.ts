@@ -38,6 +38,7 @@ const VALID_ACTION_RESULTS: Set<ActionResult> = new Set<ActionResult>([
     "INTERESTED",
     "CALLBACK_REQUESTED",
     "MEETING_BOOKED",
+    "MEETING_BOOKED_FORM",
     "MEETING_CANCELLED",
     "INVALIDE",
     "DISQUALIFIED",
@@ -153,7 +154,7 @@ export class ActionService {
         const resolvedResult = resolveActionResult(input.result);
         const triggersCallback = statusDef?.triggersCallback ?? (resolvedResult === 'CALLBACK_REQUESTED');
  const triggersOpportunity = statusDef?.triggersOpportunity ??
- (resolvedResult === 'MEETING_BOOKED' || resolvedResult === 'INTERESTED');
+ (resolvedResult === 'MEETING_BOOKED' || resolvedResult === 'MEETING_BOOKED_FORM' || resolvedResult === 'INTERESTED');
 
  // Use transaction to ensure atomicity
  const actionRecord = await prisma.$transaction(async (tx) => {
@@ -189,6 +190,7 @@ export class ActionService {
                     INTERESTED: 'Contact intéressé',
                     CALLBACK_REQUESTED: 'Rappel demandé',
                     MEETING_BOOKED: 'Rendez-vous planifié',
+                    MEETING_BOOKED_FORM: 'RDV planifié — Formulaire',
                     MEETING_CANCELLED: 'Rendez-vous annulé',
                     INVALIDE: 'Lead invalide',
                     DISQUALIFIED: 'Contact disqualifié',
@@ -203,7 +205,7 @@ export class ActionService {
             }
 
             // 1. Create the action — prefer explicit category, fallback to auto-detection from note
-            const autoCategory = (resolvedResult === 'MEETING_BOOKED')
+            const autoCategory = (resolvedResult === 'MEETING_BOOKED' || resolvedResult === 'MEETING_BOOKED_FORM')
                 ? (input.meetingCategory || detectMeetingCategoryFromNote(noteToStore || input.note))
                 : null;
 

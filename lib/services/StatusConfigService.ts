@@ -47,6 +47,18 @@ const CORE_FALLBACK_STATUSES: EffectiveStatusDefinition[] = [
         triggersCallback: false,
         resultCategoryCode: null,
     },
+    {
+        code: "MEETING_BOOKED_FORM",
+        label: "RDV planifié - Formulaire",
+        color: "#7E57C2",
+        sortOrder: 901,
+        requiresNote: false,
+        priorityLabel: "SKIP",
+        priorityOrder: 999,
+        triggersOpportunity: true,
+        triggersCallback: false,
+        resultCategoryCode: null,
+    },
 ];
 
 const SCOPE_ORDER: ActionScopeType[] = ["GLOBAL", "CLIENT", "MISSION", "CAMPAIGN"];
@@ -66,6 +78,7 @@ const LEGACY_PRIORITY: Record<string, { order: number; label: ActionPriorityLabe
     MEETING_CANCELLED: { order: 4, label: "RETRY" },
     INVALIDE: { order: 4, label: "RETRY" },
     MEETING_BOOKED: { order: 999, label: "SKIP" },
+    MEETING_BOOKED_FORM: { order: 999, label: "SKIP" },
     BAD_CONTACT: { order: 999, label: "SKIP" },
     BARRAGE_STANDARD: { order: 999, label: "SKIP" },
     NUMERO_KO: { order: 999, label: "SKIP" },

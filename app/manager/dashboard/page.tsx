@@ -29,6 +29,7 @@ interface DashboardStats {
     resultBreakdown: {
         NO_RESPONSE: number; BAD_CONTACT: number; INTERESTED: number;
         CALLBACK_REQUESTED: number; MEETING_BOOKED: number; DISQUALIFIED: number;
+        MEETING_BOOKED_FORM?: number;
     };
     leaderboard: { id: string; name: string; actions: number }[];
     rdvLeaderboard: { id: string; name: string; rdv: number; actions: number }[];
@@ -55,12 +56,14 @@ const PRESET_LABELS: Record<DateRangePreset, string> = {
 };
 const RDV_WEEKLY_GOAL = 30;
 const PIE_LABELS: Record<string, string> = {
-    MEETING_BOOKED: "RDV obtenu", CALLBACK_REQUESTED: "Rappel prévu",
+    MEETING_BOOKED: "RDV obtenu", MEETING_BOOKED_FORM: "RDV + Formulaire",
+    CALLBACK_REQUESTED: "Rappel prévu",
     INTERESTED: "Intéressé", NO_RESPONSE: "Pas répondu",
     BAD_CONTACT: "Mauvais N.", DISQUALIFIED: "Hors cible",
 };
 const PIE_COLORS: Record<string, string> = {
-    MEETING_BOOKED: "#7C5CFC", INTERESTED: "#A78BFA",
+    MEETING_BOOKED: "#7C5CFC", MEETING_BOOKED_FORM: "#5E35B1",
+    INTERESTED: "#A78BFA",
     CALLBACK_REQUESTED: "#F59E0B", NO_RESPONSE: "#E2E8F0",
     BAD_CONTACT: "#CBD5E1", DISQUALIFIED: "#94A3B8",
 };
@@ -305,7 +308,7 @@ export default function ManagerDashboard() {
     const hotLeads = stats ? (stats.resultBreakdown.INTERESTED + stats.resultBreakdown.CALLBACK_REQUESTED) : 0;
     const callbackCount = stats?.resultBreakdown?.CALLBACK_REQUESTED ?? 0;
 
-    const rdvActivity = useMemo(() => recentActivity.filter((a) => a.type === "meeting" || a.result === "MEETING_BOOKED"), [recentActivity]);
+    const rdvActivity = useMemo(() => recentActivity.filter((a) => a.type === "meeting" || a.result === "MEETING_BOOKED" || a.result === "MEETING_BOOKED_FORM"), [recentActivity]);
     const missionsNearGoal = useMemo(() => missions.filter((m) => m.isActive && m.meetingsThisPeriod > 0).sort((a, b) => b.meetingsThisPeriod - a.meetingsThisPeriod).slice(0, 5), [missions]);
     const totalResults = useMemo(() => stats?.resultBreakdown ? Object.values(stats.resultBreakdown).reduce((a, b) => a + b, 0) : 0, [stats]);
     const callResultsPieData = useMemo(() => stats?.resultBreakdown ? Object.entries(stats.resultBreakdown).filter(([, v]) => v > 0).map(([key, value]) => ({ name: PIE_LABELS[key] ?? key, value, color: PIE_COLORS[key] ?? "#94A3B8", pct: totalResults > 0 ? Math.round((value / totalResults) * 100) : 0 })) : [], [stats, totalResults]);

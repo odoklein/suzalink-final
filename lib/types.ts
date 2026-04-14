@@ -25,6 +25,7 @@ export type ActionResult =
     | "INTERESTED"
     | "CALLBACK_REQUESTED"
     | "MEETING_BOOKED"
+    | "MEETING_BOOKED_FORM"
     | "MEETING_CANCELLED"
     | "INVALIDE"
     | "DISQUALIFIED"
@@ -60,6 +61,7 @@ export const ACTION_RESULT_LABELS: Record<string, string> = {
     INTERESTED: "Intéressé",
     CALLBACK_REQUESTED: "Rappel demandé",
     MEETING_BOOKED: "Meeting booké",
+    MEETING_BOOKED_FORM: "RDV planifié - Formulaire",
     MEETING_CANCELLED: "Meeting annulé",
     INVALIDE: "Invalide",
     DISQUALIFIED: "Disqualifié",

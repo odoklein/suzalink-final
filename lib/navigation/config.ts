@@ -9,6 +9,7 @@ import {
   FolderKanban,
   Calendar,
   Phone,
+  ClipboardList,
   Briefcase,
   Settings,
   UserPlus,
@@ -102,6 +103,12 @@ export const MANAGER_NAV: NavSection[] = [
         href: "/manager/rdv",
         icon: Calendar,
         label: "SAS RDV",
+        permission: "pages.analytics",
+      },
+      {
+        href: "/manager/formulaires",
+        icon: ClipboardList,
+        label: "Formulaires",
         permission: "pages.analytics",
       },
       {

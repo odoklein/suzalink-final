@@ -86,6 +86,7 @@ export default function AnalyticsPage() {
     const defaultColors: Record<string, string> = {
         NO_RESPONSE: "#60a5fa", BAD_CONTACT: "#a78bfa", INTERESTED: "#f59e0b",
         CALLBACK_REQUESTED: "#f59e0b", MEETING_BOOKED: "#10b981",
+        MEETING_BOOKED_FORM: "#7E57C2",
         MEETING_CANCELLED: "#94a3b8", DISQUALIFIED: "#ef4444",
         ENVOIE_MAIL: "#94a3b8", NOT_INTERESTED: "#94a3b8",
     };
@@ -439,7 +440,7 @@ export default function AnalyticsPage() {
     // Handle Journal Filtering
     const filteredActions = useMemo(() => {
         if (journalFilter === 'all') return actions;
-        if (journalFilter === 'meetings') return actions.filter(a => a.result === 'MEETING_BOOKED');
+        if (journalFilter === 'meetings') return actions.filter(a => a.result === 'MEETING_BOOKED' || a.result === 'MEETING_BOOKED_FORM');
         if (journalFilter === 'callbacks') return actions.filter(a => a.result === 'CALLBACK_REQUESTED' || a.result === 'INTERESTED');
         if (journalFilter === 'disqualified') return actions.filter(a => a.result === 'DISQUALIFIED');
         if (journalFilter === 'no_response') return actions.filter(a => a.result === 'NO_RESPONSE');
@@ -1202,6 +1203,7 @@ export default function AnalyticsPage() {
                                             <div className="text-[10px] text-slate-400 leading-relaxed">
                                                 {item.code === 'NO_RESPONSE' && 'Prospects non joignables. Envisager des créneaux horaires alternatifs.'}
                                                 {item.code === 'MEETING_BOOKED' && 'RDV confirmés avec les prospects. Taux de succès optimal.'}
+                                                {item.code === 'MEETING_BOOKED_FORM' && 'RDV avec fiche de renseignement transmise. À traiter par le manager.'}
                                                 {item.code === 'CALLBACK_REQUESTED' && 'Rappels planifiés. Opportunités actives à convertir.'}
                                                 {item.code === 'INTERESTED' && 'Intérêt exprimé. Suivi prioritaire recommandé.'}
                                                 {item.code === 'DISQUALIFIED' && 'Contacts hors cible. Revoir les critères de qualification.'}
@@ -1561,6 +1563,7 @@ export default function AnalyticsPage() {
                                 key: "result", header: "Résultat", sortable: true, render: (val: string) => {
                                     let bg = 'bg-slate-100 text-slate-600', dot = 'bg-slate-400';
                                     if (val === 'MEETING_BOOKED') { bg = 'bg-emerald-50 text-emerald-700 border border-emerald-100/50'; dot = 'bg-emerald-500'; }
+                                    if (val === 'MEETING_BOOKED_FORM') { bg = 'bg-violet-50 text-violet-700 border border-violet-100/50'; dot = 'bg-violet-500'; }
                                     if (val === 'CALLBACK_REQUESTED' || val === 'INTERESTED') { bg = 'bg-amber-50 text-amber-700 border border-amber-100/50'; dot = 'bg-amber-500'; }
                                     if (val === 'DISQUALIFIED') { bg = 'bg-red-50 text-red-700 border border-red-100/50'; dot = 'bg-red-500'; }
                                     if (val === 'NO_RESPONSE') { bg = 'bg-blue-50 text-blue-700 border border-blue-100/50'; dot = 'bg-blue-500'; }

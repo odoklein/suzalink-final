@@ -110,7 +110,7 @@ export async function GET(request: NextRequest) {
                 }
                 byUser[r.sdrId].total += r._count;
                 byUser[r.sdrId].byResult[r.result] = r._count;
-                if (r.result === "MEETING_BOOKED") byUser[r.sdrId].MEETING_BOOKED += r._count;
+                if (r.result === "MEETING_BOOKED" || r.result === "MEETING_BOOKED_FORM") byUser[r.sdrId].MEETING_BOOKED += r._count;
             }
             return byUser;
         }
@@ -128,11 +128,12 @@ export async function GET(request: NextRequest) {
             if (!missionMap.has(a.sdrId)) missionMap.set(a.sdrId, {});
             const userMissions = missionMap.get(a.sdrId)!;
             const existing = userMissions[missionId];
+            const isMeeting = a.result === "MEETING_BOOKED" || a.result === "MEETING_BOOKED_FORM";
             if (existing) {
                 existing.calls += 1;
-                if (a.result === "MEETING_BOOKED") existing.meetings += 1;
+                if (isMeeting) existing.meetings += 1;
             } else {
-                userMissions[missionId] = { missionId, missionName, calls: 1, meetings: a.result === "MEETING_BOOKED" ? 1 : 0 };
+                userMissions[missionId] = { missionId, missionName, calls: 1, meetings: isMeeting ? 1 : 0 };
             }
         }
 

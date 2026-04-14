@@ -51,6 +51,7 @@ enum ActionResult {
   INTERESTED
   CALLBACK_REQUESTED
   MEETING_BOOKED
+  MEETING_BOOKED_FORM // RDV planifié avec fiche de renseignement (formulaire)
   MEETING_CANCELLED
   INVALIDE             // Invalid lead (distinct from meeting cancelled)
   DISQUALIFIED
@@ -428,10 +429,13 @@ model User {
   
   // API Keys created by this user
   createdApiKeys ApiKey[] @relation("ApiKeyCreator")
-  
+
+  // Prospection formulaires created by this user
+  createdFormulaires Formulaire[] @relation("FormulairesCreated")
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  
+
   @@index([isActive])
 }
 
@@ -551,6 +555,9 @@ model Client {
   // API Keys scoped to this client
   apiKeys       ApiKey[]
 
+  // Prospection formulaires attached to this client
+  formulaires   Formulaire[]
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -654,6 +661,9 @@ model Mission {
   // API Keys scoped to this mission
   apiKeys       ApiKey[]
 
+  // Prospection formulaires collected during meetings
+  formulaires   Formulaire[]
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -730,6 +740,7 @@ model Company {
   contacts      Contact[]
   opportunities Opportunity[]
   actions       Action[]  // Actions can be on companies too
+  formulaires   Formulaire[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -758,6 +769,8 @@ model Contact {
 
   // Email consent: when true, contact has unsubscribed from emails
   unsubscribed          Boolean   @default(false)
+
+  formulaires  Formulaire[]
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -807,10 +820,40 @@ model Action {
   createdAt     DateTime     @default(now())
 
   meetingFeedback   MeetingFeedback?
+  formulaires       Formulaire[]
 
   @@index([companyId])
   @@index([contactId])
   @@index([callbackDate])
+}
+
+// Prospection formulaire (fiche de renseignement) captured when an SDR
+// books a meeting requiring an OPCO-style intake form. Always linked to a
+// mission + client so managers can retrieve by scope.
+model Formulaire {
+  id          String   @id @default(cuid())
+  missionId   String
+  mission     Mission  @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  contactId   String?
+  contact     Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  companyId   String?
+  company     Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  actionId    String?
+  action      Action?  @relation(fields: [actionId], references: [id], onDelete: SetNull)
+  createdById String
+  createdBy   User     @relation("FormulairesCreated", fields: [createdById], references: [id])
+  title       String   @default("Fiche de renseignement")
+  content     String   @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([missionId])
+  @@index([clientId])
+  @@index([contactId])
+  @@index([companyId])
+  @@index([actionId])
 }
 
 // Dynamic fiche template (RDV briefing form)

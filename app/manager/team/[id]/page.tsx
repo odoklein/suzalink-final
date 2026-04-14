@@ -283,6 +283,7 @@ function ResultBreakdown({
 }) {
     const resultLabels: Record<string, { label: string; color: string }> = {
         MEETING_BOOKED: { label: "RDV pris", color: "bg-emerald-500" },
+        MEETING_BOOKED_FORM: { label: "RDV + Formulaire", color: "bg-violet-500" },
         INTERESTED: { label: "Intéressé", color: "bg-blue-500" },
         CALLBACK_REQUESTED: { label: "Rappel", color: "bg-amber-500" },
         NO_RESPONSE: { label: "Pas de réponse", color: "bg-slate-400" },
@@ -952,6 +953,7 @@ export default function TeamMemberDetailPage() {
                                         {todayActions.slice(0, 5).map((action) => {
                                             const historyResultLabels: Record<string, string> = {
                                                 MEETING_BOOKED: "RDV pris",
+                                                MEETING_BOOKED_FORM: "RDV + Formulaire",
                                                 INTERESTED: "Intéressé",
                                                 CALLBACK_REQUESTED: "Rappel",
                                                 NO_RESPONSE: "Pas de réponse",
@@ -1118,6 +1120,7 @@ export default function TeamMemberDetailPage() {
                                     {historyActions.map((item) => {
                                         const historyResultLabels: Record<string, string> = {
                                             MEETING_BOOKED: "RDV pris",
+                                            MEETING_BOOKED_FORM: "RDV + Formulaire",
                                             INTERESTED: "Intéressé",
                                             CALLBACK_REQUESTED: "Rappel",
                                             NO_RESPONSE: "Pas de réponse",
