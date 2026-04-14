@@ -12,6 +12,8 @@ const querySchema = z.object({
     from: z.string().optional(),
     to: z.string().optional(),
     missionId: z.string().optional(),
+    sdrId: z.string().optional(),
+    q: z.string().optional(),
     limit: z.coerce.number().int().min(1).max(500).default(100),
 });
 
@@ -42,6 +44,8 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         from: searchParams.get("from") ?? undefined,
         to: searchParams.get("to") ?? undefined,
         missionId: searchParams.get("missionId") ?? undefined,
+        sdrId: searchParams.get("sdrId") ?? undefined,
+        q: searchParams.get("q") ?? undefined,
         limit: searchParams.get("limit") ?? undefined,
     });
     if (!parsed.success) {
@@ -51,6 +55,8 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     const range = parseDateRange(parsed.data.from, parsed.data.to);
     const submittedAtFilter = range.gte || range.lte ? { submittedAt: range } : {};
     const missionId = parsed.data.missionId?.trim();
+    const sdrId = parsed.data.sdrId?.trim();
+    const query = parsed.data.q?.trim();
     const missionFilter = missionId
         ? {
               OR: [
@@ -68,6 +74,38 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     const where = {
         ...submittedAtFilter,
         ...missionFilter,
+        ...(sdrId ? { sdrId } : {}),
+        ...(query
+            ? {
+                  OR: [
+                      { review: { contains: query, mode: "insensitive" as const } },
+                      { objections: { contains: query, mode: "insensitive" as const } },
+                      { missionComment: { contains: query, mode: "insensitive" as const } },
+                      {
+                          sdr: {
+                              OR: [
+                                  { name: { contains: query, mode: "insensitive" as const } },
+                                  { email: { contains: query, mode: "insensitive" as const } },
+                              ],
+                          },
+                      },
+                      {
+                          mission: {
+                              name: { contains: query, mode: "insensitive" as const },
+                          },
+                      },
+                      {
+                          missions: {
+                              some: {
+                                  mission: {
+                                      name: { contains: query, mode: "insensitive" as const },
+                                  },
+                              },
+                          },
+                      },
+                  ],
+              }
+            : {}),
     };
 
     const rows = await prisma.sdrDailyFeedback.findMany({

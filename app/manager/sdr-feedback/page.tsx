@@ -40,6 +40,9 @@ export default function ManagerSdrFeedbackPage() {
     const [items, setItems] = useState<FeedbackItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [missionId, setMissionId] = useState("");
+    const [sdrId, setSdrId] = useState("");
+    const [query, setQuery] = useState("");
     const [from, setFrom] = useState(() => {
         const d = new Date();
         d.setDate(d.getDate() - 7);
@@ -52,6 +55,9 @@ export default function ManagerSdrFeedbackPage() {
         setError(null);
         try {
             const params = new URLSearchParams({ from, to, limit: "300" });
+            if (missionId) params.set("missionId", missionId);
+            if (sdrId) params.set("sdrId", sdrId);
+            if (query.trim()) params.set("q", query.trim());
             const res = await fetch(`/api/manager/sdr-feedback?${params.toString()}`);
             const json = await res.json();
             if (!json.success) {
@@ -66,7 +72,7 @@ export default function ManagerSdrFeedbackPage() {
         } finally {
             setLoading(false);
         }
-    }, [from, to]);
+    }, [from, to, missionId, sdrId, query]);
 
     useEffect(() => {
         void load();
@@ -83,18 +89,39 @@ export default function ManagerSdrFeedbackPage() {
         return { total, avg, objections, comments };
     }, [items]);
 
+    const missionOptions = useMemo(() => {
+        const map = new Map<string, string>();
+        for (const item of items) {
+            if (item.mission?.id && item.mission?.name) map.set(item.mission.id, item.mission.name);
+            for (const m of item.missions ?? []) {
+                if (m.mission?.id && m.mission?.name) map.set(m.mission.id, m.mission.name);
+            }
+        }
+        return Array.from(map.entries())
+            .map(([id, name]) => ({ id, name }))
+            .sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    }, [items]);
+
+    const sdrOptions = useMemo(() => {
+        const map = new Map<string, { id: string; name: string }>();
+        for (const item of items) {
+            if (item.sdr?.id && item.sdr?.name) {
+                map.set(item.sdr.id, { id: item.sdr.id, name: item.sdr.name });
+            }
+        }
+        return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    }, [items]);
+
     return (
         <div className="min-h-full bg-[#F4F6F9] p-4 md:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
                 <div>
-                    <h1 className="text-[22px] font-bold text-[#12122A] tracking-tight">
-                        Avis SDR
-                    </h1>
+                    <h1 className="text-[22px] font-bold text-[#12122A] tracking-tight">Formulaires SDR</h1>
                     <p className="text-[13px] text-[#8B8BA7] mt-0.5">
-                        Retours quotidiens, objections terrain et commentaires mission.
+                        Formulaires remplis par les SDR: retours quotidiens, objections terrain et commentaires mission.
                     </p>
                 </div>
-                <div className="flex items-end gap-2">
+                <div className="flex items-end gap-2 flex-wrap">
                     <div>
                         <label className="block text-[11px] text-[#8B8BA7] mb-1">Du</label>
                         <input
@@ -111,6 +138,46 @@ export default function ManagerSdrFeedbackPage() {
                             value={to}
                             onChange={(e) => setTo(e.target.value)}
                             className="h-9 px-2.5 rounded-lg border border-[#E8EBF0] text-[12px] bg-white"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-[11px] text-[#8B8BA7] mb-1">Mission</label>
+                        <select
+                            value={missionId}
+                            onChange={(e) => setMissionId(e.target.value)}
+                            className="h-9 px-2.5 rounded-lg border border-[#E8EBF0] text-[12px] bg-white min-w-[180px]"
+                        >
+                            <option value="">Toutes</option>
+                            {missionOptions.map((mission) => (
+                                <option key={mission.id} value={mission.id}>
+                                    {mission.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-[11px] text-[#8B8BA7] mb-1">SDR</label>
+                        <select
+                            value={sdrId}
+                            onChange={(e) => setSdrId(e.target.value)}
+                            className="h-9 px-2.5 rounded-lg border border-[#E8EBF0] text-[12px] bg-white min-w-[150px]"
+                        >
+                            <option value="">Tous</option>
+                            {sdrOptions.map((sdr) => (
+                                <option key={sdr.id} value={sdr.id}>
+                                    {sdr.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-[11px] text-[#8B8BA7] mb-1">Recherche</label>
+                        <input
+                            type="text"
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                            placeholder="Avis, objection, SDR..."
+                            className="h-9 px-2.5 rounded-lg border border-[#E8EBF0] text-[12px] bg-white min-w-[220px]"
                         />
                     </div>
                     <button
@@ -146,7 +213,7 @@ export default function ManagerSdrFeedbackPage() {
             <div className="rounded-xl border border-[#E8EBF0] bg-white overflow-hidden">
                 <div className="px-4 py-3 border-b border-[#E8EBF0] flex items-center gap-2">
                     <MessageSquare className="w-4 h-4 text-[#7C5CFC]" />
-                    <h2 className="text-[14px] font-semibold text-[#12122A]">Derniers retours</h2>
+                    <h2 className="text-[14px] font-semibold text-[#12122A]">Derniers formulaires</h2>
                 </div>
 
                 {loading ? (

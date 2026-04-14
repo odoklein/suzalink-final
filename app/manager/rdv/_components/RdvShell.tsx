@@ -137,7 +137,7 @@ export function RdvShell() {
     (m: Meeting) => {
       const resolved = meetings2.find((x) => x.id === m.id) ?? m;
       panelState.openPanel(resolved, meetings2);
-      ficheState.initFiche(resolved);
+      void ficheState.loadFiche(resolved.id);
       feedbackState.initFeedback(resolved);
       noteState.initNote((resolved as any).managerNote ?? resolved.note ?? "");
     },

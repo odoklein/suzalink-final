@@ -217,6 +217,34 @@ export default function FicheTemplatesPage() {
     }
   };
 
+  const createHygieneTemplate = async () => {
+    setCreating(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/manager/fiche-templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Fiche Hygiène Alimentaire",
+          preset: "HYGIENE_ALIMENTAIRE",
+        }),
+      });
+      const json = await res.json();
+      if (!json?.success) {
+        setMsg(json?.error ?? "Erreur de création du modèle hygiène.");
+        return;
+      }
+      const created = json.data.template as TemplateRow;
+      setTemplates((prev) => [created, ...prev]);
+      setSelectedId(created.id);
+      setMsg("Template Hygiène Alimentaire importé.");
+    } catch {
+      setMsg("Erreur réseau.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const deleteTemplate = async () => {
     if (!selected) return;
     if (!window.confirm("Supprimer ce template ?")) return;
@@ -298,6 +326,14 @@ export default function FicheTemplatesPage() {
           >
             {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
             Nouveau template
+          </button>
+          <button
+            onClick={createHygieneTemplate}
+            disabled={creating}
+            className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium disabled:opacity-50 shadow"
+          >
+            {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            Importer modèle Hygiène
           </button>
           <div className="max-h-[70vh] overflow-auto space-y-1">
             {loading ? (

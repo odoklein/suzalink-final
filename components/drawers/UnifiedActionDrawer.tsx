@@ -734,36 +734,57 @@ export function UnifiedActionDrawer({
         }
     };
 
+    const isEmailStatusCode = useCallback((code?: string | null) => {
+        if (!code) return false;
+        const normalized = code.toUpperCase();
+        return normalized.includes("MAIL") || normalized.includes("EMAIL");
+    }, []);
+
     // ── Email mailboxes (React Query) ──
     type Mailbox = { id: string; email: string; displayName: string | null };
-    const isEmailMode = newActionResult === "ENVOIE_MAIL";
+    const isEmailMode = isEmailStatusCode(newActionResult);
+    const { data: missionDefaultMailbox = null } = useQuery<Mailbox | null>({
+        queryKey: ["sdr-uad", "mission-default-mailbox", isOpen && missionId ? missionId : null],
+        queryFn: async () => {
+            if (!missionId) return null;
+            try {
+                const mr = await fetch(`/api/missions/${missionId}`);
+                const mj = await mr.json();
+                if (mj.success && mj.data?.defaultMailbox) return mj.data.defaultMailbox as Mailbox;
+            } catch {
+                return null;
+            }
+            return null;
+        },
+        enabled: isOpen && isEmailMode && !!missionId,
+        staleTime: 60_000,
+    });
     const { data: emailMailboxes = [], isFetching: emailMailboxesLoading } = useQuery<Mailbox[]>({
         queryKey: sdrUnifiedDrawerMailboxesKey(isOpen && isEmailMode && missionId ? missionId : null),
         queryFn: async () => {
-            let missionDefault: Mailbox | null = null;
-            if (missionId) {
-                try {
-                    const mr = await fetch(`/api/missions/${missionId}`);
-                    const mj = await mr.json();
-                    if (mj.success && mj.data?.defaultMailbox) missionDefault = mj.data.defaultMailbox as Mailbox;
-                } catch { /* ignore */ }
-            }
             const res = await fetch("/api/email/mailboxes?includeShared=true");
             const json = await res.json();
             let list: Mailbox[] = json.success && Array.isArray(json.data) ? json.data : [];
-            if (list.length === 0 && missionDefault) list = [missionDefault];
+            if (missionDefaultMailbox && !list.some((m) => m.id === missionDefaultMailbox.id)) {
+                list = [missionDefaultMailbox, ...list];
+            }
+            if (list.length === 0 && missionDefaultMailbox) list = [missionDefaultMailbox];
             return list;
         },
         enabled: isOpen && isEmailMode,
         staleTime: 60_000,
     });
 
-    // Auto-select preferred mailbox when list loads
+    // Auto-select mission mailbox when available, otherwise first available mailbox.
     useEffect(() => {
+        if (missionDefaultMailbox?.id) {
+            setEmailSelectedMailboxId(missionDefaultMailbox.id);
+            return;
+        }
         if (emailMailboxes.length > 0 && !emailSelectedMailboxId) {
             setEmailSelectedMailboxId(emailMailboxes[0].id);
         }
-    }, [emailMailboxes, emailSelectedMailboxId]);
+    }, [missionDefaultMailbox?.id, emailMailboxes, emailSelectedMailboxId]);
 
     // ── Email templates (React Query) ──
     type MissionTemplate = { id: string; templateId: string; order: number; template: { id: string; name: string; subject: string; bodyHtml: string; category: string } };
@@ -788,6 +809,7 @@ export function UnifiedActionDrawer({
     // Reset email panel state when result changes away from ENVOIE_MAIL
     useEffect(() => {
         if (!isEmailMode) {
+            setEmailSelectedMailboxId("");
             setEmailSelectedTemplateId("");
             setEmailPreviewTemplateId("");
         }
@@ -1039,7 +1061,7 @@ export function UnifiedActionDrawer({
                     contactId: contactId || undefined,
                     companyId: contactId ? undefined : companyId,
                     campaignId,
-                    channel: newActionResult === "ENVOIE_MAIL" ? "EMAIL" : channel,
+                    channel: isEmailStatusCode(newActionResult) ? "EMAIL" : channel,
                     result: newActionResult,
                     note: newActionNote.trim() || undefined,
                     callbackDate:
@@ -2713,7 +2735,7 @@ export function UnifiedActionDrawer({
                                     </fieldset>
 
                                     {/* ── Inline email panel: mailbox + template picker ── */}
-                                    {newActionResult === "ENVOIE_MAIL" && (
+                                    {isEmailMode && (
                                         <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-3.5 space-y-3">
                                             <div className="flex items-center gap-2 mb-0.5">
                                                 <Mail className="w-4 h-4 text-blue-600" aria-hidden="true" />
@@ -2984,7 +3006,7 @@ export function UnifiedActionDrawer({
                                     )}
 
                                     {/* Note */}
-                                    {newActionResult !== "ENVOIE_MAIL" && (
+                                    {!isEmailMode && (
                                     <div>
                                         <label
                                             htmlFor="action-note"
@@ -3086,8 +3108,8 @@ export function UnifiedActionDrawer({
                                     </div>
                                     )}
 
-                                    {/* Submit — hidden when ENVOIE_MAIL (email panel has its own send) */}
-                                    {newActionResult !== "ENVOIE_MAIL" && (
+                                    {/* Submit — hidden when email panel has its own send */}
+                                    {!isEmailMode && (
                                     <div className="flex flex-col sm:flex-row gap-2 pt-3 mt-1 border-t border-indigo-100">
                                         <Button
                                             type="button"

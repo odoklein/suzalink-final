@@ -186,3 +186,36 @@ export const DEFAULT_FICHE_FIELDS: FicheField[] = [
   { key: "objectionsFreins", label: "Objections / Freins", type: "textarea", required: false, order: 4, active: true },
   { key: "notesImportantes", label: "Notes importantes", type: "textarea", required: false, order: 5, active: true },
 ];
+
+/**
+ * Preset built from: "fiche renseignement hygiene alimentaire.docx".
+ * Used to quickly bootstrap a full hygiene-alimentaire form for teams.
+ */
+export const HYGIENE_ALIMENTAIRE_FICHE_FIELDS: FicheField[] = [
+  { key: "cnfCollaborateurNomPrenom", label: "Nom prénom du collaborateur CNF", type: "text", required: false, order: 1, active: true },
+  { key: "dateDemande", label: "Date", type: "date", required: false, order: 2, active: true },
+  { key: "restaurateurNomPrenom", label: "Nom et prénom (restaurateur)", type: "text", required: true, order: 3, active: true },
+  { key: "restaurateurDateNaissance", label: "Date de naissance", type: "date", required: false, order: 4, active: true },
+  { key: "restaurateurAdresse", label: "Adresse personnelle", type: "textarea", required: false, order: 5, active: true },
+  { key: "restaurateurTelephone", label: "Téléphone", type: "text", required: false, order: 6, active: true },
+  { key: "restaurateurEmail", label: "E-mail", type: "text", required: false, order: 7, active: true },
+  { key: "etablissementNom", label: "Nom du restaurant / établissement", type: "text", required: true, order: 8, active: true },
+  { key: "etablissementAdresse", label: "Adresse complète", type: "textarea", required: false, order: 9, active: true },
+  { key: "siret", label: "SIRET", type: "text", required: false, order: 10, active: true },
+  { key: "codeApe", label: "Code APE", type: "text", required: false, order: 11, active: true },
+  { key: "typeActivite", label: "Type d’activité", type: "textarea", required: false, order: 12, active: true },
+  { key: "apprenants", label: "Apprenant(s) (max 7)", type: "textarea", required: false, order: 13, active: true, placeholder: "Nom, prénom, date de naissance, n° sécurité sociale, email, téléphone, ancienneté, type de contrat..." },
+  { key: "nomDirigeant", label: "Nom du dirigeant (si différent du bénéficiaire)", type: "text", required: false, order: 14, active: true },
+  { key: "contactAdministratif", label: "E-mail de contact administratif & téléphone", type: "text", required: false, order: 15, active: true },
+  { key: "dureeFormation", label: "Durée de la formation", type: "text", required: false, order: 16, active: true, placeholder: "Ex: 14 heures / 2 jours" },
+  { key: "datesSouhaitees", label: "Dates souhaitées", type: "textarea", required: false, order: 17, active: true },
+  { key: "lieuFormation", label: "Lieu de la formation", type: "text", required: false, order: 18, active: true },
+  { key: "coutPedagogique", label: "Coût pédagogique", type: "text", required: false, order: 19, active: true },
+  { key: "opcoRattachement", label: "OPCO de rattachement (nom et adresse)", type: "textarea", required: false, order: 20, active: true },
+  { key: "idccConventionCollective", label: "Numéro IDCC / Convention collective", type: "text", required: false, order: 21, active: true },
+  { key: "typeFinancementDemande", label: "Type de financement demandé", type: "textarea", required: false, order: 22, active: true },
+  { key: "piecesJointes", label: "Pièces jointes prévues", type: "textarea", required: false, order: 23, active: true, placeholder: "Devis, convention, programme détaillé..." },
+  { key: "signataireNomFonction", label: "Nom et fonction du signataire", type: "text", required: false, order: 24, active: true },
+  { key: "signatureDate", label: "Date de signature", type: "date", required: false, order: 25, active: true },
+  { key: "observations", label: "Observations", type: "textarea", required: false, order: 26, active: true },
+];

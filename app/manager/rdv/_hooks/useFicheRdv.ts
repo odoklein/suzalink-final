@@ -1,162 +1,105 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import type { Meeting } from "../_types";
-
-export type FicheAutoSaveStatus = "idle" | "saving" | "saved" | "error";
-
-export interface FicheForm {
-  contexte: string;
-  besoinsProblemes: string;
-  solutionsEnPlace: string;
-  objectionsFreins: string;
-  notesImportantes: string;
-}
+import type { FicheTemplateDTO, FicheValues, FicheValidationError } from "@/lib/fiche/types";
 
 export interface UseFicheRdvReturn {
-  ficheForm: FicheForm;
-  setFicheForm: React.Dispatch<React.SetStateAction<FicheForm>>;
+  ficheTemplate: FicheTemplateDTO | null;
+  ficheValues: FicheValues;
   ficheLoading: boolean;
   ficheError: string | null;
-  setFicheError: (v: string | null) => void;
   ficheSaving: boolean;
-  ficheSaved: boolean;
-  ficheManualTranscript: string;
-  setFicheManualTranscript: (v: string) => void;
-  ficheAutoSaveStatus: FicheAutoSaveStatus;
-  initFiche: (m: Meeting) => void;
-  generateWithAI: (meeting: Meeting, onUpdate: (m: Meeting) => void) => Promise<void>;
+  ficheValidationErrors: FicheValidationError[];
+  loadFiche: (meetingId: string) => Promise<void>;
   saveFiche: (meeting: Meeting, onUpdate: (m: Meeting) => void) => Promise<void>;
-  triggerAutoSave: (meetingId: string, form: FicheForm) => void;
+  submitFicheValues: (
+    meeting: Meeting,
+    values: FicheValues,
+    onUpdate: (m: Meeting) => void
+  ) => Promise<void>;
 }
 
 export function useFicheRdv(
   updateMeeting: (id: string, data: Record<string, unknown>) => Promise<void>
 ): UseFicheRdvReturn {
-  const [ficheForm, setFicheForm] = useState<FicheForm>({
-    contexte: "",
-    besoinsProblemes: "",
-    solutionsEnPlace: "",
-    objectionsFreins: "",
-    notesImportantes: "",
-  });
+  const [ficheTemplate, setFicheTemplate] = useState<FicheTemplateDTO | null>(null);
+  const [ficheValues, setFicheValues] = useState<FicheValues>({});
   const [ficheLoading, setFicheLoading] = useState(false);
   const [ficheError, setFicheError] = useState<string | null>(null);
   const [ficheSaving, setFicheSaving] = useState(false);
-  const [ficheSaved, setFicheSaved] = useState(false);
-  const [ficheManualTranscript, setFicheManualTranscript] = useState("");
-  const [ficheAutoSaveStatus, setFicheAutoSaveStatus] = useState<FicheAutoSaveStatus>("idle");
-  const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [ficheValidationErrors, setFicheValidationErrors] = useState<FicheValidationError[]>([]);
 
-  const initFiche = useCallback((m: Meeting) => {
-    setFicheForm({
-      contexte: (m.rdvFiche?.contexte as string) || "",
-      besoinsProblemes: (m.rdvFiche?.besoinsProblemes as string) || "",
-      solutionsEnPlace: (m.rdvFiche?.solutionsEnPlace as string) || "",
-      objectionsFreins: (m.rdvFiche?.objectionsFreins as string) || "",
-      notesImportantes: (m.rdvFiche?.notesImportantes as string) || "",
-    });
-    setFicheLoading(false);
+  const loadFiche = useCallback(async (meetingId: string) => {
+    setFicheLoading(true);
     setFicheError(null);
-    setFicheManualTranscript("");
-    setFicheSaved(false);
-  }, []);
-
-  const generateWithAI = useCallback(
-    async (meeting: Meeting, onUpdate: (m: Meeting) => void) => {
-      const transcription = ficheManualTranscript.trim();
-      if (!transcription) {
-        setFicheError(
-          "Collez une transcription dans le champ prévu à cet effet, puis relancez."
-        );
+    setFicheValidationErrors([]);
+    try {
+      const res = await fetch(`/api/sdr/meetings/${meetingId}/fiche`);
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        setFicheError(json?.error || "Impossible de charger la fiche.");
         return;
       }
-      setFicheLoading(true);
+      setFicheTemplate((json.data?.template as FicheTemplateDTO) ?? null);
+      setFicheValues((json.data?.fiche as FicheValues) ?? {});
+    } catch {
+      setFicheError("Erreur réseau lors du chargement de la fiche.");
+    } finally {
+      setFicheLoading(false);
+    }
+  }, []);
+
+  const submitFicheValues = useCallback(
+    async (meeting: Meeting, values: FicheValues, onUpdate: (m: Meeting) => void) => {
+      setFicheSaving(true);
       setFicheError(null);
+      setFicheValidationErrors([]);
       try {
-        const res = await fetch("/api/ai/openai/rdv-fiche", {
-          method: "POST",
+        const res = await fetch(`/api/sdr/meetings/${meeting.id}/fiche`, {
+          method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ transcription }),
+          body: JSON.stringify({ fiche: values }),
         });
         const json = await res.json().catch(() => null);
         if (!res.ok || !json?.success) {
-          setFicheError(json?.error || "Impossible de générer la fiche.");
+          setFicheError(json?.error || "Erreur lors de la sauvegarde.");
           return;
         }
-        const fiche = json.data?.fiche;
-        setFicheForm({
-          contexte: fiche?.contexte || "",
-          besoinsProblemes: fiche?.besoinsProblemes || "",
-          solutionsEnPlace: fiche?.solutionsEnPlace || "",
-          objectionsFreins: fiche?.objectionsFreins || "",
-          notesImportantes: fiche?.notesImportantes || "",
+        if (json.data?.ok === false) {
+          setFicheValidationErrors((json.data.errors as FicheValidationError[]) ?? []);
+          return;
+        }
+        setFicheValues((json.data?.fiche as FicheValues) ?? values);
+        onUpdate({
+          ...meeting,
+          rdvFiche: (json.data?.fiche as Record<string, unknown>) ?? values,
+          rdvFicheUpdatedAt: (json.data?.rdvFicheUpdatedAt as string) ?? new Date().toISOString(),
         });
-        await updateMeeting(meeting.id, { rdvFiche: fiche });
-        onUpdate({ ...meeting, rdvFiche: fiche, rdvFicheUpdatedAt: new Date().toISOString() });
-        setFicheSaved(true);
-        setTimeout(() => setFicheSaved(false), 3000);
-      } catch (e) {
-        console.error(e);
-        setFicheError("Erreur réseau lors de la génération.");
-      } finally {
-        setFicheLoading(false);
-      }
-    },
-    [ficheManualTranscript, updateMeeting]
-  );
-
-  const saveFiche = useCallback(
-    async (meeting: Meeting, onUpdate: (m: Meeting) => void) => {
-      setFicheSaving(true);
-      setFicheError(null);
-      try {
-        const fiche = { ...ficheForm };
-        await updateMeeting(meeting.id, { rdvFiche: fiche });
-        onUpdate({ ...meeting, rdvFiche: fiche, rdvFicheUpdatedAt: new Date().toISOString() });
-        setFicheSaved(true);
-        setTimeout(() => setFicheSaved(false), 3000);
-      } catch (e) {
-        console.error(e);
-        setFicheError("Erreur lors de la sauvegarde.");
+      } catch {
+        setFicheError("Erreur réseau lors de la sauvegarde.");
       } finally {
         setFicheSaving(false);
       }
     },
-    [ficheForm, updateMeeting]
+    []
   );
 
-  const triggerAutoSave = useCallback(
-    (meetingId: string, form: FicheForm) => {
-      if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
-      setFicheAutoSaveStatus("saving");
-      autoSaveTimeoutRef.current = setTimeout(async () => {
-        try {
-          await updateMeeting(meetingId, { rdvFiche: form });
-          setFicheAutoSaveStatus("saved");
-          setTimeout(() => setFicheAutoSaveStatus("idle"), 2000);
-        } catch {
-          setFicheAutoSaveStatus("error");
-        }
-      }, 1500);
-    },
-    [updateMeeting]
+  const saveFiche = useCallback(
+    async (meeting: Meeting, onUpdate: (m: Meeting) => void) =>
+      submitFicheValues(meeting, ficheValues, onUpdate),
+    [submitFicheValues, ficheValues]
   );
 
   return {
-    ficheForm,
-    setFicheForm,
+    ficheTemplate,
+    ficheValues,
     ficheLoading,
     ficheError,
-    setFicheError,
     ficheSaving,
-    ficheSaved,
-    ficheManualTranscript,
-    setFicheManualTranscript,
-    ficheAutoSaveStatus,
-    initFiche,
-    generateWithAI,
+    ficheValidationErrors,
+    loadFiche,
     saveFiche,
-    triggerAutoSave,
+    submitFicheValues,
   };
 }

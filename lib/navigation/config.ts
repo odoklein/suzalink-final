@@ -136,7 +136,7 @@ export const MANAGER_NAV: NavSection[] = [
       {
         href: "/manager/sdr-feedback",
         icon: MessageSquare,
-        label: "Avis SDR",
+        label: "Formulaires SDR",
         permission: "pages.sdrs",
       },
       {

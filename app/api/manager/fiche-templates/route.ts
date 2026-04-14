@@ -8,7 +8,7 @@ import {
   validateRequest,
 } from "@/lib/api-utils";
 import { templateRowToDTO } from "@/lib/fiche/resolver";
-import { DEFAULT_FICHE_FIELDS } from "@/lib/fiche/types";
+import { DEFAULT_FICHE_FIELDS, HYGIENE_ALIMENTAIRE_FICHE_FIELDS } from "@/lib/fiche/types";
 
 const fieldSchema = z.object({
   key: z
@@ -31,6 +31,7 @@ const createSchema = z.object({
   missionId: z.string().nullable().optional(),
   fields: z.array(fieldSchema).optional(),
   isActive: z.boolean().optional(),
+  preset: z.enum(["HYGIENE_ALIMENTAIRE"]).optional(),
 });
 
 /**
@@ -88,7 +89,13 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
       name: body.name,
       clientId: body.clientId ?? null,
       missionId: body.missionId ?? null,
-      fields: (body.fields && body.fields.length > 0 ? body.fields : DEFAULT_FICHE_FIELDS) as object,
+      fields: (
+        body.fields && body.fields.length > 0
+          ? body.fields
+          : body.preset === "HYGIENE_ALIMENTAIRE"
+            ? HYGIENE_ALIMENTAIRE_FICHE_FIELDS
+            : DEFAULT_FICHE_FIELDS
+      ) as object,
       isActive: body.isActive ?? true,
     },
   });
