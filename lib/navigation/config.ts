@@ -487,6 +487,12 @@ export const CLIENT_NAV: NavSection[] = [
         permission: "pages.dashboard",
       },
       {
+        href: "/client/portal/formulaires",
+        icon: ClipboardList,
+        label: "Formulaires",
+        permission: "pages.dashboard",
+      },
+      {
         href: "/client/portal/reporting",
         icon: FileDown,
         label: "Rapports",
@@ -580,6 +586,11 @@ export const COMMERCIAL_NAV: NavSection[] = [
         href: "/commercial/portal/contacts",
         icon: Users,
         label: "Contacts",
+      },
+      {
+        href: "/commercial/portal/formulaires",
+        icon: ClipboardList,
+        label: "Formulaires",
       },
     ],
   },

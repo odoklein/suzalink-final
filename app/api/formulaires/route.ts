@@ -34,7 +34,7 @@ const createSchema = z.object({
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
     const session = await requireRole(
-        ["MANAGER", "SDR", "BUSINESS_DEVELOPER", "BOOKER"],
+        ["MANAGER", "SDR", "BUSINESS_DEVELOPER", "BOOKER", "COMMERCIAL", "CLIENT"],
         request
     );
     const { searchParams } = new URL(request.url);
@@ -53,6 +53,25 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     if (contactId) where.contactId = contactId;
     if (companyId) where.companyId = companyId;
     if (actionId) where.actionId = actionId;
+
+    if (session.user.role === "COMMERCIAL") {
+        const interlocuteurId = session.user.interlocuteurId;
+        if (!interlocuteurId) {
+            return errorResponse("Profil commercial introuvable", 403);
+        }
+        // Commercial users can only list formulaires explicitly assigned to them
+        // through the linked action (action.interlocuteurId).
+        where.action = { interlocuteurId };
+    }
+
+    if (session.user.role === "CLIENT") {
+        const scopedClientId = session.user.clientId;
+        if (!scopedClientId) {
+            return errorResponse("Client introuvable pour cet utilisateur", 403);
+        }
+        // Client users can list formulaires for their own client only.
+        where.clientId = scopedClientId;
+    }
 
     // SDR / BD / BOOKER only see their own formulaires unless scoped to an
     // entity (entity view = retrieval from a company/contact/action drawer).
