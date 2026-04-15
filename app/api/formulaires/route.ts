@@ -59,9 +59,14 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         if (!interlocuteurId) {
             return errorResponse("Profil commercial introuvable", 403);
         }
-        // Commercial users can only list formulaires explicitly assigned to them
-        // through the linked action (action.interlocuteurId).
-        where.action = { interlocuteurId };
+        const interlocuteur = await prisma.clientInterlocuteur.findUnique({
+            where: { id: interlocuteurId },
+            select: { clientId: true },
+        });
+        if (!interlocuteur) {
+            return errorResponse("Interlocuteur introuvable", 403);
+        }
+        where.clientId = interlocuteur.clientId;
     }
 
     if (session.user.role === "CLIENT") {

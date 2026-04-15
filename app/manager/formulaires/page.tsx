@@ -18,7 +18,14 @@ import {
     Trash2,
     Copy,
     Check,
+    Download,
 } from "lucide-react";
+import {
+    isFicheHygieneAlimentaireContent,
+    FicheHygieneAlimentaireData,
+} from "@/lib/constants/ficheHygieneAlimentaire";
+import FicheHygieneAlimentaireForm from "@/components/fiche/FicheHygieneAlimentaireForm";
+import { downloadFormulairesCsv } from "@/lib/utils/formulaireExport";
 
 interface FormulaireItem {
     id: string;
@@ -86,7 +93,9 @@ export default function ManagerFormulairesPage() {
     const [searchQuery, setSearchQuery] = useState("");
     const [selected, setSelected] = useState<FormulaireItem | null>(null);
     const [editContent, setEditContent] = useState<string>("");
+    const [editFiche, setEditFiche] = useState<FicheHygieneAlimentaireData | null>(null);
     const [copied, setCopied] = useState(false);
+    const [checked, setChecked] = useState<Set<string>>(new Set());
 
     useEffect(() => {
         const missionFromUrl = searchParams.get("missionId") ?? "";
@@ -150,21 +159,36 @@ export default function ManagerFormulairesPage() {
 
     const openDetail = (f: FormulaireItem) => {
         setSelected(f);
-        setEditContent(f.content);
+        const fiche = isFicheHygieneAlimentaireContent(f.content);
+        if (fiche) {
+            setEditFiche(fiche);
+            setEditContent("");
+        } else {
+            setEditFiche(null);
+            setEditContent(f.content);
+        }
     };
 
     const closeDetail = () => {
         setSelected(null);
         setEditContent("");
+        setEditFiche(null);
         setCopied(false);
     };
 
+    const isDirty = selected
+        ? editFiche
+            ? JSON.stringify(editFiche) !== selected.content
+            : editContent !== selected.content
+        : false;
+
     const handleSave = async () => {
         if (!selected) return;
+        const contentToSave = editFiche ? JSON.stringify(editFiche) : editContent;
         const res = await fetch(`/api/formulaires/${selected.id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content: editContent }),
+            body: JSON.stringify({ content: contentToSave }),
         });
         const json = await res.json();
         if (!json.success) {
@@ -174,7 +198,38 @@ export default function ManagerFormulairesPage() {
         success("Fiche mise à jour", "Le contenu a été enregistré");
         queryClient.invalidateQueries({ queryKey: ["manager", "formulaires"] });
         setSelected(json.data);
+        const fiche = isFicheHygieneAlimentaireContent(json.data.content);
+        if (fiche) setEditFiche(fiche);
+        else setEditContent(json.data.content);
     };
+
+    const toggleCheck = (id: string) => {
+        setChecked((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const toggleAll = () => {
+        if (checked.size === filtered.length) setChecked(new Set());
+        else setChecked(new Set(filtered.map((f) => f.id)));
+    };
+
+    const exportItems = (items: FormulaireItem[], prefix: string) => {
+        if (!items.length) {
+            showError("Export", "Aucun formulaire à exporter.");
+            return;
+        }
+        downloadFormulairesCsv(items, prefix);
+    };
+
+    const exportSelected = () =>
+        exportItems(filtered.filter((f) => checked.has(f.id)), "formulaires-selection");
+    const exportAll = () => exportItems(filtered, "formulaires-manager");
+    const exportSingle = (f: FormulaireItem) =>
+        exportItems([f], `formulaire-${f.id.slice(0, 8)}`);
 
     const handleDelete = async () => {
         if (!selected) return;
@@ -213,13 +268,31 @@ export default function ManagerFormulairesPage() {
                         </div>
                     </div>
                 </div>
-                <button
-                    onClick={() => refetch()}
-                    className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50"
-                >
-                    <RefreshCw className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`} />
-                    Rafraîchir
-                </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                    {checked.size > 0 && (
+                        <button
+                            onClick={exportSelected}
+                            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100"
+                        >
+                            <Download className="w-4 h-4" />
+                            Exporter la sélection ({checked.size})
+                        </button>
+                    )}
+                    <button
+                        onClick={exportAll}
+                        className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100"
+                    >
+                        <Download className="w-4 h-4" />
+                        Exporter tout
+                    </button>
+                    <button
+                        onClick={() => refetch()}
+                        className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50"
+                    >
+                        <RefreshCw className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`} />
+                        Rafraîchir
+                    </button>
+                </div>
             </header>
 
             {/* Filters */}
@@ -269,15 +342,28 @@ export default function ManagerFormulairesPage() {
 
             {/* List */}
             <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/50 flex items-center justify-between">
+                <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/50 flex items-center justify-between gap-3">
                     <p className="text-sm font-semibold text-slate-700">
                         {filtered.length} fiche{filtered.length > 1 ? "s" : ""}
                     </p>
-                    {isFetching && (
-                        <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Chargement…
-                        </span>
-                    )}
+                    <div className="flex items-center gap-3">
+                        {filtered.length > 0 && (
+                            <label className="inline-flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={checked.size === filtered.length}
+                                    onChange={toggleAll}
+                                    className="w-3.5 h-3.5 rounded border-slate-300"
+                                />
+                                Tout sélectionner
+                            </label>
+                        )}
+                        {isFetching && (
+                            <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Chargement…
+                            </span>
+                        )}
+                    </div>
                 </div>
                 {filtered.length === 0 ? (
                     <div className="p-10 text-center text-sm text-slate-500">
@@ -286,11 +372,18 @@ export default function ManagerFormulairesPage() {
                 ) : (
                     <ul className="divide-y divide-slate-100">
                         {filtered.map((f) => (
-                            <li key={f.id}>
+                            <li key={f.id} className="flex items-center gap-2 pl-3 hover:bg-slate-50 transition-colors">
+                                <input
+                                    type="checkbox"
+                                    checked={checked.has(f.id)}
+                                    onChange={() => toggleCheck(f.id)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="w-3.5 h-3.5 rounded border-slate-300 shrink-0"
+                                />
                                 <button
                                     type="button"
                                     onClick={() => openDetail(f)}
-                                    className="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors"
+                                    className="flex-1 text-left py-3 pr-2"
                                 >
                                     <div className="flex items-start justify-between gap-3">
                                         <div className="min-w-0 flex-1">
@@ -332,6 +425,14 @@ export default function ManagerFormulairesPage() {
                                             )}
                                         </div>
                                     </div>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); exportSingle(f); }}
+                                    className="mr-3 p-1.5 text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg"
+                                    title="Exporter"
+                                >
+                                    <Download className="w-4 h-4" />
                                 </button>
                             </li>
                         ))}
@@ -383,21 +484,27 @@ export default function ManagerFormulairesPage() {
                                     <label htmlFor="formulaire-edit" className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
                                         Fiche de renseignement
                                     </label>
-                                    <button
-                                        onClick={handleCopy}
-                                        className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800"
-                                    >
-                                        {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                                        Copier
-                                    </button>
+                                    {!editFiche && (
+                                        <button
+                                            onClick={handleCopy}
+                                            className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800"
+                                        >
+                                            {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                                            Copier
+                                        </button>
+                                    )}
                                 </div>
-                                <textarea
-                                    id="formulaire-edit"
-                                    value={editContent}
-                                    onChange={(e) => setEditContent(e.target.value)}
-                                    rows={22}
-                                    className="w-full px-3 py-2.5 text-xs font-mono border border-slate-200 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-violet-400/30 focus:border-violet-400 resize-y"
-                                />
+                                {editFiche ? (
+                                    <FicheHygieneAlimentaireForm value={editFiche} onChange={setEditFiche} />
+                                ) : (
+                                    <textarea
+                                        id="formulaire-edit"
+                                        value={editContent}
+                                        onChange={(e) => setEditContent(e.target.value)}
+                                        rows={22}
+                                        className="w-full px-3 py-2.5 text-xs font-mono border border-slate-200 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-violet-400/30 focus:border-violet-400 resize-y"
+                                    />
+                                )}
                             </div>
                         </div>
                         <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-slate-200 bg-slate-50/40">
@@ -416,8 +523,15 @@ export default function ManagerFormulairesPage() {
                                     Annuler
                                 </button>
                                 <button
+                                    onClick={() => exportSingle(selected)}
+                                    className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100"
+                                >
+                                    <Download className="w-4 h-4" />
+                                    Exporter
+                                </button>
+                                <button
                                     onClick={handleSave}
-                                    disabled={editContent === selected.content}
+                                    disabled={!isDirty}
                                     className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
                                 >
                                     <Save className="w-4 h-4" />

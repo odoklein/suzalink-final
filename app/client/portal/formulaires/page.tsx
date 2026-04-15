@@ -15,6 +15,11 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/components/ui";
+import {
+    isFicheHygieneAlimentaireContent,
+    FicheHygieneAlimentaireData,
+} from "@/lib/constants/ficheHygieneAlimentaire";
+import FicheHygieneAlimentaireForm from "@/components/fiche/FicheHygieneAlimentaireForm";
 
 interface FormulaireItem {
     id: string;
@@ -53,6 +58,7 @@ export default function ClientFormulairesPage() {
     const [missionFilter, setMissionFilter] = useState("");
     const [selected, setSelected] = useState<FormulaireItem | null>(null);
     const [editContent, setEditContent] = useState("");
+    const [editFiche, setEditFiche] = useState<FicheHygieneAlimentaireData | null>(null);
     const [saving, setSaving] = useState(false);
 
     const { data: formulaires = [], isFetching, refetch } = useQuery({
@@ -91,21 +97,38 @@ export default function ClientFormulairesPage() {
 
     const openDetail = (item: FormulaireItem) => {
         setSelected(item);
-        setEditContent(item.content);
+        const fiche = isFicheHygieneAlimentaireContent(item.content);
+        if (fiche) {
+            setEditFiche(fiche);
+            setEditContent("");
+        } else {
+            setEditFiche(null);
+            setEditContent(item.content);
+        }
     };
+
+    const isDirty = selected
+        ? editFiche
+            ? JSON.stringify(editFiche) !== selected.content
+            : editContent !== selected.content
+        : false;
 
     const saveFormulaire = async () => {
         if (!selected) return;
         setSaving(true);
         try {
+            const contentToSave = editFiche ? JSON.stringify(editFiche) : editContent;
             const res = await fetch(`/api/formulaires/${selected.id}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ content: editContent }),
+                body: JSON.stringify({ content: contentToSave }),
             });
             const json = await res.json();
             if (!json.success) throw new Error(json.error || "Échec de sauvegarde");
             setSelected(json.data);
+            const fiche = isFicheHygieneAlimentaireContent(json.data.content);
+            if (fiche) setEditFiche(fiche);
+            else setEditContent(json.data.content);
             success("Formulaire mis à jour", "Les modifications ont été enregistrées.");
             await refetch();
         } catch (e) {
@@ -245,18 +268,22 @@ export default function ClientFormulairesPage() {
                             </button>
                         </div>
                         <div className="flex-1 p-5 overflow-y-auto">
-                            <textarea
-                                value={editContent}
-                                onChange={(e) => setEditContent(e.target.value)}
-                                rows={26}
-                                className="w-full px-3 py-2.5 text-xs font-mono border border-[#E8EBF0] rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400/40 focus:border-indigo-400"
-                            />
+                            {editFiche ? (
+                                <FicheHygieneAlimentaireForm value={editFiche} onChange={setEditFiche} />
+                            ) : (
+                                <textarea
+                                    value={editContent}
+                                    onChange={(e) => setEditContent(e.target.value)}
+                                    rows={26}
+                                    className="w-full px-3 py-2.5 text-xs font-mono border border-[#E8EBF0] rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400/40 focus:border-indigo-400"
+                                />
+                            )}
                         </div>
                         <div className="px-5 py-3 border-t border-[#E8EBF0] bg-[#FAFBFF] flex justify-end">
                             <button
                                 type="button"
                                 onClick={saveFormulaire}
-                                disabled={saving || editContent === selected.content}
+                                disabled={saving || !isDirty}
                                 className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
                             >
                                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}

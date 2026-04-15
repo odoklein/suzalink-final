@@ -4,7 +4,11 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Drawer, Button, Badge, Select, useToast, TextSkeleton, ListSkeleton, DateTimePicker, Modal } from "@/components/ui";
 import { ACTION_RESULT_LABELS, type ActionResult } from "@/lib/types";
-import { FORMULAIRE_TEMPLATE_DEFAULT } from "@/lib/constants/formulaireTemplate";
+import {
+    FicheHygieneAlimentaireData,
+    emptyFicheHygieneAlimentaire,
+} from "@/lib/constants/ficheHygieneAlimentaire";
+import FicheHygieneAlimentaireForm from "@/components/fiche/FicheHygieneAlimentaireForm";
 import {
     Building2,
     User,
@@ -571,7 +575,12 @@ export function UnifiedActionDrawer({
     const [meetingJoinUrl, setMeetingJoinUrl] = useState("");
     const [meetingAddress, setMeetingAddress] = useState("");
     const [meetingPhone, setMeetingPhone] = useState("");
-    const [formulaireContent, setFormulaireContent] = useState("");
+    const [ficheData, setFicheData] = useState<FicheHygieneAlimentaireData | null>(null);
+    const isFicheValid = (d: FicheHygieneAlimentaireData | null) => {
+        if (!d) return false;
+        if (d.collaborateurCnf.trim() || d.restaurateur.nomPrenom.trim() || d.etablissement.nom.trim()) return true;
+        return d.apprenants.some((a) => a.nomUsage.trim() || a.prenom.trim());
+    };
     useEffect(() => {
         onBookingDialogOpenChange?.(showBookingDrawer);
     }, [showBookingDrawer, onBookingDialogOpenChange]);
@@ -1066,7 +1075,7 @@ export function UnifiedActionDrawer({
                             : "Une note est requise pour ce résultat"
                 );
             }
-            if (newActionResult === "MEETING_BOOKED_FORM" && !formulaireContent.trim()) {
+            if (newActionResult === "MEETING_BOOKED_FORM" && !isFicheValid(ficheData)) {
                 throw new Error("La fiche de renseignement est requise pour ce résultat");
             }
             const selectedCampaign = campaigns[0];
@@ -1101,7 +1110,7 @@ export function UnifiedActionDrawer({
 
             const newActionId = json.data?.id as string | undefined;
 
-            if (newActionResult === "MEETING_BOOKED_FORM" && formulaireContent.trim()) {
+            if (newActionResult === "MEETING_BOOKED_FORM" && isFicheValid(ficheData)) {
                 if (!missionId) {
                     throw new Error("Mission manquante : impossible de créer la fiche");
                 }
@@ -1114,7 +1123,7 @@ export function UnifiedActionDrawer({
                             contactId: contactId || undefined,
                             companyId: contactId ? undefined : companyId,
                             actionId: newActionId,
-                            content: formulaireContent,
+                            content: JSON.stringify(ficheData),
                         }),
                     });
                     const formJson = await formRes.json();
@@ -1169,7 +1178,7 @@ export function UnifiedActionDrawer({
             setNewActionNote("");
             setNewActionResult("");
             setNewCallbackDateValue("");
-            setFormulaireContent("");
+            setFicheData(null);
             setLinkedAlloCall(null);
             queryClient.invalidateQueries({ queryKey: actionsQueryKey });
             onActionRecorded?.();
@@ -1303,7 +1312,7 @@ export function UnifiedActionDrawer({
         !!newActionResult &&
         !requiresSavedInterlocutorBeforeSubmit &&
         (!textFieldRequiredForResult || newActionNote.trim().length > 0) &&
-        (newActionResult !== "MEETING_BOOKED_FORM" || formulaireContent.trim().length > 0) &&
+        (newActionResult !== "MEETING_BOOKED_FORM" || isFicheValid(ficheData)) &&
         !addActionMutation.isPending;
 
     const sortedHistoryActions = useMemo(() => {
@@ -2743,9 +2752,9 @@ export function UnifiedActionDrawer({
                                                             setNewActionResult(opt.value);
                                                             if (
                                                                 opt.value === "MEETING_BOOKED_FORM" &&
-                                                                !formulaireContent.trim()
+                                                                !ficheData
                                                             ) {
-                                                                setFormulaireContent(FORMULAIRE_TEMPLATE_DEFAULT);
+                                                                setFicheData(emptyFicheHygieneAlimentaire());
                                                             }
                                                         }}
                                                         className={cn(
@@ -2989,39 +2998,26 @@ export function UnifiedActionDrawer({
                                     )}
 
                                     {/* Contextual: formulaire editor — shown for MEETING_BOOKED_FORM */}
-                                    {newActionResult === "MEETING_BOOKED_FORM" && (
-                                        <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-3.5 space-y-2">
+                                    {newActionResult === "MEETING_BOOKED_FORM" && ficheData && (
+                                        <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-3.5 space-y-3">
                                             <div className="flex items-start gap-2">
                                                 <ClipboardList className="w-4 h-4 text-violet-600 mt-0.5" aria-hidden="true" />
                                                 <div className="flex-1">
                                                     <p className="text-sm font-semibold text-violet-800">Fiche de renseignement</p>
                                                     <p className="text-xs text-violet-700/90">
-                                                        Ce formulaire sera enregistré et lié à la mission et au client pour le suivi manager.
+                                                        Remplissez les champs ci-dessous. La fiche sera enregistrée et liée à la mission pour le suivi manager &amp; commercial.
                                                     </p>
                                                 </div>
-                                            </div>
-                                            <label htmlFor="formulaire-content" className="sr-only">
-                                                Contenu de la fiche de renseignement
-                                            </label>
-                                            <textarea
-                                                id="formulaire-content"
-                                                value={formulaireContent}
-                                                onChange={(e) => setFormulaireContent(e.target.value)}
-                                                rows={14}
-                                                placeholder="Remplissez la fiche de renseignement..."
-                                                className="w-full px-3 py-2.5 text-xs font-mono border border-violet-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-400/30 focus:border-violet-400 resize-y"
-                                            />
-                                            <div className="flex items-center justify-between gap-2">
-                                                <p className="text-[11px] text-violet-700/80">
-                                                    {formulaireContent.length} caractères
-                                                </p>
                                                 <button
                                                     type="button"
-                                                    onClick={() => setFormulaireContent(FORMULAIRE_TEMPLATE_DEFAULT)}
-                                                    className="text-[11px] font-semibold text-violet-700 hover:text-violet-900 underline"
+                                                    onClick={() => setFicheData(emptyFicheHygieneAlimentaire())}
+                                                    className="text-[11px] font-semibold text-violet-700 hover:text-violet-900 underline shrink-0"
                                                 >
-                                                    Réinitialiser le modèle
+                                                    Réinitialiser
                                                 </button>
+                                            </div>
+                                            <div className="rounded-lg bg-white border border-violet-100 p-3">
+                                                <FicheHygieneAlimentaireForm value={ficheData} onChange={setFicheData} />
                                             </div>
                                         </div>
                                     )}

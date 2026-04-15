@@ -33,7 +33,7 @@ function canAccess(
         action: { interlocuteurId: string | null } | null;
     },
     session: { user: { id: string; role: string; clientId?: string | null } },
-    commercialInterlocuteurId?: string | null,
+    commercialClientId?: string | null,
     clientId?: string | null
 ) {
     if (session.user.role === "MANAGER") return true;
@@ -41,9 +41,18 @@ function canAccess(
         return !!clientId && formulaire.clientId === clientId;
     }
     if (session.user.role === "COMMERCIAL") {
-        return !!commercialInterlocuteurId && formulaire.action?.interlocuteurId === commercialInterlocuteurId;
+        return !!commercialClientId && formulaire.clientId === commercialClientId;
     }
     return formulaire.createdById === session.user.id;
+}
+
+async function resolveCommercialClientId(interlocuteurId: string | null | undefined) {
+    if (!interlocuteurId) return null;
+    const interlocuteur = await prisma.clientInterlocuteur.findUnique({
+        where: { id: interlocuteurId },
+        select: { clientId: true },
+    });
+    return interlocuteur?.clientId ?? null;
 }
 
 // ============================================
@@ -57,10 +66,12 @@ export const GET = withErrorHandler(
             request
         );
         const { id } = await params;
-        const commercialInterlocuteurId =
-            session.user.role === "COMMERCIAL" ? session.user.interlocuteurId ?? null : null;
+        const commercialClientId =
+            session.user.role === "COMMERCIAL"
+                ? await resolveCommercialClientId(session.user.interlocuteurId)
+                : null;
         const clientId = session.user.role === "CLIENT" ? session.user.clientId ?? null : null;
-        if (session.user.role === "COMMERCIAL" && !commercialInterlocuteurId) {
+        if (session.user.role === "COMMERCIAL" && !commercialClientId) {
             return errorResponse("Profil commercial introuvable", 403);
         }
         if (session.user.role === "CLIENT" && !clientId) {
@@ -72,7 +83,7 @@ export const GET = withErrorHandler(
             include: includeRelations,
         });
         if (!row) throw new NotFoundError("Formulaire introuvable");
-        if (!canAccess(row, session, commercialInterlocuteurId, clientId)) return errorResponse("Accès non autorisé", 403);
+        if (!canAccess(row, session, commercialClientId, clientId)) return errorResponse("Accès non autorisé", 403);
 
         return successResponse(row);
     }
@@ -90,10 +101,12 @@ export const PATCH = withErrorHandler(
         );
         const { id } = await params;
         const data = await validateRequest(request, updateSchema);
-        const commercialInterlocuteurId =
-            session.user.role === "COMMERCIAL" ? session.user.interlocuteurId ?? null : null;
+        const commercialClientId =
+            session.user.role === "COMMERCIAL"
+                ? await resolveCommercialClientId(session.user.interlocuteurId)
+                : null;
         const clientId = session.user.role === "CLIENT" ? session.user.clientId ?? null : null;
-        if (session.user.role === "COMMERCIAL" && !commercialInterlocuteurId) {
+        if (session.user.role === "COMMERCIAL" && !commercialClientId) {
             return errorResponse("Profil commercial introuvable", 403);
         }
         if (session.user.role === "CLIENT" && !clientId) {
@@ -105,7 +118,7 @@ export const PATCH = withErrorHandler(
             include: { action: { select: { interlocuteurId: true } } },
         });
         if (!existing) throw new NotFoundError("Formulaire introuvable");
-        if (!canAccess(existing, session, commercialInterlocuteurId, clientId)) return errorResponse("Accès non autorisé", 403);
+        if (!canAccess(existing, session, commercialClientId, clientId)) return errorResponse("Accès non autorisé", 403);
 
         const updated = await prisma.formulaire.update({
             where: { id },
