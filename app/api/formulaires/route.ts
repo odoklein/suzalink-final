@@ -13,6 +13,25 @@ import {
     NotFoundError,
 } from "@/lib/api-utils";
 
+async function ensureFormulaireStatusColumn() {
+    // Temporary safety net for environments where the latest Prisma migration
+    // was not applied yet (P2022 on Formulaire.status).
+    await prisma.$executeRawUnsafe(`
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'FormulaireStatus') THEN
+    CREATE TYPE "FormulaireStatus" AS ENUM ('DRAFT', 'SENT', 'SIGNED');
+  END IF;
+END
+$$;
+`);
+
+    await prisma.$executeRawUnsafe(`
+ALTER TABLE "Formulaire"
+ADD COLUMN IF NOT EXISTS "status" "FormulaireStatus" NOT NULL DEFAULT 'DRAFT';
+`);
+}
+
 // ============================================
 // SCHEMAS
 // ============================================
@@ -34,6 +53,8 @@ const createSchema = z.object({
 // (team-lead behaviour kept simple — managers handle cross-team visibility).
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
+    await ensureFormulaireStatusColumn();
+
     const session = await requireRole(
         ["MANAGER", "SDR", "BUSINESS_DEVELOPER", "BOOKER", "COMMERCIAL", "CLIENT"],
         request
@@ -120,6 +141,8 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 // ============================================
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
+    await ensureFormulaireStatusColumn();
+
     const session = await requireRole(
         ["MANAGER", "SDR", "BUSINESS_DEVELOPER", "BOOKER"],
         request
