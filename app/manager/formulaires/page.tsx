@@ -19,6 +19,7 @@ import {
     Copy,
     Check,
     Download,
+    Mail,
 } from "lucide-react";
 import {
     isFicheHygieneAlimentaireContent,
@@ -36,6 +37,11 @@ interface FormulaireItem {
     actionId: string | null;
     title: string;
     content: string;
+    status: "DRAFT" | "SENT" | "SIGNED";
+    sentToEmail: string | null;
+    sentAt: string | null;
+    signedAt: string | null;
+    signedBy: string | null;
     createdAt: string;
     updatedAt: string;
     mission: { id: string; name: string; clientId: string } | null;
@@ -96,6 +102,8 @@ export default function ManagerFormulairesPage() {
     const [editFiche, setEditFiche] = useState<FicheHygieneAlimentaireData | null>(null);
     const [copied, setCopied] = useState(false);
     const [checked, setChecked] = useState<Set<string>>(new Set());
+    const [recipientEmail, setRecipientEmail] = useState("");
+    const [isSending, setIsSending] = useState(false);
 
     useEffect(() => {
         const missionFromUrl = searchParams.get("missionId") ?? "";
@@ -159,6 +167,7 @@ export default function ManagerFormulairesPage() {
 
     const openDetail = (f: FormulaireItem) => {
         setSelected(f);
+        setRecipientEmail(f.sentToEmail || f.contact?.email || "");
         const fiche = isFicheHygieneAlimentaireContent(f.content);
         if (fiche) {
             setEditFiche(fiche);
@@ -243,6 +252,37 @@ export default function ManagerFormulairesPage() {
         success("Fiche supprimée", "La fiche a été supprimée");
         queryClient.invalidateQueries({ queryKey: ["manager", "formulaires"] });
         closeDetail();
+    };
+
+    const statusUi: Record<FormulaireItem["status"], { label: string; className: string }> = {
+        DRAFT: { label: "Brouillon", className: "bg-slate-100 text-slate-700" },
+        SENT: { label: "Envoye", className: "bg-amber-100 text-amber-700" },
+        SIGNED: { label: "Signe", className: "bg-emerald-100 text-emerald-700" },
+    };
+
+    const handleSendForSignature = async () => {
+        if (!selected) return;
+        if (!recipientEmail.trim()) {
+            showError("Email requis", "Saisissez un email de destinataire");
+            return;
+        }
+        setIsSending(true);
+        try {
+            const res = await fetch(`/api/formulaires/${selected.id}/send`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ recipientEmail: recipientEmail.trim() }),
+            });
+            const json = await res.json();
+            if (!json.success) throw new Error(json.error || "Envoi impossible");
+            success("Formulaire envoye", "Le lien de signature a ete envoye par email.");
+            await queryClient.invalidateQueries({ queryKey: ["manager", "formulaires"] });
+            setSelected((prev) => (prev ? { ...prev, ...json.data } : prev));
+        } catch (e) {
+            showError("Erreur", e instanceof Error ? e.message : "Envoi impossible");
+        } finally {
+            setIsSending(false);
+        }
     };
 
     const handleCopy = () => {
@@ -411,6 +451,9 @@ export default function ManagerFormulairesPage() {
                                                         <User className="w-3 h-3" /> {fullName(f.contact)}
                                                     </span>
                                                 )}
+                                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full font-medium ${statusUi[f.status].className}`}>
+                                                    {statusUi[f.status].label}
+                                                </span>
                                             </div>
                                         </div>
                                         <div className="text-right text-xs text-slate-500 shrink-0">
@@ -452,6 +495,18 @@ export default function ManagerFormulairesPage() {
                                     {selected.mission?.name} • {selected.client?.name}
                                     {selected.createdBy?.name ? ` • ${selected.createdBy.name}` : ""}
                                 </p>
+                                <div className="mt-2 flex items-center gap-2">
+                                    <span className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full font-semibold ${statusUi[selected.status].className}`}>
+                                        <Check className="w-3 h-3 mr-1" />
+                                        {statusUi[selected.status].label}
+                                    </span>
+                                    {selected.signedBy && (
+                                        <span className="text-xs text-emerald-700">
+                                            Signe par {selected.signedBy}
+                                            {selected.signedAt ? ` le ${new Date(selected.signedAt).toLocaleDateString("fr-FR")}` : ""}
+                                        </span>
+                                    )}
+                                </div>
                             </div>
                             <button
                                 onClick={closeDetail}
@@ -480,6 +535,31 @@ export default function ManagerFormulairesPage() {
                                 )}
                             </div>
                             <div>
+                                <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                    <p className="text-xs font-semibold text-slate-700 mb-2">Envoi pour signature</p>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            value={recipientEmail}
+                                            onChange={(e) => setRecipientEmail(e.target.value)}
+                                            placeholder="email@prospect.com"
+                                            className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-violet-400/30 focus:border-violet-400"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={handleSendForSignature}
+                                            disabled={isSending}
+                                            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50"
+                                        >
+                                            <Mail className="w-4 h-4" />
+                                            {isSending ? "Envoi..." : "Envoyer"}
+                                        </button>
+                                    </div>
+                                    {selected.sentAt && (
+                                        <p className="text-xs text-slate-500 mt-2">
+                                            Dernier envoi: {new Date(selected.sentAt).toLocaleString("fr-FR")}
+                                        </p>
+                                    )}
+                                </div>
                                 <div className="flex items-center justify-between mb-1.5">
                                     <label htmlFor="formulaire-edit" className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
                                         Fiche de renseignement

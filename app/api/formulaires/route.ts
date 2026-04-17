@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { createNotification, createClientPortalNotification } from "@/lib/notifications";
 import {
     successResponse,
     errorResponse,
@@ -159,6 +160,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
             actionId: data.actionId ?? null,
             title: data.title ?? "Fiche de renseignement",
             content: data.content,
+            status: "DRAFT",
             createdById: session.user.id,
         },
         include: {
@@ -170,6 +172,35 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
             },
             createdBy: { select: { id: true, name: true, email: true } },
         },
+    });
+
+    const creatorName = created.createdBy?.name || "Un collaborateur";
+    const baseTitle = "Nouveau formulaire";
+    const baseMessage = `${creatorName} a soumis un nouveau formulaire${created.mission?.name ? ` (${created.mission.name})` : ""}.`;
+
+    // Notify managers so new forms are visible in Notifications + sidebar badges.
+    const managers = await prisma.user.findMany({
+        where: { role: "MANAGER", isActive: true },
+        select: { id: true },
+    });
+    await Promise.allSettled(
+        managers.map((manager) =>
+            createNotification({
+                userId: manager.id,
+                title: baseTitle,
+                message: baseMessage,
+                type: "info",
+                link: "/manager/formulaires",
+            })
+        )
+    );
+
+    // Notify client portal users attached to the same client.
+    await createClientPortalNotification(clientId, {
+        title: baseTitle,
+        message: baseMessage,
+        type: "info",
+        link: "/client/portal/formulaires",
     });
 
     return successResponse(created, 201);

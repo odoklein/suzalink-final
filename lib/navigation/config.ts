@@ -27,6 +27,7 @@ import {
   FileDown,
   Activity,
   Key,
+  ClipboardCheck,
 } from "lucide-react";
 import { UserRole } from "@prisma/client";
 
@@ -269,6 +270,18 @@ export const SDR_NAV: NavSection[] = [
   {
     title: "Organisation",
     items: [
+      {
+        href: "/sdr/prospects",
+        icon: Users,
+        label: "Prospects",
+        permission: "pages.action",
+      },
+      {
+        href: "/sdr/formulaires",
+        icon: ClipboardCheck,
+        label: "Formulaires",
+        permission: "pages.action",
+      },
       {
         href: "/sdr/projects",
         icon: FolderKanban,

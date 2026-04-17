@@ -186,6 +186,12 @@ const COMMS_HREFS = [
     "/developer/comms",
     "/client/comms",
 ];
+const FORMULAIRES_HREFS = [
+    "/manager/formulaires",
+    "/sdr/formulaires",
+    "/client/portal/formulaires",
+    "/commercial/portal/formulaires",
+];
 
 export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
     const { data: session } = useSession();
@@ -203,6 +209,7 @@ export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
         null
     );
     const [commsUnreadCount, setCommsUnreadCount] = useState<number>(0);
+    const [formulairesUnreadCount, setFormulairesUnreadCount] = useState<number>(0);
     const [showUserMenu, setShowUserMenu] = useState(false);
     const userMenuRef = useRef<HTMLDivElement>(null);
 
@@ -259,6 +266,32 @@ export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
     }, [userRole]);
 
     useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch("/api/notifications");
+                const json = await res.json();
+                if (cancelled || !json?.success) return;
+                const notifications = Array.isArray(json?.data?.notifications)
+                    ? json.data.notifications
+                    : [];
+                const unreadFormulaires = notifications.filter(
+                    (notif: { isRead?: boolean; link?: string | null }) =>
+                        !notif.isRead &&
+                        typeof notif.link === "string" &&
+                        notif.link.includes("formulaires")
+                ).length;
+                setFormulairesUnreadCount(unreadFormulaires);
+            } catch {
+                if (!cancelled) setFormulairesUnreadCount(0);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    useEffect(() => {
         function handleClickOutside(e: MouseEvent) {
             if (
                 userMenuRef.current &&
@@ -277,7 +310,8 @@ export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
     const effectiveNavigation = useMemo(() => {
         const hasRappels = callbacksCount !== null || nextCallbackDate;
         const hasComms = commsUnreadCount > 0;
-        if (!hasRappels && !hasComms) return navigation;
+        const hasFormulaires = formulairesUnreadCount > 0;
+        if (!hasRappels && !hasComms && !hasFormulaires) return navigation;
         return navigation.map((section) => ({
             ...section,
             items: section.items.map((item) => {
@@ -299,10 +333,22 @@ export function GlobalSidebar({ navigation }: GlobalSidebarProps) {
                         badgeVariant: "comms" as const,
                     };
                 }
+                if (FORMULAIRES_HREFS.includes(item.href) && hasFormulaires) {
+                    return {
+                        ...item,
+                        badge: String(formulairesUnreadCount),
+                    };
+                }
                 return item;
             }),
         }));
-    }, [navigation, callbacksCount, nextCallbackDate, commsUnreadCount]);
+    }, [
+        navigation,
+        callbacksCount,
+        nextCallbackDate,
+        commsUnreadCount,
+        formulairesUnreadCount,
+    ]);
 
     const userName = session?.user?.name ?? "";
     const userEmail = session?.user?.email ?? "";

@@ -27,6 +27,9 @@ interface FormulaireItem {
     clientId: string;
     title: string;
     content: string;
+    status: "DRAFT" | "SENT" | "SIGNED";
+    signedAt: string | null;
+    signedBy: string | null;
     createdAt: string;
     updatedAt: string;
     mission: { id: string; name: string } | null;
@@ -53,6 +56,12 @@ function csvEscape(input: string): string {
 }
 
 export default function ClientFormulairesPage() {
+    const statusUi: Record<FormulaireItem["status"], { label: string; className: string }> = {
+        DRAFT: { label: "Brouillon", className: "bg-slate-100 text-slate-700" },
+        SENT: { label: "Envoye", className: "bg-amber-100 text-amber-700" },
+        SIGNED: { label: "Signe", className: "bg-emerald-100 text-emerald-700" },
+    };
+
     const { success, error: showError } = useToast();
     const [search, setSearch] = useState("");
     const [missionFilter, setMissionFilter] = useState("");
@@ -240,6 +249,9 @@ export default function ClientFormulairesPage() {
                                         <span className="inline-flex items-center gap-1"><Building2 className="w-3.5 h-3.5" /> {f.client?.name ?? "Client"}</span>
                                         <span className="inline-flex items-center gap-1"><User className="w-3.5 h-3.5" /> {contactLabel(f.contact)}</span>
                                         <span className="inline-flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {new Date(f.createdAt).toLocaleDateString("fr-FR")}</span>
+                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full font-medium ${statusUi[f.status].className}`}>
+                                            {statusUi[f.status].label}
+                                        </span>
                                     </div>
                                 </button>
                             </li>
@@ -258,6 +270,12 @@ export default function ClientFormulairesPage() {
                                 <p className="text-xs text-[#6B7194] mt-0.5">
                                     {selected.mission?.name} • {contactLabel(selected.contact)}
                                 </p>
+                                {selected.signedBy && (
+                                    <p className="text-xs text-emerald-700 mt-1">
+                                        Signe par {selected.signedBy}
+                                        {selected.signedAt ? ` le ${new Date(selected.signedAt).toLocaleDateString("fr-FR")}` : ""}
+                                    </p>
+                                )}
                             </div>
                             <button
                                 type="button"

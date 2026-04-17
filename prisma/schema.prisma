@@ -846,6 +846,12 @@ model Formulaire {
   createdBy   User     @relation("FormulairesCreated", fields: [createdById], references: [id])
   title       String   @default("Fiche de renseignement")
   content     String   @db.Text
+  status      FormulaireStatus @default(DRAFT)
+  signToken   String?  @unique
+  sentToEmail String?
+  sentAt      DateTime?
+  signedAt    DateTime?
+  signedBy    String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -854,6 +860,13 @@ model Formulaire {
   @@index([contactId])
   @@index([companyId])
   @@index([actionId])
+  @@index([status])
+}
+
+enum FormulaireStatus {
+  DRAFT
+  SENT
+  SIGNED
 }
 
 // Dynamic fiche template (RDV briefing form)

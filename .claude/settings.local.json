@@ -6,7 +6,8 @@
       "Bash(xargs wc:*)",
       "Bash(xargs grep:*)",
       "Bash(wc:*)",
-      "Bash(grep *)"
+      "Bash(grep *)",
+      "Bash(npx tsc *)"
     ]
   }
 }
