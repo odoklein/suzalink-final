@@ -20,6 +20,8 @@ import {
     Check,
     Download,
     Mail,
+    PenLine,
+    QrCode,
 } from "lucide-react";
 import {
     isFicheHygieneAlimentaireContent,
@@ -27,6 +29,8 @@ import {
 } from "@/lib/constants/ficheHygieneAlimentaire";
 import FicheHygieneAlimentaireForm from "@/components/fiche/FicheHygieneAlimentaireForm";
 import { downloadFormulairesCsv } from "@/lib/utils/formulaireExport";
+import { InPersonSignModal } from "@/components/formulaires/InPersonSignModal";
+import { QrCodeModal } from "@/components/formulaires/QrCodeModal";
 
 interface FormulaireItem {
     id: string;
@@ -45,7 +49,7 @@ interface FormulaireItem {
     createdAt: string;
     updatedAt: string;
     mission: { id: string; name: string; clientId: string } | null;
-    client: { id: string; name: string } | null;
+    client: { id: string; name: string; email?: string | null } | null;
     company: { id: string; name: string } | null;
     contact: { id: string; firstName: string | null; lastName: string | null; email: string | null } | null;
     createdBy: { id: string; name: string; email: string } | null;
@@ -104,6 +108,9 @@ export default function ManagerFormulairesPage() {
     const [checked, setChecked] = useState<Set<string>>(new Set());
     const [recipientEmail, setRecipientEmail] = useState("");
     const [isSending, setIsSending] = useState(false);
+    const [originFilter, setOriginFilter] = useState<"ALL" | "CALLING" | "EMAIL_SENT">("ALL");
+    const [showInPersonSign, setShowInPersonSign] = useState(false);
+    const [showQr, setShowQr] = useState(false);
 
     useEffect(() => {
         const missionFromUrl = searchParams.get("missionId") ?? "";
@@ -147,8 +154,9 @@ export default function ManagerFormulairesPage() {
 
     const filtered = useMemo(() => {
         const q = searchQuery.trim().toLowerCase();
-        if (!q) return formulaires;
-        return formulaires.filter((f) => {
+        const base = !q
+            ? formulaires
+            : formulaires.filter((f) => {
             const hay = [
                 f.title,
                 f.content,
@@ -163,7 +171,19 @@ export default function ManagerFormulairesPage() {
                 .toLowerCase();
             return hay.includes(q);
         });
-    }, [formulaires, searchQuery]);
+        if (originFilter === "CALLING") return base.filter((f) => Boolean(f.actionId));
+        if (originFilter === "EMAIL_SENT") return base.filter((f) => Boolean(f.sentAt));
+        return base;
+    }, [formulaires, searchQuery, originFilter]);
+
+    const verificationCounts = useMemo(
+        () => ({
+            total: formulaires.length,
+            fromCalling: formulaires.filter((f) => Boolean(f.actionId)).length,
+            sentByEmail: formulaires.filter((f) => Boolean(f.sentAt)).length,
+        }),
+        [formulaires]
+    );
 
     const openDetail = (f: FormulaireItem) => {
         setSelected(f);
@@ -348,6 +368,38 @@ export default function ManagerFormulairesPage() {
                             className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-violet-400/30 focus:border-violet-400"
                         />
                     </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <button
+                            onClick={() => setOriginFilter("ALL")}
+                            className={`text-xs px-3 py-1.5 rounded-full border ${
+                                originFilter === "ALL"
+                                    ? "bg-indigo-50 border-indigo-200 text-indigo-700"
+                                    : "bg-white border-slate-200 text-slate-600"
+                            }`}
+                        >
+                            Tous ({verificationCounts.total})
+                        </button>
+                        <button
+                            onClick={() => setOriginFilter("CALLING")}
+                            className={`text-xs px-3 py-1.5 rounded-full border ${
+                                originFilter === "CALLING"
+                                    ? "bg-violet-50 border-violet-200 text-violet-700"
+                                    : "bg-white border-slate-200 text-slate-600"
+                            }`}
+                        >
+                            Depuis appels ({verificationCounts.fromCalling})
+                        </button>
+                        <button
+                            onClick={() => setOriginFilter("EMAIL_SENT")}
+                            className={`text-xs px-3 py-1.5 rounded-full border ${
+                                originFilter === "EMAIL_SENT"
+                                    ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                                    : "bg-white border-slate-200 text-slate-600"
+                            }`}
+                        >
+                            Envoyes par email ({verificationCounts.sentByEmail})
+                        </button>
+                    </div>
                 </div>
                 <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Client</label>
@@ -454,6 +506,12 @@ export default function ManagerFormulairesPage() {
                                                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full font-medium ${statusUi[f.status].className}`}>
                                                     {statusUi[f.status].label}
                                                 </span>
+                                                <Badge variant={f.actionId ? "primary" : "default"}>
+                                                    {f.actionId ? "Depuis appel" : "Saisie interne"}
+                                                </Badge>
+                                                <Badge variant={f.sentAt ? "success" : "warning"}>
+                                                    {f.sentAt ? "Envoye client" : "A envoyer client"}
+                                                </Badge>
                                             </div>
                                         </div>
                                         <div className="text-right text-xs text-slate-500 shrink-0">
@@ -537,6 +595,36 @@ export default function ManagerFormulairesPage() {
                             <div>
                                 <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
                                     <p className="text-xs font-semibold text-slate-700 mb-2">Envoi pour signature</p>
+                                    {(selected.contact?.email || selected.client?.email) && (
+                                        <div className="flex flex-wrap gap-1.5 mb-2">
+                                            {selected.contact?.email && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setRecipientEmail(selected.contact!.email!)}
+                                                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                                                        recipientEmail === selected.contact.email
+                                                            ? "bg-indigo-100 border-indigo-300 text-indigo-700"
+                                                            : "bg-white border-slate-200 text-slate-600 hover:border-indigo-200"
+                                                    }`}
+                                                >
+                                                    Contact: {selected.contact.email}
+                                                </button>
+                                            )}
+                                            {selected.client?.email && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setRecipientEmail(selected.client!.email!)}
+                                                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                                                        recipientEmail === selected.client.email
+                                                            ? "bg-emerald-100 border-emerald-300 text-emerald-700"
+                                                            : "bg-white border-slate-200 text-slate-600 hover:border-emerald-200"
+                                                    }`}
+                                                >
+                                                    Client: {selected.client.email}
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
                                     <div className="flex items-center gap-2">
                                         <input
                                             value={recipientEmail}
@@ -554,10 +642,39 @@ export default function ManagerFormulairesPage() {
                                             {isSending ? "Envoi..." : "Envoyer"}
                                         </button>
                                     </div>
+                                    {selected.status === "SENT" && (
+                                        <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 flex items-center gap-2">
+                                            <Loader2 className="w-3.5 h-3.5 text-amber-500 animate-spin shrink-0" />
+                                            <p className="text-xs font-medium text-amber-700">En attente de signature</p>
+                                            {selected.sentToEmail && (
+                                                <span className="text-xs text-amber-600 ml-auto truncate">→ {selected.sentToEmail}</span>
+                                            )}
+                                        </div>
+                                    )}
                                     {selected.sentAt && (
-                                        <p className="text-xs text-slate-500 mt-2">
+                                        <p className="text-xs text-slate-500 mt-1.5">
                                             Dernier envoi: {new Date(selected.sentAt).toLocaleString("fr-FR")}
                                         </p>
+                                    )}
+                                    {selected.status !== "SIGNED" && (
+                                        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-200">
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowInPersonSign(true)}
+                                                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100"
+                                            >
+                                                <PenLine className="w-3.5 h-3.5" />
+                                                Signer en présentiel
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowQr(true)}
+                                                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100"
+                                            >
+                                                <QrCode className="w-3.5 h-3.5" />
+                                                QR Code
+                                            </button>
+                                        </div>
                                     )}
                                 </div>
                                 <div className="flex items-center justify-between mb-1.5">
@@ -621,6 +738,32 @@ export default function ManagerFormulairesPage() {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* In-person sign modal */}
+            {showInPersonSign && selected && (
+                <InPersonSignModal
+                    formulaireId={selected.id}
+                    title={selected.title}
+                    content={selected.content}
+                    onClose={() => setShowInPersonSign(false)}
+                    onSigned={(name) => {
+                        setShowInPersonSign(false);
+                        queryClient.invalidateQueries({ queryKey: ["manager", "formulaires"] });
+                        setSelected((prev) =>
+                            prev ? { ...prev, status: "SIGNED", signedBy: name, signedAt: new Date().toISOString() } : prev
+                        );
+                    }}
+                />
+            )}
+
+            {/* QR code modal */}
+            {showQr && selected && (
+                <QrCodeModal
+                    formulaireId={selected.id}
+                    title={selected.title}
+                    onClose={() => setShowQr(false)}
+                />
             )}
         </div>
     );

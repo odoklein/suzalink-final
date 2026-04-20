@@ -18,9 +18,18 @@ const bodySchema = z.object({
   recipientEmail: z.string().email("Email invalide"),
 });
 
+function linkForRole(role: string): string {
+  if (role === "MANAGER") return "/manager/formulaires";
+  if (role === "COMMERCIAL") return "/commercial/portal/formulaires";
+  return "/sdr/formulaires";
+}
+
 export const POST = withErrorHandler(
   async (request: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
-    const session = await requireRole(["MANAGER", "SDR", "BUSINESS_DEVELOPER", "BOOKER"], request);
+    const session = await requireRole(
+      ["MANAGER", "SDR", "BUSINESS_DEVELOPER", "BOOKER", "COMMERCIAL"],
+      request
+    );
     const { id } = await params;
     const data = await validateRequest(request, bodySchema);
 
@@ -29,11 +38,23 @@ export const POST = withErrorHandler(
       include: {
         mission: { select: { name: true } },
         contact: { select: { firstName: true, lastName: true, email: true } },
+        createdBy: { select: { id: true, role: true } },
       },
     });
 
     if (!formulaire) throw new NotFoundError("Formulaire introuvable");
-    if (session.user.role !== "MANAGER" && formulaire.createdById !== session.user.id) {
+
+    if (session.user.role === "COMMERCIAL") {
+      const interlocuteurId = session.user.interlocuteurId;
+      if (!interlocuteurId) return errorResponse("Profil commercial introuvable", 403);
+      const interlocuteur = await prisma.clientInterlocuteur.findUnique({
+        where: { id: interlocuteurId },
+        select: { clientId: true },
+      });
+      if (!interlocuteur || interlocuteur.clientId !== formulaire.clientId) {
+        return errorResponse("Acces non autorise", 403);
+      }
+    } else if (session.user.role !== "MANAGER" && formulaire.createdById !== session.user.id) {
       return errorResponse("Acces non autorise", 403);
     }
 
@@ -78,8 +99,14 @@ export const POST = withErrorHandler(
       where: { role: "MANAGER", isActive: true },
       select: { id: true },
     });
-    await Promise.allSettled(
-      managerUsers.map((manager) =>
+
+    const notifyCreator =
+      formulaire.createdById &&
+      formulaire.createdBy?.role !== "MANAGER" &&
+      formulaire.createdById !== session.user.id;
+
+    await Promise.allSettled([
+      ...managerUsers.map((manager) =>
         createNotification({
           userId: manager.id,
           title: "Formulaire envoye",
@@ -87,8 +114,20 @@ export const POST = withErrorHandler(
           type: "info",
           link: "/manager/formulaires",
         })
-      )
-    );
+      ),
+      ...(notifyCreator
+        ? [
+            createNotification({
+              userId: formulaire.createdById!,
+              title: "Formulaire envoye",
+              message: `Le formulaire "${formulaire.title}" a ete envoye a ${data.recipientEmail}.`,
+              type: "info",
+              link: linkForRole(formulaire.createdBy?.role ?? "SDR"),
+            }),
+          ]
+        : []),
+    ]);
+
     await createClientPortalNotification(formulaire.clientId, {
       title: "Formulaire envoye",
       message: `Un formulaire vient d'etre envoye au prospect (${data.recipientEmail}).`,

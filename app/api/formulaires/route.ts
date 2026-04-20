@@ -122,7 +122,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
             take: limit,
             include: {
                 mission: { select: { id: true, name: true, clientId: true } },
-                client: { select: { id: true, name: true } },
+                client: { select: { id: true, name: true, email: true } },
                 company: { select: { id: true, name: true } },
                 contact: {
                     select: { id: true, firstName: true, lastName: true, email: true },

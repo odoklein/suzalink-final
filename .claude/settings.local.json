@@ -7,7 +7,9 @@
       "Bash(xargs grep:*)",
       "Bash(wc:*)",
       "Bash(grep *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(npm install *)",
+      "Bash(node *)"
     ]
   }
 }

@@ -850,9 +850,10 @@ model Formulaire {
   signToken   String?  @unique
   sentToEmail String?
   sentAt      DateTime?
-  signedAt    DateTime?
-  signedBy    String?
-  createdAt   DateTime @default(now())
+  signedAt      DateTime?
+  signedBy      String?
+  signatureData String?  @db.Text
+  createdAt     DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([missionId])

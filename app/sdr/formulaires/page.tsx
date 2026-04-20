@@ -2,20 +2,23 @@
 
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, Mail, RefreshCw, Search, CheckCircle2 } from "lucide-react";
-import { useToast } from "@/components/ui";
+import { ClipboardList, Mail, RefreshCw, Search, CheckCircle2, PenLine, QrCode } from "lucide-react";
+import { useToast, Badge } from "@/components/ui";
+import { InPersonSignModal } from "@/components/formulaires/InPersonSignModal";
+import { QrCodeModal } from "@/components/formulaires/QrCodeModal";
 
 interface FormulaireItem {
   id: string;
   title: string;
   content: string;
   status: "DRAFT" | "SENT" | "SIGNED";
+  actionId?: string | null;
   sentToEmail: string | null;
   sentAt: string | null;
   signedAt: string | null;
   signedBy: string | null;
   mission: { id: string; name: string } | null;
-  client: { id: string; name: string } | null;
+  client: { id: string; name: string; email?: string | null } | null;
   contact: { email: string | null; firstName: string | null; lastName: string | null } | null;
   createdAt: string;
 }
@@ -33,6 +36,9 @@ export default function SDRFormulairesPage() {
   const [search, setSearch] = useState("");
   const [recipientById, setRecipientById] = useState<Record<string, string>>({});
   const [sendingId, setSendingId] = useState<string | null>(null);
+  const [viewFilter, setViewFilter] = useState<"ALL" | "CALLING" | "EMAIL_SENT">("ALL");
+  const [inPersonRow, setInPersonRow] = useState<FormulaireItem | null>(null);
+  const [qrRow, setQrRow] = useState<FormulaireItem | null>(null);
 
   const { data = [], isFetching, refetch } = useQuery({
     queryKey: ["sdr-formulaires"],
@@ -58,6 +64,22 @@ export default function SDRFormulairesPage() {
         .includes(q)
     );
   }, [data, search]);
+
+  const visible = useMemo(() => {
+    if (viewFilter === "CALLING") return filtered.filter((f) => Boolean(f.actionId));
+    if (viewFilter === "EMAIL_SENT") return filtered.filter((f) => Boolean(f.sentAt));
+    return filtered;
+  }, [filtered, viewFilter]);
+
+  const metrics = useMemo(() => {
+    const fromCalling = data.filter((f) => Boolean(f.actionId)).length;
+    const sentByEmail = data.filter((f) => Boolean(f.sentAt)).length;
+    return {
+      total: data.length,
+      fromCalling,
+      sentByEmail,
+    };
+  }, [data]);
 
   const statusLabel = (status: FormulaireItem["status"]) => {
     if (status === "SIGNED") return "Signe";
@@ -117,19 +139,53 @@ export default function SDRFormulairesPage() {
       </header>
 
       <div className="rounded-xl border border-slate-200 bg-white p-4">
-        <div className="relative max-w-md">
-          <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher mission, client, contact..."
-            className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg"
-          />
+        <div className="space-y-3">
+          <div className="relative max-w-md">
+            <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher mission, client, contact..."
+              className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setViewFilter("ALL")}
+              className={`text-xs px-3 py-1.5 rounded-full border ${
+                viewFilter === "ALL"
+                  ? "bg-indigo-50 border-indigo-200 text-indigo-700"
+                  : "bg-white border-slate-200 text-slate-600"
+              }`}
+            >
+              Tous ({metrics.total})
+            </button>
+            <button
+              onClick={() => setViewFilter("CALLING")}
+              className={`text-xs px-3 py-1.5 rounded-full border ${
+                viewFilter === "CALLING"
+                  ? "bg-violet-50 border-violet-200 text-violet-700"
+                  : "bg-white border-slate-200 text-slate-600"
+              }`}
+            >
+              Depuis appels ({metrics.fromCalling})
+            </button>
+            <button
+              onClick={() => setViewFilter("EMAIL_SENT")}
+              className={`text-xs px-3 py-1.5 rounded-full border ${
+                viewFilter === "EMAIL_SENT"
+                  ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                  : "bg-white border-slate-200 text-slate-600"
+              }`}
+            >
+              Envoyes par email ({metrics.sentByEmail})
+            </button>
+          </div>
         </div>
       </div>
 
       <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-        {filtered.length === 0 ? (
+        {visible.length === 0 ? (
           <div className="p-10 text-center text-sm text-slate-500">Aucun formulaire.</div>
         ) : (
           <div className="overflow-x-auto">
@@ -144,10 +200,18 @@ export default function SDRFormulairesPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((row) => (
+                {visible.map((row) => (
                   <tr key={row.id} className="border-t border-slate-100 align-top">
                     <td className="px-3 py-2">
                       <p className="font-semibold text-slate-900">{row.title}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <Badge variant={row.actionId ? "primary" : "default"}>
+                          {row.actionId ? "Depuis appel" : "Saisie interne"}
+                        </Badge>
+                        <Badge variant={row.sentAt ? "success" : "warning"}>
+                          {row.sentAt ? "Envoye client" : "A envoyer client"}
+                        </Badge>
+                      </div>
                       <p className="text-xs text-slate-500">
                         {new Date(row.createdAt).toLocaleDateString("fr-FR")}
                       </p>
@@ -162,6 +226,36 @@ export default function SDRFormulairesPage() {
                       </span>
                     </td>
                     <td className="px-3 py-2">
+                      {(row.contact?.email || row.client?.email) && (
+                        <div className="flex flex-wrap gap-1 mb-1.5">
+                          {row.contact?.email && (
+                            <button
+                              type="button"
+                              onClick={() => setRecipientById((prev) => ({ ...prev, [row.id]: row.contact!.email! }))}
+                              className={`text-xs px-2 py-0.5 rounded-full border ${
+                                (recipientById[row.id] ?? row.sentToEmail ?? row.contact?.email) === row.contact.email
+                                  ? "bg-indigo-100 border-indigo-300 text-indigo-700"
+                                  : "bg-white border-slate-200 text-slate-500 hover:border-indigo-200"
+                              }`}
+                            >
+                              Contact
+                            </button>
+                          )}
+                          {row.client?.email && (
+                            <button
+                              type="button"
+                              onClick={() => setRecipientById((prev) => ({ ...prev, [row.id]: row.client!.email! }))}
+                              className={`text-xs px-2 py-0.5 rounded-full border ${
+                                (recipientById[row.id] ?? row.sentToEmail ?? row.contact?.email) === row.client.email
+                                  ? "bg-emerald-100 border-emerald-300 text-emerald-700"
+                                  : "bg-white border-slate-200 text-slate-500 hover:border-emerald-200"
+                              }`}
+                            >
+                              Client
+                            </button>
+                          )}
+                        </div>
+                      )}
                       <div className="flex gap-2">
                         <input
                           value={recipientById[row.id] ?? row.sentToEmail ?? row.contact?.email ?? ""}
@@ -180,9 +274,15 @@ export default function SDRFormulairesPage() {
                           {sendingId === row.id ? "Envoi..." : "Envoyer"}
                         </button>
                       </div>
+                      {row.status === "SENT" && (
+                        <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          En attente de signature
+                        </p>
+                      )}
                       {row.sentAt && (
-                        <p className="text-xs text-slate-500 mt-1">
-                          Dernier envoi: {new Date(row.sentAt).toLocaleString("fr-FR")}
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Envoi: {new Date(row.sentAt).toLocaleString("fr-FR")}
                         </p>
                       )}
                     </td>
@@ -194,7 +294,27 @@ export default function SDRFormulairesPage() {
                           {row.signedAt ? ` le ${new Date(row.signedAt).toLocaleDateString("fr-FR")}` : ""}
                         </p>
                       ) : (
-                        <p className="text-xs text-slate-500">En attente</p>
+                        <div className="space-y-1.5">
+                          <p className="text-xs text-slate-500">En attente</p>
+                          <div className="flex gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setInPersonRow(row)}
+                              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded hover:bg-violet-100"
+                            >
+                              <PenLine className="w-3 h-3" />
+                              Présentiel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setQrRow(row)}
+                              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded hover:bg-slate-100"
+                            >
+                              <QrCode className="w-3 h-3" />
+                              QR
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -204,6 +324,26 @@ export default function SDRFormulairesPage() {
           </div>
         )}
       </section>
+
+      {inPersonRow && (
+        <InPersonSignModal
+          formulaireId={inPersonRow.id}
+          title={inPersonRow.title}
+          content={inPersonRow.content}
+          onClose={() => setInPersonRow(null)}
+          onSigned={() => {
+            setInPersonRow(null);
+            queryClient.invalidateQueries({ queryKey: ["sdr-formulaires"] });
+          }}
+        />
+      )}
+      {qrRow && (
+        <QrCodeModal
+          formulaireId={qrRow.id}
+          title={qrRow.title}
+          onClose={() => setQrRow(null)}
+        />
+      )}
     </div>
   );
 }

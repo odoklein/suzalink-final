@@ -12,7 +12,14 @@ import { createClientPortalNotification, createNotification } from "@/lib/notifi
 
 const signSchema = z.object({
   signerName: z.string().min(2, "Nom du signataire requis"),
+  signatureData: z.string().optional(),
 });
+
+function linkForRole(role: string): string {
+  if (role === "MANAGER") return "/manager/formulaires";
+  if (role === "COMMERCIAL") return "/commercial/portal/formulaires";
+  return "/sdr/formulaires";
+}
 
 export const GET = withErrorHandler(
   async (_request: NextRequest, { params }: { params: Promise<{ token: string }> }) => {
@@ -49,7 +56,7 @@ export const POST = withErrorHandler(
     const formulaire = await prisma.formulaire.findUnique({
       where: { signToken: token },
       include: {
-        createdBy: { select: { id: true } },
+        createdBy: { select: { id: true, role: true } },
         contact: { select: { email: true } },
       },
     });
@@ -65,6 +72,7 @@ export const POST = withErrorHandler(
         status: "SIGNED",
         signedAt: new Date(),
         signedBy: body.signerName,
+        signatureData: body.signatureData ?? null,
         sentToEmail: formulaire.sentToEmail ?? formulaire.contact?.email ?? null,
       },
     });
@@ -73,6 +81,7 @@ export const POST = withErrorHandler(
       where: { role: "MANAGER", isActive: true },
       select: { id: true },
     });
+
     await Promise.allSettled(
       managers.map((manager) =>
         createNotification({
@@ -84,15 +93,18 @@ export const POST = withErrorHandler(
         })
       )
     );
-    if (formulaire.createdById) {
+
+    // Notify creator with their role-appropriate link (skip if already notified as MANAGER)
+    if (formulaire.createdById && formulaire.createdBy?.role !== "MANAGER") {
       await createNotification({
         userId: formulaire.createdById,
         title: "Formulaire signe",
         message: `Votre formulaire "${formulaire.title}" a ete signe par ${body.signerName}.`,
         type: "success",
-        link: "/manager/formulaires",
+        link: linkForRole(formulaire.createdBy?.role ?? "SDR"),
       });
     }
+
     await createClientPortalNotification(formulaire.clientId, {
       title: "Formulaire signe",
       message: `Le prospect a signe le formulaire "${formulaire.title}".`,
