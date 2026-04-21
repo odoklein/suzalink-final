@@ -36,31 +36,14 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '30')));
     const skip = (page - 1) * limit;
 
-    // Get all missions for this client
-    const missions = await prisma.mission.findMany({
-        where: { clientId },
-        select: { id: true },
-    });
-
-    const missionIds = missions.map((m) => m.id);
-    if (missionIds.length === 0) {
-        return successResponse({ contacts: [], companies: [], total: 0 });
-    }
-
-    // Get campaigns linked to these missions
-    const campaigns = await prisma.campaign.findMany({
-        where: { missionId: { in: missionIds } },
-        select: { id: true },
-    });
-
-    const campaignIds = campaigns.map((c) => c.id);
-    if (campaignIds.length === 0) {
-        return successResponse({ contacts: [], companies: [], total: 0 });
-    }
-
-    // Build contact where clause
+    // Build contact where clause scoped to the commercial's client.
+    // We intentionally do not require existing actions so the full prospect base is visible.
     const contactWhere: Record<string, unknown> = {
-        actions: { some: { campaignId: { in: campaignIds } } },
+        company: {
+            list: {
+                mission: { clientId },
+            },
+        },
     };
 
     if (search) {

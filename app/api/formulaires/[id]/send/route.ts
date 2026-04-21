@@ -27,7 +27,7 @@ function linkForRole(role: string): string {
 export const POST = withErrorHandler(
   async (request: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
     const session = await requireRole(
-      ["MANAGER", "SDR", "BUSINESS_DEVELOPER", "BOOKER", "COMMERCIAL"],
+      ["MANAGER", "SDR", "BUSINESS_DEVELOPER", "BOOKER", "COMMERCIAL", "CLIENT"],
       request
     );
     const { id } = await params;
@@ -52,6 +52,10 @@ export const POST = withErrorHandler(
         select: { clientId: true },
       });
       if (!interlocuteur || interlocuteur.clientId !== formulaire.clientId) {
+        return errorResponse("Acces non autorise", 403);
+      }
+    } else if (session.user.role === "CLIENT") {
+      if (!session.user.clientId || session.user.clientId !== formulaire.clientId) {
         return errorResponse("Acces non autorise", 403);
       }
     } else if (session.user.role !== "MANAGER" && formulaire.createdById !== session.user.id) {

@@ -576,6 +576,8 @@ export function UnifiedActionDrawer({
     const [meetingAddress, setMeetingAddress] = useState("");
     const [meetingPhone, setMeetingPhone] = useState("");
     const [ficheData, setFicheData] = useState<FicheHygieneAlimentaireData | null>(null);
+    const [sendFormAfterSave, setSendFormAfterSave] = useState(false);
+    const [formSignatureRecipient, setFormSignatureRecipient] = useState("");
     const isFicheValid = (d: FicheHygieneAlimentaireData | null) => {
         if (!d) return false;
         if (d.collaborateurCnf.trim() || d.restaurateur.nomPrenom.trim() || d.etablissement.nom.trim()) return true;
@@ -635,6 +637,16 @@ export function UnifiedActionDrawer({
             setInterlocutorContactSaved(false);
         }
     }, [newActionResult]);
+
+    useEffect(() => {
+        if (newActionResult === "MEETING_BOOKED_FORM") {
+            const fallbackEmail = contact?.email || company?.contacts?.find((c) => c.email)?.email || "";
+            setFormSignatureRecipient((prev) => prev || fallbackEmail);
+            return;
+        }
+        setSendFormAfterSave(false);
+        setFormSignatureRecipient("");
+    }, [newActionResult, contact, company]);
 
     const toggleNoteExpand = (actionId: string) => {
         setExpandedNotes((prev) => {
@@ -1078,6 +1090,9 @@ export function UnifiedActionDrawer({
             if (newActionResult === "MEETING_BOOKED_FORM" && !isFicheValid(ficheData)) {
                 throw new Error("La fiche de renseignement est requise pour ce résultat");
             }
+            if (newActionResult === "MEETING_BOOKED_FORM" && sendFormAfterSave && !formSignatureRecipient.trim()) {
+                throw new Error("Renseignez un email destinataire pour envoyer la signature");
+            }
             const selectedCampaign = campaigns[0];
             const channel = (selectedCampaign?.mission?.channel ?? "CALL") as "CALL" | "EMAIL" | "LINKEDIN";
             const res = await fetch("/api/actions", {
@@ -1132,6 +1147,24 @@ export function UnifiedActionDrawer({
                             "Fiche non enregistrée",
                             formJson.error ?? "La fiche de renseignement n'a pas pu être sauvegardée."
                         );
+                    } else if (sendFormAfterSave) {
+                        const sendRes = await fetch(`/api/formulaires/${formJson.data.id}/send`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ recipientEmail: formSignatureRecipient.trim() }),
+                        });
+                        const sendJson = await sendRes.json();
+                        if (!sendJson.success) {
+                            showError(
+                                "Email non envoyé",
+                                sendJson.error ?? "Le formulaire est créé mais l'email de signature a échoué."
+                            );
+                        } else {
+                            success(
+                                "Formulaire envoyé",
+                                `Lien de signature envoyé à ${formSignatureRecipient.trim()}.`
+                            );
+                        }
                     }
                 } catch {
                     showError(
@@ -3018,6 +3051,26 @@ export function UnifiedActionDrawer({
                                             </div>
                                             <div className="rounded-lg bg-white border border-violet-100 p-3">
                                                 <FicheHygieneAlimentaireForm value={ficheData} onChange={setFicheData} />
+                                            </div>
+                                            <div className="rounded-lg bg-white border border-violet-100 p-3 space-y-2">
+                                                <label className="flex items-center gap-2 text-sm text-slate-700">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={sendFormAfterSave}
+                                                        onChange={(e) => setSendFormAfterSave(e.target.checked)}
+                                                        className="rounded border-slate-300 text-violet-600 focus:ring-violet-400"
+                                                    />
+                                                    Envoyer automatiquement le formulaire pour signature
+                                                </label>
+                                                {sendFormAfterSave && (
+                                                    <input
+                                                        type="email"
+                                                        value={formSignatureRecipient}
+                                                        onChange={(e) => setFormSignatureRecipient(e.target.value)}
+                                                        placeholder="email@contact.com"
+                                                        className="w-full px-3 py-2 text-sm border border-violet-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-400/30 focus:border-violet-400"
+                                                    />
+                                                )}
                                             </div>
                                         </div>
                                     )}
